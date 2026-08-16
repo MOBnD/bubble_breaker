@@ -613,21 +613,23 @@
             Object.values(db).forEach(group => group.bubbles.forEach(bubble => {
                 if (bubble.childId && !groupIds.has(bubble.childId)) bubble.childId = null;
             }));
-            const entryGroupId = groupIds.has(String(raw.entryGroupId)) ? String(raw.entryGroupId) : groups[0].id;
+            const entryGroupId = String(raw.entryGroupId || '');
             const entryGroup = db[entryGroupId];
+            const entryBubble = entryGroup && entryGroup.bubbles.find(bubble => bubble.id === String(raw.entryBubbleId || ''));
             const parentGroup = entryGroup && entryGroup.parentId ? db[entryGroup.parentId] : null;
             const childGroups = Object.values(db).filter(group => group.parentId === entryGroupId);
-            if (!entryGroup || !parentGroup || parentGroup.parentId || childGroups.length === 0) {
-                throw new Error('入力意見を含む中間カテゴリの3階層が不足しています');
+            if (!entryGroup || !entryBubble || !parentGroup || parentGroup.parentId !== null) {
+                throw new Error('entryGroupIdは入力意見を含む中間カテゴリである必要があります');
             }
-            const linkedChildId = entryGroup.bubbles.find(bubble => bubble.childId && db[bubble.childId])?.childId;
-            const childGroup = childGroups.find(group => group.id === linkedChildId) || childGroups[0];
-            const entryBubble = entryGroup && entryGroup.bubbles.find(bubble => bubble.id === String(raw.entryBubbleId));
-            if (!entryBubble || entryBubble.childId !== childGroup.id) {
+            if (childGroups.length !== 1 || !entryBubble.childId) {
                 throw new Error('入力意見バブルから下位カテゴリへ接続できません');
             }
+            const childGroup = childGroups[0];
+            if (entryBubble.childId !== childGroup.id) {
+                throw new Error('entryBubbleIdは下位カテゴリへ接続する入力意見バブルである必要があります');
+            }
             if (!parentGroup.bubbles.some(bubble => bubble.childId === entryGroupId)) {
-                parentGroup.bubbles[0].childId = entryGroupId;
+                throw new Error('親カテゴリから中間カテゴリへの接続がありません');
             }
             const connectedIds = new Set([parentGroup.id, entryGroup.id, childGroup.id]);
             Object.keys(db).forEach(id => { if (!connectedIds.has(id)) delete db[id]; });
@@ -638,7 +640,7 @@
         }
 
         function buildOpenAIRequest(input) {
-            const prompt = `ユーザーの意見: ${input}\n\n日本語圏を中心にWeb Searchで関連する公開情報を調査し、BubbleBreaker用のバブル宇宙を生成してください。\n- groupsは必ず連結した3階層だけにする（親カテゴリ・入力意見を含む中間カテゴリ・入力意見バブルの下位カテゴリ）\n- entryGroupIdは必ず中間カテゴリのIDにする。入力意見そのものの詳細グループをentryGroupIdにしてはいけない\n- entryBubbleIdは中間カテゴリ内でユーザーの入力意見に対応するバブルのIDにする\n- 中間カテゴリのbubblesには、ユーザーの入力意見に対応するバブルを必ず1つ含める。そのバブルには下位カテゴリのchildIdを設定する\n- 親カテゴリには中間カテゴリへつながるバブル、中間カテゴリには下位カテゴリへつながるバブルを設定する\n- 各グループのバブルは最大10個にする\n- バブル群のtypeは「分散型」「一極集中型」「多極型」のいずれか\n- sizeは検索ソースの言及量・傾向に基づく相対的な推定値で、グループ内合計を100に正規化する\n- 意見が近いバブルは近いpos、対立するバブルは離れたposにする。バブル同士が重ならないようにposを十分に離す\n- overview/history/demographic/evaluationには要約、インサイト、グラフ用metricsを含める\n- sizeと解析データが推定である場合はisEstimated=trueにする\n- 使用した公開ソースのURLと、そのソースが裏付ける内容をsourcesに含める\n- JSON Schema以外の文章は出力しない`;
+            const prompt = `ユーザーの意見: ${input}\n\n日本語圏を中心にWeb Searchで関連する公開情報を調査し、BubbleBreaker用のバブル宇宙を生成してください。\n- groupsは必ず連結した3階層だけにする（親カテゴリ・入力意見を含む中間カテゴリ・入力意見バブルの下位カテゴリ）。入力確定後に表示するのはこの中間カテゴリです\n- entryGroupIdは必ず「入力された意見のバブルが含まれるカテゴリ」のID（中間カテゴリ）にする。入力意見の細かな理由・属性・詳細を並べる下位カテゴリをentryGroupIdにしてはいけない。例えば「きのこの山が好き」なら、中間カテゴリは「きのこの山派・たけのこの里派・木こりの切り株派」のような選択肢のカテゴリにし、詳細な好みの分類は下位カテゴリにする\n- entryBubbleIdは中間カテゴリ内でユーザーの入力意見に対応するバブルのIDにする\n- 中間カテゴリのbubblesには、ユーザーの入力意見に対応するバブルを必ず1つ含め、そのバブルのchildIdを下位カテゴリへ設定する\n- 親カテゴリには中間カテゴリへつながるバブルを1つ以上、中間カテゴリには下位カテゴリへつながるバブルを設定する。entryGroupの親はルート（さらに親を持たない）にする\n- 各グループは通常10個のバブルを生成する。検索で裏付けられる候補が少ない場合は1〜10個を許容し、根拠のない項目で水増ししない\n- バブル群のtypeは「分散型」「一極集中型」「多極型」のいずれか\n- sizeは検索ソースの言及量・傾向に基づく相対的な推定値で、グループ内合計を100に正規化する\n- 意見が近いバブルは近いpos、対立するバブルは離れたposにする。バブル同士が重ならないようにposを十分に離す\n- overview/history/demographic/evaluationには要約、インサイト、グラフ用metricsを含める\n- sizeと解析データが推定である場合はisEstimated=trueにする\n- 使用した公開ソースのURLと、そのソースが裏付ける内容をsourcesに含める\n- JSON Schema以外の文章は出力しない`;
             return {
                 model: OPENAI_MODEL, store: false, max_output_tokens: 12000, tool_choice: 'required',
                 tools: [{ type: 'web_search', search_context_size: 'high', user_location: { type: 'approximate', country: 'JP', timezone: 'Asia/Tokyo' } }],
