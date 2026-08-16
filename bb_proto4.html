@@ -1,0 +1,947 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BubbleBreaker - Prototype</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Three.jsを直接読み込む（環境依存エラーをなくすため安定版のr128を使用） -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #050510; color: white; font-family: 'Helvetica Neue', Arial, 'Hiragino Kaku Gothic ProN', 'Hiragino Sans', Meiryo, sans-serif; touch-action: none; }
+        #canvas-container { position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; z-index: 1; }
+        
+        /* 3D空間に追従するHTMLラベル */
+        #labels-container { position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; z-index: 5; pointer-events: none; overflow: hidden; }
+        .bubble-label {
+            position: absolute;
+            transform: translate(-50%, -50%);
+            color: rgba(255, 255, 255, 0.9);
+            text-shadow: 0 0 5px rgba(0,0,0,0.8), 0 0 10px rgba(0,0,0,0.5);
+            font-weight: bold;
+            text-align: center;
+            transition: opacity 0.3s, transform 0.1s;
+            cursor: pointer;
+            pointer-events: auto;
+        }
+        .bubble-label:hover { color: #fff; text-shadow: 0 0 10px rgba(255,255,255,0.8); }
+
+        /* UIレイヤー */
+        #ui-layer { position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; z-index: 10; pointer-events: none; }
+        
+        .glass-panel {
+            background: rgba(15, 20, 40, 0.6);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.5);
+        }
+
+        /* 画面フェード用 */
+        .screen-container { transition: opacity 0.5s ease-in-out, transform 0.5s ease, visibility 0.5s; opacity: 0; visibility: hidden; pointer-events: none; position: absolute; inset: 0; }
+        .screen-active { opacity: 1; visibility: visible; pointer-events: none; transform: scale(1); }
+        .screen-hidden { transform: scale(1.05); }
+
+        /* 解析カードの出現アニメーション */
+        .card-anim {
+            transition: transform 0.6s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.4s ease;
+        }
+        .screen-hidden .card-tl { transform: translate(150%, 150%) scale(0); opacity: 0; }
+        .screen-hidden .card-tr { transform: translate(-150%, 150%) scale(0); opacity: 0; }
+        .screen-hidden .card-bl { transform: translate(150%, -150%) scale(0); opacity: 0; }
+        .screen-hidden .card-br { transform: translate(-150%, -150%) scale(0); opacity: 0; }
+
+        .screen-active .card-tl { transform: translate(0, 0) scale(1); opacity: 1; transition-delay: 0.1s; }
+        .screen-active .card-tr { transform: translate(0, 0) scale(1); opacity: 1; transition-delay: 0.2s; }
+        .screen-active .card-bl { transform: translate(0, 0) scale(1); opacity: 1; transition-delay: 0.3s; }
+        .screen-active .card-br { transform: translate(0, 0) scale(1); opacity: 1; transition-delay: 0.4s; }
+
+        ::-webkit-scrollbar { width: 4px; background: transparent; }
+        ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.2); border-radius: 4px; }
+        
+        .meter-gradient { background: linear-gradient(90deg, #3b82f6 0%, #a855f7 50%, #ef4444 100%); }
+    </style>
+</head>
+<body>
+
+    <div id="canvas-container"></div>
+    <div id="labels-container"></div>
+
+    <div id="ui-layer">
+        
+        <!-- ヘッダー -->
+        <div class="absolute top-6 left-6 flex flex-col gap-1 z-50 pointer-events-none">
+            <h1 class="text-2xl font-bold tracking-widest text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-purple-500">
+                BubbleBreaker
+            </h1>
+            <p class="text-xs text-gray-400">君の世界は、編集されている</p>
+            <div id="toast" class="mt-2 glass-panel px-4 py-2 rounded-lg text-xs text-blue-200 opacity-0 transition-opacity duration-500">
+                メッセージ
+            </div>
+        </div>
+
+        <!-- ① 意見入力画面 -->
+        <div id="screen-input" class="screen-container screen-active flex flex-col items-center justify-center bg-black/40 backdrop-blur-sm z-50 pointer-events-auto">
+            <div id="input-panel" class="glass-panel p-10 rounded-2xl w-full max-w-lg text-center flex flex-col gap-6 transition-all duration-500 relative z-50">
+                <h2 class="text-3xl font-bold text-white mb-2">あなたの意見を教えてください</h2>
+                <p class="text-sm text-gray-300">入力した言葉から、あなたが属するバブルの宇宙を探索します。</p>
+                <input type="text" id="input-opinion" placeholder="例: きのこの山が好き" class="w-full bg-black/50 border border-gray-600 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-blue-500 transition-colors pointer-events-auto">
+                <button id="btn-dive" class="w-full bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 text-white font-bold py-3 px-4 rounded-lg transition-all shadow-[0_0_15px_rgba(59,130,246,0.5)] cursor-pointer pointer-events-auto">
+                    宇宙へダイブ 🚀
+                </button>
+            </div>
+        </div>
+
+        <!-- ② バブル群画面 -->
+        <div id="screen-group" class="screen-container screen-hidden flex justify-end p-6 pt-24 z-40">
+            <div class="glass-panel w-80 rounded-xl p-5 flex flex-col gap-5 h-fit max-h-[80vh] overflow-y-auto relative pointer-events-auto">
+                <div>
+                    <div class="text-[10px] text-blue-300 font-semibold mb-1 flex items-center justify-between">
+                        <span>現在の観測領域 (階層)</span>
+                        <button id="btn-zoomout-group" class="bg-white/10 hover:bg-white/20 px-2 py-1 rounded text-white flex items-center gap-1 transition-colors cursor-pointer">
+                            <span>↓ 上の階層へ</span>
+                        </button>
+                    </div>
+                    <h2 id="group-title" class="text-xl font-bold">--</h2>
+                </div>
+                <div class="bg-black/40 rounded-lg p-3 border border-gray-700">
+                    <div class="text-xs text-gray-400 mb-1">バブル群の型</div>
+                    <div id="group-type" class="text-lg font-bold text-purple-300">--</div>
+                </div>
+                <div>
+                    <div class="text-xs text-gray-400 mb-2 flex justify-between"><span>構成要素</span><span>占有率</span></div>
+                    <div id="group-list" class="flex flex-col gap-2"></div>
+                </div>
+                <div class="text-[10px] text-gray-500 mt-2 text-center">
+                    バブルをクリックするか、ズームイン<br>下スクロールで上の階層へ戻る
+                </div>
+            </div>
+        </div>
+
+        <!-- ③ 個別バブル画面 -->
+        <div id="screen-single" class="screen-container screen-hidden flex justify-end p-6 pt-24 z-40">
+            <div id="single-bubble-info" onclick="loadAnalysis()" class="absolute top-1/2 left-1/4 transform -translate-x-1/2 -translate-y-1/2 text-center pointer-events-auto cursor-pointer hover:scale-105 transition-all w-96 group">
+                <div class="absolute -top-8 left-1/2 transform -translate-x-1/2 text-xs text-blue-300 opacity-0 group-hover:opacity-100 transition-opacity bg-black/60 px-3 py-1 rounded-full border border-blue-500/50 shadow-lg">
+                    クリックして詳細解析へ
+                </div>
+                <h2 id="single-title" class="text-4xl font-bold text-white text-shadow-lg mb-4 group-hover:text-blue-200 transition-colors">--</h2>
+                <p id="single-desc" class="text-sm text-gray-200 bg-black/50 p-4 rounded-xl backdrop-blur-md border border-white/10 group-hover:border-blue-500/50 transition-colors">--</p>
+            </div>
+
+            <div class="glass-panel w-80 rounded-xl p-6 flex flex-col gap-6 h-fit relative pointer-events-auto">
+                <div>
+                    <div class="text-xs text-blue-300 font-semibold mb-1">立ち位置解析</div>
+                    <div class="text-sm text-gray-300">あなたが観測しているこの意見は、カテゴリ全体の</div>
+                    <div class="text-4xl font-bold text-white my-2"><span id="single-percent" class="text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-green-400">--</span><span class="text-lg ml-1">%</span></div>
+                    <div class="text-sm text-gray-300">を占めるバブルの中にいます。</div>
+                </div>
+                
+                <div class="bg-black/40 rounded-lg p-4 border border-gray-700">
+                    <div class="text-xs text-gray-400 mb-2 flex justify-between">
+                        <span>偏り度メーター</span>
+                        <span class="text-red-400 font-bold">High</span>
+                    </div>
+                    <div class="w-full bg-gray-800 rounded-full h-3 mb-1 overflow-hidden relative">
+                        <div id="bias-meter" class="meter-gradient h-full w-4/5 rounded-full relative">
+                            <div class="absolute right-0 top-1/2 transform translate-x-1/2 -translate-y-1/2 w-4 h-4 bg-white rounded-full shadow-[0_0_10px_white]"></div>
+                        </div>
+                    </div>
+                    <p class="text-[10px] text-gray-500 mt-2">フィルターバブルに陥っている可能性が高い領域です。</p>
+                </div>
+
+                <div class="flex flex-col gap-3 mt-4">
+                    <button id="btn-analyze" class="w-full bg-blue-600/80 hover:bg-blue-500 text-white font-bold py-3 px-4 rounded-lg transition-colors border border-blue-400/50 shadow-[0_0_15px_rgba(59,130,246,0.3)] cursor-pointer">
+                        このバブルを詳しく解析する 🔍
+                    </button>
+                    <div class="flex gap-2">
+                        <button id="btn-zoomout-single" class="flex-1 bg-gray-700/50 hover:bg-gray-600 text-xs text-white py-2 rounded border border-gray-600 transition-colors cursor-pointer">
+                            ↓ 俯瞰する (下スクロール)
+                        </button>
+                        <button id="btn-zoomin-single" class="flex-1 bg-gray-700/50 hover:bg-gray-600 text-xs text-white py-2 rounded border border-gray-600 transition-colors hidden cursor-pointer">
+                            ↑ 中を見る (上スクロール)
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ④ 個別バブル解析画面 -->
+        <div id="screen-analysis" class="screen-container screen-hidden flex items-center justify-center p-6 z-40">
+            <div class="relative w-full max-w-6xl h-[75vh] mt-10 pointer-events-none">
+                
+                <div id="analysis-center-title" class="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 text-2xl font-bold text-white text-shadow-lg cursor-pointer hover:scale-110 transition-transform pointer-events-auto text-center w-full z-10">
+                    --
+                </div>
+                
+                <div class="card-tl card-anim absolute top-0 left-0 lg:left-10 pointer-events-auto">
+                    <div onclick="showDetail('overview')" class="analysis-card w-64 glass-panel p-4 rounded-xl cursor-pointer hover:scale-105 hover:border-blue-400 transition-all group relative overflow-hidden">
+                        <h3 class="text-sm font-bold text-blue-300 mb-2 border-b border-blue-500/30 pb-1 relative z-10">📖 バブルの概要</h3>
+                        <div class="w-full h-24 bg-gray-800 rounded mb-2 flex items-center justify-center text-gray-500 text-xs overflow-hidden relative z-10">
+                            <div class="absolute inset-0 bg-gradient-to-br from-blue-900/40 to-purple-900/40"></div>
+                            [関連画像/グラフ]
+                        </div>
+                        <p class="text-xs text-gray-300 line-clamp-2 relative z-10">このバブルを形成する主な意見や特徴的な行動パターンのサマリーです。</p>
+                        <div class="absolute -right-2 -top-2 bg-blue-500 w-6 h-6 rounded-full flex items-center justify-center text-xs opacity-0 group-hover:opacity-100 transition-opacity shadow-lg z-10">↗</div>
+                    </div>
+                </div>
+                
+                <div class="card-bl card-anim absolute bottom-0 left-0 lg:left-10 pointer-events-auto">
+                    <div onclick="showDetail('history')" class="analysis-card w-64 glass-panel p-4 rounded-xl cursor-pointer hover:scale-105 hover:border-green-400 transition-all group">
+                        <h3 class="text-sm font-bold text-green-300 mb-2 border-b border-green-500/30 pb-1">⏳ 形成の歴史</h3>
+                        <div class="w-full h-20 flex items-end gap-1 mb-2 px-2">
+                            <div class="w-1/5 bg-green-900/50 h-1/4 rounded-t"></div>
+                            <div class="w-1/5 bg-green-800/50 h-2/4 rounded-t"></div>
+                            <div class="w-1/5 bg-green-600/50 h-full rounded-t"></div>
+                            <div class="w-1/5 bg-green-500/80 h-3/4 rounded-t"></div>
+                            <div class="w-1/5 bg-green-400 h-full rounded-t shadow-[0_0_8px_#4ade80]"></div>
+                        </div>
+                        <p class="text-[10px] text-gray-400">いつ頃からこの意見が形成され、どう拡大したかを示すトレンドグラフ。</p>
+                    </div>
+                </div>
+
+                <div class="card-tr card-anim absolute top-0 right-0 lg:right-10 pointer-events-auto">
+                    <div onclick="showDetail('demographic')" class="analysis-card w-64 glass-panel p-4 rounded-xl cursor-pointer hover:scale-105 hover:border-yellow-400 transition-all group">
+                        <h3 class="text-sm font-bold text-yellow-300 mb-2 border-b border-yellow-500/30 pb-1">🎯 構成層・情報源</h3>
+                        <div class="flex justify-center mb-2">
+                            <div class="w-20 h-20 rounded-full border-4 border-yellow-500/50 border-t-yellow-400 border-r-yellow-400 flex items-center justify-center text-xs font-bold shadow-inner">
+                                SNS 65%
+                            </div>
+                        </div>
+                        <p class="text-xs text-gray-300 line-clamp-2">このバブルに属する人々の主な年齢層や、情報を得ているプラットフォーム。</p>
+                    </div>
+                </div>
+
+                <div class="card-br card-anim absolute bottom-0 right-0 lg:right-10 pointer-events-auto">
+                    <div onclick="showDetail('evaluation')" class="analysis-card w-64 glass-panel p-4 rounded-xl cursor-pointer hover:scale-105 hover:border-purple-400 transition-all group">
+                        <h3 class="text-sm font-bold text-purple-300 mb-2 border-b border-purple-500/30 pb-1">👁️ 内と外からの評価</h3>
+                        <div class="text-xs space-y-2">
+                            <div class="bg-blue-900/30 p-2 rounded border-l-2 border-blue-500">
+                                <span class="text-[10px] text-blue-400 block mb-1">内部からの視点(自認)</span>
+                                「私たちは真実を見極めている正当な派閥だ」
+                            </div>
+                            <div class="bg-red-900/30 p-2 rounded border-l-2 border-red-500">
+                                <span class="text-[10px] text-red-400 block mb-1">外部からの視点(印象)</span>
+                                「極端な意見ばかりで話が通じない集団」
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="absolute -bottom-6 left-1/2 transform -translate-x-1/2 text-[10px] text-gray-500 pointer-events-auto bg-black/50 px-3 py-1 rounded-full backdrop-blur-sm">
+                    カードをクリックして詳細表示 / 下スクロールで戻る
+                </div>
+            </div>
+        </div>
+
+        <!-- ⑤ 解析バブル詳細表示画面 -->
+        <div id="screen-detail" class="screen-container screen-hidden bg-black/80 backdrop-blur-lg flex items-center justify-center p-10 z-50 pointer-events-auto">
+            <div class="w-full max-w-5xl h-[80vh] bg-gray-900 border border-gray-700 rounded-2xl shadow-2xl relative flex overflow-hidden">
+                <div class="w-2/3 p-10 overflow-y-auto">
+                    <div class="inline-block px-3 py-1 bg-blue-900/50 text-blue-300 text-xs font-bold rounded-full mb-4 border border-blue-500/50" id="detail-tag">カテゴリ</div>
+                    <h2 id="detail-title" class="text-4xl font-bold mb-6 text-white">解析詳細タイトル</h2>
+                    
+                    <div class="space-y-6 text-gray-300">
+                        <p class="text-lg leading-relaxed">ここに詳細な解析テキストが入ります。個別バブル解析画面でクリックされた解析バブルの詳細を画面全体で見ることができます。（一枚スライド風）</p>
+                        
+                        <div class="bg-black/50 p-6 rounded-xl border border-gray-800">
+                            <h4 class="text-white font-bold mb-3">AIによる分析インサイト</h4>
+                            <p class="text-sm">このバブルは、特定のキーワードに対するアルゴリズムの推薦によって強化されています。情報源が限定されることで、構成員の思考が単一化しやすい傾向にあります。フィルターバブルを脱出するには、対極にある情報源を意図的にフォローすることが推奨されます。</p>
+                        </div>
+
+                        <div class="flex gap-4 h-48">
+                            <div class="flex-1 bg-gray-800 rounded-lg flex items-center justify-center text-gray-500 text-sm">詳細データグラフA</div>
+                            <div class="flex-1 bg-gray-800 rounded-lg flex items-center justify-center text-gray-500 text-sm">詳細データグラフB</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="w-1/3 bg-gray-800/50 p-8 border-l border-gray-700 flex flex-col justify-between relative">
+                    <div>
+                        <div class="text-xs text-gray-400 mb-1">対象バブル</div>
+                        <div id="detail-origin-title" class="text-xl font-bold text-white mb-8">元のバブル名</div>
+                        
+                        <div class="space-y-4">
+                            <div class="h-2 bg-gray-700 rounded-full overflow-hidden"><div class="w-3/4 h-full bg-blue-500"></div></div>
+                            <div class="h-2 bg-gray-700 rounded-full overflow-hidden"><div class="w-1/2 h-full bg-purple-500"></div></div>
+                            <div class="h-2 bg-gray-700 rounded-full overflow-hidden"><div class="w-5/6 h-full bg-green-500"></div></div>
+                        </div>
+                    </div>
+                    
+                    <div class="self-end text-right">
+                        <button id="btn-back-detail" class="group relative inline-flex items-center justify-center w-32 h-32 rounded-full bg-gradient-to-br from-blue-900 to-purple-900 border-4 border-blue-500 shadow-[0_0_20px_rgba(59,130,246,0.5)] hover:scale-105 transition-all cursor-pointer">
+                            <span class="absolute inset-0 rounded-full bg-white opacity-0 group-hover:opacity-10 transition-opacity"></span>
+                            <div class="text-center">
+                                <div class="text-xs text-blue-200 mb-1">ズームアウト</div>
+                                <div class="font-bold text-white text-sm">解析画面へ<br>戻る</div>
+                            </div>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <script>
+        // ==========================================
+        // === 1. データ定義 (3階層ツリー構造のモックデータ) ===
+        // ==========================================
+        // 全体のカテゴリ構造を定義するデータベース。実際のアプリではこれがサーバーから取得されます。
+        // parentId: ズームアウトした時に戻る親階層のID
+        // childId: ズームインした時に進む子階層のID
+        // pos: 3D空間での座標 [x, y, z]
+        const DB = {
+            // ----- 【お菓子カテゴリ】 -----
+            "snacks_root": {
+                id: "snacks_root", title: "お菓子の派閥", type: "分散型", parentId: null,
+                desc: "世の中に無数にあるお菓子の好み。多様性が保たれている宇宙。",
+                bubbles: [
+                    { id: "kinoko_takenoko", name: "きのこたけのこ論争", size: 60, color: 0xffaaaa, htmlColor: "#ffaaaa", pos: [0, 0, 0], childId: "kinoko_takenoko_group" },
+                    { id: "pocky", name: "ポッキー派", size: 25, color: 0xaa2222, htmlColor: "#aa2222", pos: [5, 4, -2], childId: null },
+                    { id: "potato", name: "ポテチ派", size: 15, color: 0xddaa55, htmlColor: "#ddaa55", pos: [-6, -3, 2], childId: null }
+                ]
+            },
+            "kinoko_takenoko_group": {
+                id: "kinoko_takenoko_group", title: "きのこ派 vs たけのこ派", type: "多極型", parentId: "snacks_root",
+                desc: "大きな意見が対立しており、その間の距離が遠い状態。エコーチェンバーが起きやすい型。",
+                bubbles: [
+                    { id: "kinoko", name: "きのこの山", size: 45, color: 0xffaa00, htmlColor: "#ffaa00", pos: [-5, 1, 0], childId: "kinoko_detail", desc: "サクサクのクラッカーとチョコの絶妙なバランスを愛する派閥。独立志向が強い。" },
+                    { id: "takenoko", name: "たけのこの里", size: 48, color: 0x55cc22, htmlColor: "#55cc22", pos: [5, -1, 0], childId: null, desc: "クッキー生地のほろほろ感とチョコの一体感を至高とする派閥。結束力が高い。" },
+                    { id: "kikori", name: "木こりの切り株", size: 7, color: 0xaa6633, htmlColor: "#aa6633", pos: [0, 4, -4], childId: null, desc: "争いを避ける第三の勢力。平和主義者。" }
+                ]
+            },
+            "kinoko_detail": {
+                id: "kinoko_detail", title: "きのこの山の魅力", type: "分散型", parentId: "kinoko_takenoko_group",
+                desc: "きのこ派の中でも、何に魅力を感じているかが細分化されている状態。",
+                bubbles: [
+                    { id: "choco", name: "チョコの量が適正", size: 40, color: 0x552200, htmlColor: "#552200", pos: [-3, 2, 1], childId: null, desc: "チョコの純粋な味を楽しむ層。" },
+                    { id: "biscuit", name: "クラッカーの食感", size: 35, color: 0xddaa77, htmlColor: "#ddaa77", pos: [4, -1, -2], childId: null, desc: "食感重視。持ち手が汚れない点も評価。" },
+                    { id: "separate", name: "分けて食べられる", size: 25, color: 0xffcc88, htmlColor: "#ffcc88", pos: [0, -4, 2], childId: null, desc: "チョコとクラッカーを分解して食べる異端だが一定数いる層。" }
+                ]
+            },
+
+            // ----- 【ライトノベルカテゴリ】 (復活データ) -----
+            "novels_root": {
+                id: "novels_root", title: "ライトノベルのジャンル", type: "分散型", parentId: null,
+                desc: "様々なジャンルが乱立する宇宙。",
+                bubbles: [
+                    { id: "narou_group", name: "なろう系", size: 45, color: 0x4488ff, htmlColor: "#4488ff", pos: [0, 0, 0], childId: "narou_group" },
+                    { id: "romcom", name: "ラブコメ", size: 35, color: 0xff88aa, htmlColor: "#ff88aa", pos: [-5, 3, 2], childId: null },
+                    { id: "sf", name: "SF", size: 20, color: 0xaaaaaa, htmlColor: "#aaaaaa", pos: [4, -4, -1], childId: null }
+                ]
+            },
+            "narou_group": {
+                id: "narou_group", title: "好きななろう小説", type: "分散型", parentId: "novels_root",
+                desc: "意見が複数に分かれ、それぞれが一定の規模を持って散らばっている状態。",
+                bubbles: [
+                    { id: "slime", name: "転生したらスライム...", size: 30, color: 0x4488ff, htmlColor: "#4488ff", pos: [-4, 2, 1], childId: "slime_detail", desc: "国造り要素と無双感を愛する巨大派閥。" },
+                    { id: "mushoku", name: "無職転生", size: 28, color: 0xff5555, htmlColor: "#ff5555", pos: [4, 1, -2], childId: null, desc: "重厚なストーリーと成長を描く作品を好む層。" },
+                    { id: "hellmode", name: "ヘルモード", size: 22, color: 0x9933ff, htmlColor: "#9933ff", pos: [-1, -3, 2], childId: null, desc: "やり込み要素やゲーム的バランスを好む層。" },
+                    { id: "honduki", name: "本好きの下剋上", size: 20, color: 0x44ccaa, htmlColor: "#44ccaa", pos: [2, 4, 3], childId: null, desc: "内政と緻密な世界観設定を愛好する層。" }
+                ]
+            },
+            "slime_detail": {
+                id: "slime_detail", title: "転スラの魅力", type: "一極集中型", parentId: "narou_group",
+                desc: "特定の要素が圧倒的な支持を得ている状態。",
+                bubbles: [
+                    { id: "rimuru", name: "リムルが可愛い", size: 70, color: 0x4488ff, htmlColor: "#4488ff", pos: [0, 0, 0], childId: null, desc: "主人公のキャラクター性に惹かれる圧倒的多数派。" },
+                    { id: "build", name: "国造り要素", size: 20, color: 0x44ccaa, htmlColor: "#44ccaa", pos: [5, 2, -2], childId: null, desc: "シミュレーションゲーム的な発展を楽しむ層。" },
+                    { id: "battle", name: "バトル", size: 10, color: 0xff5555, htmlColor: "#ff5555", pos: [-4, -3, 1], childId: null, desc: "爽快な戦闘シーンを求める層。" }
+                ]
+            },
+
+            // ----- 【食事カテゴリ】 (復活データ) -----
+            "foods_root": {
+                id: "foods_root", title: "食事の好み", type: "分散型", parentId: null,
+                desc: "和洋中さまざまな食の宇宙。",
+                bubbles: [
+                    { id: "staple", name: "主食", size: 60, color: 0xffffff, htmlColor: "#ffffff", pos: [0, 0, 0], childId: "staple_group" },
+                    { id: "meat", name: "肉", size: 25, color: 0xff4444, htmlColor: "#ff4444", pos: [5, -2, 2], childId: null },
+                    { id: "veg", name: "野菜", size: 15, color: 0x44ff44, htmlColor: "#44ff44", pos: [-4, 4, -1], childId: null }
+                ]
+            },
+            "staple_group": {
+                id: "staple_group", title: "日本の主食", type: "一極集中型", parentId: "foods_root",
+                desc: "1つの巨大なバブルが支配的で、他の意見が極端に少ない状態。無意識の前提になりやすい型。",
+                bubbles: [
+                    { id: "rice", name: "お米", size: 75, color: 0xffffff, htmlColor: "#ffffff", pos: [0, 0, 0], childId: "rice_detail", desc: "日本人のDNAに刻まれた圧倒的多数派。これが普通だと思っている。" },
+                    { id: "bread", name: "パン", size: 18, color: 0xddaa55, htmlColor: "#ddaa55", pos: [7, 2, -2], childId: null, desc: "朝食を中心に一定の勢力を誇るが、米には及ばない。" },
+                    { id: "noodle", name: "麺類", size: 7, color: 0xffffaa, htmlColor: "#ffffaa", pos: [-5, -3, 3], childId: null, desc: "手軽さを求める層。" }
+                ]
+            },
+            "rice_detail": {
+                id: "rice_detail", title: "お米の食べ方", type: "分散型", parentId: "staple_group",
+                desc: "圧倒的多数派の中にも、多様な派閥が存在する。",
+                bubbles: [
+                    { id: "plain", name: "白米そのまま", size: 40, color: 0xffffff, htmlColor: "#ffffff", pos: [-2, 2, 0], childId: null, desc: "米本来の甘みを味わう過激派。" },
+                    { id: "furikake", name: "ふりかけ", size: 35, color: 0xffaaaa, htmlColor: "#ffaaaa", pos: [3, -1, 1], childId: null, desc: "味の多様性を求める層。" },
+                    { id: "tamago", name: "卵かけご飯", size: 25, color: 0xffff44, htmlColor: "#ffff44", pos: [0, -3, -2], childId: null, desc: "TKGの完成度を信仰する熱狂的な層。" }
+                ]
+            }
+        };
+
+        // ==========================================
+        // === 2. 状態管理 (変数の定義) ===
+        // ==========================================
+        let state = {
+            screen: 'INPUT',       // 現在表示している画面名（INPUT, GROUP, SINGLE, ANALYSIS, DETAIL）
+            groupId: null,         // 現在表示しているバブル群（親）のID
+            bubbleId: null,        // 選択されている個別バブル（子）のID
+            groupData: null,       // バブル群の詳細データオブジェクト
+            bubbleData: null       // 個別バブルの詳細データオブジェクト
+        };
+        
+        let isDiving = false;          // ワープアニメーション中かどうかの判定フラグ
+        let diveStartTime = 0;         // ワープ開始時の時間（アニメーションの進行度計算用）
+        let diveVelocity = 0;          // ワープの進行速度
+        let isZoomingIntoGroup = false;// ワープ終了後、遠距離から目的のバブル群にズームインする演出中かどうかのフラグ
+
+        // 画面左上に一時的なメッセージ（トースト通知）を表示する関数
+        function showToast(msg) {
+            const toast = document.getElementById('toast');
+            toast.innerText = msg;
+            toast.classList.remove('opacity-0');
+            // 3秒後にフェードアウトさせる
+            setTimeout(() => toast.classList.add('opacity-0'), 3000);
+        }
+
+        // HTML側のUI表示を切り替える関数
+        // .screen-active クラスを付け外しすることで、フェードイン・フェードアウトを実現
+        function switchScreen(screenName) {
+            document.querySelectorAll('.screen-container').forEach(el => {
+                el.classList.remove('screen-active');
+                el.classList.add('screen-hidden');
+            });
+            document.getElementById(`screen-${screenName.toLowerCase()}`).classList.remove('screen-hidden');
+            document.getElementById(`screen-${screenName.toLowerCase()}`).classList.add('screen-active');
+            state.screen = screenName;
+        }
+
+        // ==========================================
+        // === 3. Three.js セットアップ (3D空間の構築) ===
+        // ==========================================
+        const container = document.getElementById('canvas-container');
+        const labelsContainer = document.getElementById('labels-container'); // バブルの名前(HTMLタグ)を置くコンテナ
+        
+        const scene = new THREE.Scene();
+        // 宇宙空間の奥が徐々に暗くなるフォグ（霧）効果を設定
+        scene.fog = new THREE.FogExp2(0x050510, 0.02);
+
+        // カメラ（視点）の設定
+        const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 10000);
+        
+        // レンダラー（描画エンジン）の設定
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)); // 高解像度ディスプレイ対応
+        container.appendChild(renderer.domElement);
+
+        // OrbitControls：マウスのドラッグで視点移動するための標準プラグイン
+        const controls = new THREE.OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true; // 視点移動に滑らかな慣性をつける
+        controls.dampingFactor = 0.05;
+
+        // 照明の設定
+        scene.add(new THREE.AmbientLight(0xffffff, 0.4)); // 全体を照らす環境光
+        const dirLight = new THREE.DirectionalLight(0xffffff, 0.8); // 陰影をつける平行光源
+        dirLight.position.set(10, 20, 10);
+        scene.add(dirLight);
+        
+        // --- 背景のバブル星屑（銀河）の生成 ---
+        // 星をただの四角ではなく、丸いバブルの形にするためのテクスチャをCanvasで動的に作成
+        function createCircleTexture() {
+            const canvas = document.createElement('canvas');
+            canvas.width = 32; canvas.height = 32;
+            const ctx = canvas.getContext('2d');
+            ctx.beginPath();
+            ctx.arc(16, 16, 14, 0, Math.PI * 2);
+            ctx.fillStyle = '#ffffff';
+            ctx.fill();
+            return new THREE.CanvasTexture(canvas);
+        }
+
+        // 星の数と位置・色を定義
+        const starsGeometry = new THREE.BufferGeometry();
+        const starsCount = 30000; // 星の数。圧倒的なダイブ感を出すために30,000個に設定
+        const posArray = new Float32Array(starsCount * 3);
+        const colorsArray = new Float32Array(starsCount * 3);
+
+        for(let i=0; i<starsCount * 3; i+=3) {
+            // 星の座標(X, Y, Z)をランダムに設定。ワープで奥に進むためZ軸(-10000の奥まで)に細長く配置
+            posArray[i] = (Math.random() - 0.5) * 1000;
+            posArray[i+1] = (Math.random() - 0.5) * 1000;
+            posArray[i+2] = (Math.random() - 1.0) * 10000;
+
+            // 星の色(RGB)をHSL色空間を使って青〜紫〜白のランダムに設定
+            const color = new THREE.Color();
+            color.setHSL(0.6 + Math.random() * 0.2, 0.8, 0.6 + Math.random() * 0.4);
+            colorsArray[i] = color.r;
+            colorsArray[i+1] = color.g;
+            colorsArray[i+2] = color.b;
+        }
+        starsGeometry.setAttribute('position', new THREE.BufferAttribute(posArray, 3));
+        starsGeometry.setAttribute('color', new THREE.BufferAttribute(colorsArray, 3));
+
+        // 星の質感（マテリアル）の設定
+        const starsMaterial = new THREE.PointsMaterial({
+            size: 6.0, // 星の大きさ（サイズを大きくしてダイブ感を演出）
+            vertexColors: true,
+            transparent: true,
+            opacity: 0.8,
+            map: createCircleTexture(),
+            alphaTest: 0.1,
+            blending: THREE.AdditiveBlending // 重なった時に光って見える合成方法
+        });
+        const starMesh = new THREE.Points(starsGeometry, starsMaterial);
+        scene.add(starMesh);
+
+        // --- 個別のバブル（球体）を生成・管理する仕組み ---
+        let currentBubbles = []; // 現在画面に表示されているバブルの配列を保存
+        let targetCameraPos = new THREE.Vector3(0, 0, 25);     // カメラが移動する目標地点
+        let targetControlTarget = new THREE.Vector3(0, 0, 0);  // カメラが向くべき注視点の目標地点
+
+        // バブルの3Dモデル(Mesh)を作る関数
+        function createBubbleMesh(size, colorHex, position) {
+            // ガラスのような質感を出すための物理ベースマテリアル設定
+            const material = new THREE.MeshPhysicalMaterial({
+                color: colorHex, metalness: 0.1, roughness: 0.1, transmission: 0.8,
+                transparent: true, opacity: 0.9, ior: 1.5, clearcoat: 1.0, clearcoatRoughness: 0.1
+            });
+            const mesh = new THREE.Mesh(new THREE.SphereGeometry(1, 64, 64), material);
+            const radius = Math.pow(size, 0.45); // サイズ値から半径を計算（極端に大きくなりすぎないように調整）
+            mesh.scale.set(radius, radius, radius);
+            mesh.position.set(...position);
+            return mesh;
+        }
+
+        // ==========================================
+        // === 4. 画面遷移ロジック (カメラワークとデータ読み込み) ===
+        // ==========================================
+
+        // 【バブル群画面】 を読み込んで表示する関数
+        // isAfterDive: ワープ直後に遠くからズームインしてくる演出を入れるかどうかのフラグ
+        window.loadGroup = function(groupId, isAfterDive = false) {
+            const data = DB[groupId];
+            if(!data) return;
+            
+            state.groupId = groupId;
+            state.groupData = data;
+            state.bubbleId = null;
+            state.bubbleData = null;
+
+            // 古いバブル（3DモデルとHTMLラベル）を画面から削除
+            currentBubbles.forEach(b => { scene.remove(b.mesh); b.label.remove(); });
+            currentBubbles = [];
+            labelsContainer.innerHTML = '';
+
+            // 新しいバブル群を生成して配置
+            data.bubbles.forEach(bData => {
+                const mesh = createBubbleMesh(bData.size, bData.color, bData.pos);
+                scene.add(mesh);
+
+                // 3Dバブルに追従させるためのHTMLラベルを作成
+                const label = document.createElement('div');
+                label.className = 'bubble-label';
+                label.innerText = bData.name;
+                // ラベルがクリックされたら、そのバブルの個別画面に飛ぶ
+                label.onclick = (e) => {
+                    e.stopPropagation(); // 貫通して裏のバブルもクリックされるのを防ぐ
+                    loadSingle(bData);
+                };
+                labelsContainer.appendChild(label);
+
+                // 生成したデータを配列に保存
+                currentBubbles.push({ mesh, label, data: bData });
+            });
+
+            // UIパネルの情報を更新
+            document.getElementById('group-title').innerText = data.title;
+            document.getElementById('group-type').innerText = data.type;
+            document.getElementById('btn-zoomout-group').style.display = data.parentId ? 'flex' : 'none';
+            
+            // 右側のリスト（構成要素と占有率）を生成
+            const listContainer = document.getElementById('group-list');
+            listContainer.innerHTML = '';
+            data.bubbles.forEach(bData => {
+                const item = document.createElement('div');
+                item.className = 'flex items-center gap-3 cursor-pointer group';
+                item.onclick = () => loadSingle(bData);
+                item.innerHTML = `
+                    <div class="w-3 h-3 rounded-full shadow-[0_0_8px_${bData.htmlColor}]" style="background-color: ${bData.htmlColor};"></div>
+                    <div class="flex-1 text-sm group-hover:text-white truncate">${bData.name}</div>
+                    <div class="text-sm font-bold w-8 text-right">${bData.size}%</div>
+                `;
+                listContainer.appendChild(item);
+            });
+
+            // カメラ位置の設定（ダイブ後か、通常の移動かで動きを変える）
+            if (isAfterDive) {
+                // ワープ明けの演出：超遠距離(Z=400)に瞬間移動させ、そこから目標(Z=25)へ滑らかにアニメーションさせる
+                controls.enabled = false;
+                camera.position.set(0, 0, 400); 
+                targetCameraPos.set(0, 0, 25); 
+                isZoomingIntoGroup = true;
+            } else {
+                // 通常の移動：最初から標準距離にセット
+                controls.enabled = true;
+                camera.position.set(0, 0, 25);
+                targetCameraPos.set(0, 0, 25);
+            }
+            // カメラの向き（注視点）を空間の中央にリセット
+            controls.target.set(0, 0, 0);
+            targetControlTarget.set(0, 0, 0);
+            controls.update();
+            
+            // 画面UIをバブル群画面(GROUP)に切り替え
+            switchScreen('GROUP');
+            showToast(`${data.title} の宇宙を観測中`);
+        }
+
+        // 【個別バブル画面】 を読み込んで表示する関数
+        // 特定のバブルにカメラがグーッと寄っていく演出を行います。
+        window.loadSingle = function(bubbleData) {
+            state.bubbleId = bubbleData.id;
+            state.bubbleData = bubbleData;
+
+            // 選択されたバブルの3Dモデルを探す
+            const bObj = currentBubbles.find(b => b.data.id === bubbleData.id);
+            if(!bObj) return;
+
+            const radius = bObj.mesh.scale.x;
+            const targetPos = bObj.mesh.position.clone();
+            
+            controls.enabled = false; // マウスによる視点操作を一時無効化
+            // カメラの注視点と位置を、対象のバブルの目の前に移動するように計算
+            targetControlTarget.copy(targetPos).add(new THREE.Vector3(radius * 0.8, 0, 0)); 
+            targetCameraPos.copy(targetPos).add(new THREE.Vector3(0, 0, radius * 1.5 + 2)); 
+
+            // UIパネルの情報を更新
+            document.getElementById('single-title').innerText = bubbleData.name;
+            document.getElementById('single-desc').innerText = bubbleData.desc || "このバブルの簡易説明です。";
+            document.getElementById('single-percent').innerText = bubbleData.size;
+            
+            // さらにズームできる子階層がある場合はボタンを表示
+            const hasChild = !!bubbleData.childId;
+            document.getElementById('btn-zoomin-single').style.display = hasChild ? 'block' : 'none';
+            document.getElementById('btn-zoomin-single').innerText = hasChild ? `↑ ${DB[bubbleData.childId].title}へ (上スクロール)` : '';
+
+            // 偏り度メーターのバー幅を計算（占有率sizeをもとに適当な割合を算出）
+            const biasWidth = Math.min(100, Math.max(20, bubbleData.size * 1.5));
+            document.getElementById('bias-meter').style.width = `${biasWidth}%`;
+
+            switchScreen('SINGLE');
+            showToast(`個別バブル「${bubbleData.name}」にズームしました`);
+        }
+
+        // 【個別バブル解析画面】 を読み込んで表示する関数
+        // 四隅に解析カードが広がり、対象のバブルが中央に配置される画面。
+        window.loadAnalysis = function() {
+            if(state.screen !== 'SINGLE') return;
+            
+            const bObj = currentBubbles.find(b => b.data.id === state.bubbleData.id);
+            if(!bObj) return;
+
+            const radius = bObj.mesh.scale.x;
+            const targetPos = bObj.mesh.position.clone();
+            
+            // バブルが画面の「ど真ん中」に来るようにカメラを少し引き、真正面から見据える
+            targetControlTarget.copy(targetPos); 
+            targetCameraPos.copy(targetPos).add(new THREE.Vector3(0, 0, radius * 3.5));
+
+            // 中央のテキスト表示を更新
+            document.getElementById('analysis-center-title').innerText = state.bubbleData.name;
+
+            switchScreen('ANALYSIS');
+            showToast(`解析モードへ移行しました`);
+        }
+
+        // 【解析バブル詳細表示画面】(一番最後の詳細テキスト画面)を表示する関数
+        window.showDetail = function(cardType) {
+            const titles = {
+                'overview': 'バブルの概要と特徴',
+                'history': '形成の歴史と拡大要因',
+                'demographic': '構成層・情報源の分析',
+                'evaluation': '内と外からの評価のギャップ'
+            };
+            // どのカードがクリックされたかに応じてタイトルを変更
+            document.getElementById('detail-tag').innerText = state.groupData.title;
+            document.getElementById('detail-title').innerText = titles[cardType] || '詳細解析';
+            document.getElementById('detail-origin-title').innerText = state.bubbleData.name;
+
+            switchScreen('DETAIL');
+        }
+
+        // ==========================================
+        // === 5. イベントリスナー (ユーザー操作の受付) ===
+        // ==========================================
+        
+        // --- 3Dオブジェクト(球体)のクリック判定処理 ---
+        const raycaster = new THREE.Raycaster(); // マウス位置から光線を飛ばして交差判定するクラス
+        const mouse = new THREE.Vector2();       // マウスの座標(2D)
+
+        window.addEventListener('click', (event) => {
+            // UIパネルや文字ラベルをクリックした時は、裏の3D空間のクリック判定を無視する
+            if (event.target.closest('.glass-panel') || event.target.closest('button') || event.target.closest('input') || event.target.closest('.bubble-label')) return;
+
+            // マウスの画面上の座標を -1 から 1 の範囲（Three.jsで扱いやすい形式）に変換
+            mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+
+            // カメラからマウスの位置へ光線(レイ)をセット
+            raycaster.setFromCamera(mouse, camera);
+            
+            // 画面に現在表示(visible)されているバブルだけを判定対象にする（透明になって消えているバブルをクリックさせないため）
+            const visibleBubbles = currentBubbles.filter(b => b.mesh.visible);
+            const intersects = raycaster.intersectObjects(visibleBubbles.map(b => b.mesh));
+
+            // もし光線が何かのバブルとぶつかったら
+            if (intersects.length > 0) {
+                const clickedMesh = intersects[0].object;
+                // クリックされたMesh(3Dモデル)を持つバブルのデータを探す
+                const bubbleObj = currentBubbles.find(b => b.mesh === clickedMesh);
+                if (bubbleObj) {
+                    if (state.screen === 'GROUP') {
+                        // バブル群画面でクリックされたら → 個別バブル画面へズームイン
+                        loadSingle(bubbleObj.data);
+                    } else if (state.screen === 'SINGLE' && bubbleObj.data.id === state.bubbleId) {
+                        // 個別バブル画面で、見ているバブル自身をクリックされたら → 解析画面へ移行
+                        loadAnalysis();
+                    }
+                }
+            }
+        });
+
+        // --- ダイブボタン(入力確定)の処理 ---
+        document.getElementById('btn-dive').addEventListener('click', () => {
+            const input = document.getElementById('input-opinion').value;
+            
+            // 入力された文字列に応じて、遷移先のバブル群（カテゴリ）を判定して振り分ける
+            let targetGroup = 'kinoko_takenoko_group'; // デフォルトは「きのこたけのこ」
+            if (input.includes("なろう") || input.includes("小説")) {
+                targetGroup = 'narou_group'; // ライトノベルのカテゴリへ
+            } else if (input.includes("米") || input.includes("パン") || input.includes("主食") || input.includes("食事")) {
+                targetGroup = 'staple_group'; // 食事のカテゴリへ
+            }
+
+            // 入力パネルを奥に消えるように縮小・フェードアウトさせる
+            const panel = document.getElementById('input-panel');
+            panel.style.transform = 'scale(0.5)';
+            panel.style.opacity = '0';
+            panel.style.pointerEvents = 'none';
+            
+            showToast("対象のバブル宇宙へダイブしています... 🚀");
+            
+            // 4秒間のワープアニメーション開始のフラグを立てる
+            isDiving = true;
+            diveStartTime = clock.getElapsedTime();
+
+            // 4秒後に実際の画面遷移（データの読み込み）を行う
+            setTimeout(() => {
+                isDiving = false; // ワープ終了
+                // 最初の入力画面を非表示にする
+                document.getElementById('screen-input').classList.remove('screen-active');
+                document.getElementById('screen-input').classList.add('screen-hidden');
+                
+                // ワープで歪んだり奥に進んだカメラを一旦リセット
+                camera.fov = 60;
+                camera.updateProjectionMatrix();
+                camera.rotation.set(0, 0, 0);
+
+                // 判定した対象グループを読み込み。isAfterDive=trueにしてワープ明けのズームイン演出を行う
+                loadGroup(targetGroup, true); 
+            }, 4000); 
+        });
+
+        // テキストボックスでEnterキーを押した時もダイブボタンをクリックした扱いにする
+        document.getElementById('input-opinion').addEventListener('keypress', (e) => {
+            if(e.key === 'Enter') document.getElementById('btn-dive').click();
+        });
+
+        // --- 各種UIボタンのクリックイベント ---
+        document.getElementById('btn-zoomout-group').addEventListener('click', () => {
+            if(state.groupData && state.groupData.parentId) loadGroup(state.groupData.parentId);
+        });
+        document.getElementById('btn-zoomout-single').addEventListener('click', () => loadGroup(state.groupId));
+        document.getElementById('btn-zoomin-single').addEventListener('click', () => {
+            if(state.bubbleData && state.bubbleData.childId) loadGroup(state.bubbleData.childId);
+        });
+        document.getElementById('btn-analyze').addEventListener('click', () => loadAnalysis());
+        document.getElementById('analysis-center-title').addEventListener('click', () => loadSingle(state.bubbleData));
+        document.getElementById('btn-back-detail').addEventListener('click', () => switchScreen('ANALYSIS'));
+
+        // --- マウスホイール(トラックパッドのスワイプ)操作によるズーム/階層移動 ---
+        let wheelTimeout; // 連続スクロールの過剰反応を防ぐためのタイマー
+
+        window.addEventListener('wheel', (e) => {
+            // スクロール可能なUI領域（右側のリストなど）を操作している場合は、階層移動を発生させない
+            const scrollable = e.target.closest('.overflow-y-auto');
+            if(scrollable && state.screen !== 'SINGLE' && state.screen !== 'ANALYSIS') {
+                if(e.ctrlKey) e.preventDefault(); // Ctrlキー押下時のブラウザの文字拡大は防ぐ
+                return; 
+            }
+            
+            // それ以外の空間をホイールした場合は、ブラウザのデフォルトスクロールを止める
+            e.preventDefault();
+            
+            // 一度スクロール判定したら、1秒間は次の判定を受け付けない（誤作動防止）
+            if(wheelTimeout) return; 
+            wheelTimeout = setTimeout(() => { wheelTimeout = null; }, 1000);
+
+            if (e.deltaY > 0) { 
+                // 下スクロール（手前に引く）＝ ズームアウト（親階層へ戻る）
+                if (state.screen === 'DETAIL') switchScreen('ANALYSIS');
+                else if (state.screen === 'ANALYSIS') loadSingle(state.bubbleData);
+                else if (state.screen === 'SINGLE') loadGroup(state.groupId);
+                else if (state.screen === 'GROUP' && state.groupData && state.groupData.parentId) {
+                    loadGroup(state.groupData.parentId);
+                }
+            } else if (e.deltaY < 0) { 
+                // 上スクロール（奥へ押し込む）＝ ズームイン（子階層へ進む）
+                if (state.screen === 'SINGLE' && state.bubbleData && state.bubbleData.childId) {
+                    loadGroup(state.bubbleData.childId);
+                }
+            }
+        }, { passive: false }); // e.preventDefault()を機能させるために必要
+
+        // ==========================================
+        // === 6. アニメーションループ (毎フレームの描画更新) ===
+        // ==========================================
+        const clock = new THREE.Clock(); // 経過時間を計るためのクラス
+
+        function animate() {
+            // ブラウザの描画タイミングに合わせて次のフレームを予約（ループの仕組み）
+            requestAnimationFrame(animate);
+            const time = clock.getElapsedTime(); // アプリ起動からの経過秒数
+
+            // --- 状態に応じたカメラ・演出の制御 ---
+            if (isDiving) {
+                // 【ダイブアニメーション中】
+                // 経過時間(0~4秒)から進捗率(0~1)を計算
+                const t = time - diveStartTime; 
+                const progress = Math.min(t / 4.0, 1.0); 
+                
+                // 加速度を指数関数(8乗)で爆発的に上げ、最後の瞬間に光速へ到達するような動きにする
+                diveVelocity = 0.5 + Math.pow(progress, 8) * 300; 
+                
+                // カメラをZ軸の奥方向マイナスへ猛烈な速度で進める
+                camera.position.z -= diveVelocity; 
+                // 視野角(FOV)も極端に広げて歪ませることで、スピード感を強調
+                camera.fov = 60 + Math.pow(progress, 8) * 120; 
+                camera.updateProjectionMatrix(); // カメラ設定を変更した時はこれを呼ぶ必要がある
+                
+                // 星屑も回転速度を上げて、流れる星の尾のように見せる
+                starMesh.rotation.y += 0.002 + diveVelocity * 0.0002;
+                starMesh.rotation.z += 0.002 + diveVelocity * 0.0002;
+                
+            } else if (isZoomingIntoGroup) {
+                // 【ワープ明けの自動ズームイン中】
+                // 遠距離(Z=400)から目標(Z=25)へ、毎フレーム0.02の割合で滑らかに(Lerp)接近させる
+                camera.position.lerp(targetCameraPos, 0.02); 
+                controls.target.lerp(targetControlTarget, 0.02);
+                camera.lookAt(controls.target); // 常に目標を睨み続ける
+                
+                // 目的地に十分近づいたら自動ズームイン演出を終了し、手動操作(controls)を解禁する
+                if (camera.position.distanceTo(targetCameraPos) < 1.0) {
+                    isZoomingIntoGroup = false;
+                    controls.enabled = true;
+                }
+            } else if (controls.enabled) {
+                // 【ユーザー操作中（通常時）】
+                // マウスドラッグでの視点移動を滑らかに更新
+                controls.update();
+            } else {
+                // 【画面遷移のカメラ移動中】(loadSingleなどで指定された位置へ移動)
+                camera.position.lerp(targetCameraPos, 0.05);
+                controls.target.lerp(targetControlTarget, 0.05);
+                camera.lookAt(controls.target);
+            }
+            
+            // ダイブ中以外は、背景の星屑宇宙をゆっくり回転させて雄大さを出す
+            if (!isDiving) {
+                starMesh.rotation.y = time * 0.02; 
+            }
+
+            // 現在が解析画面系かどうかを判定（他のバブルを消す処理に使う）
+            const isAnalysisOrDetail = (state.screen === 'ANALYSIS' || state.screen === 'DETAIL');
+
+            // --- 現在表示されている各バブルごとの更新処理 ---
+            currentBubbles.forEach(b => {
+                // Y座標（上下）をサイン波を使ってふわふわと浮遊させる
+                b.mesh.position.y += Math.sin(time * 2 + b.mesh.position.x) * 0.005; 
+                
+                // --- 解析画面時の他バブル透過処理 ---
+                const isTarget = (state.bubbleId === b.data.id);
+                // 対象バブル以外は目標不透明度を 0 にしてフェードアウトさせる
+                const targetOpacity = (isAnalysisOrDetail && !isTarget) ? 0.0 : 0.9;
+                
+                // 不透明度を滑らかに変化させる
+                b.mesh.material.opacity += (targetOpacity - b.mesh.material.opacity) * 0.1;
+                // 完全に透明になったら、3D的な描画やクリック判定の対象から外す
+                b.mesh.visible = b.mesh.material.opacity > 0.01; 
+                
+                // --- HTML文字ラベルの追従処理 ---
+                // バブル群画面で、かつ自動ズーム演出中でない時だけラベルを表示する
+                if (state.screen === 'GROUP' && !isAnalysisOrDetail && !isZoomingIntoGroup) {
+                    // 3D空間の座標を、2Dの画面上の座標(-1〜1)に投影・変換する
+                    const pos = b.mesh.position.clone().project(camera);
+                    // カメラの背後にバブルがある場合はラベルを非表示にする
+                    if (pos.z > 1) { b.label.style.opacity = '0'; return; }
+                    
+                    // -1〜1の座標を、実際のピクセル座標（X,Y）に変換
+                    const x = (pos.x * 0.5 + 0.5) * window.innerWidth;
+                    const y = -(pos.y * 0.5 - 0.5) * window.innerHeight;
+                    
+                    // カメラからの距離に応じてラベルの大きさを変える（遠くにあると文字も小さくなる）
+                    const dist = camera.position.distanceTo(b.mesh.position);
+                    let scale = Math.max(0.5, 15 / dist) * (1 + b.mesh.scale.x * 0.1);
+                    
+                    // スタイルを適用してラベルを配置
+                    b.label.style.transform = `translate(-50%, -50%) translate(${x}px, ${y}px) scale(${scale})`;
+                    b.label.style.opacity = '1';
+                    b.label.style.pointerEvents = 'auto'; // クリックを受け付ける
+                } else {
+                    // それ以外の画面ではラベルを消す
+                    b.label.style.opacity = '0'; 
+                    b.label.style.pointerEvents = 'none';
+                }
+            });
+
+            // --- 接近ズームイン判定 (カメラが近づいたら自動遷移) ---
+            // 自動ズーム中(isZoomingIntoGroup)は、まだ到着していないのに吸い込まれるのを防ぐために除外
+            if (state.screen === 'GROUP' && controls.enabled && !isDiving && !isZoomingIntoGroup) {
+                let minDistance = Infinity;
+                let closestBubble = null;
+                // 一番近くにあるバブルを探す
+                currentBubbles.forEach(b => {
+                    const dist = camera.position.distanceTo(b.mesh.position);
+                    if (dist < minDistance) {
+                        minDistance = dist;
+                        closestBubble = b;
+                    }
+                });
+                
+                // 一番近いバブルが、そのバブルのサイズに応じた距離(ぶつかるくらい)に接近していたら
+                if (closestBubble && minDistance < closestBubble.mesh.scale.x * 2.5) {
+                    loadSingle(closestBubble.data); // 個別バブル画面へ自動で遷移
+                }
+            }
+
+            // 最後に、全ての計算結果をもとに画面を描画（レンダリング）する
+            renderer.render(scene, camera);
+        }
+
+        // --- 画面サイズが変更された時の対応処理 ---
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight; // カメラの縦横比を修正
+            camera.updateProjectionMatrix(); // カメラ設定を更新
+            renderer.setSize(window.innerWidth, window.innerHeight); // レンダラーのサイズを更新
+        });
+
+        // アニメーションループを開始！
+        animate();
+
+    </script>
+</body>
+</html>
