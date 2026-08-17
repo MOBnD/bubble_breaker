@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { cp, mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -46,4 +46,5 @@ const output = source
 
 await mkdir(outputDir, { recursive: true });
 await writeFile(outputPath, output, 'utf8');
+await cp(path.join(root, 'BGM'), path.join(outputDir, 'BGM'), { recursive: true });
 console.log(`Built ${path.relative(root, outputPath)}${apiKey ? ' with API key' : ' without API key (fixed-data fallback enabled)'}.`);

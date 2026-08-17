@@ -27,7 +27,8 @@
             transform: translate(-50%, -50%);
             color: rgba(255, 255, 255, 0.9);
             text-shadow: 0 0 5px rgba(0,0,0,0.8), 0 0 10px rgba(0,0,0,0.5);
-            font-weight: bold;
+            font-weight: 800;
+            font-size: clamp(16px, 1.5vw, 24px);
             text-align: center;
             transition: opacity 0.3s, transform 0.1s;
             cursor: pointer;
@@ -77,6 +78,14 @@
 
     <div id="ui-layer">
         <button id="btn-sound-toggle" class="absolute top-6 right-6 z-[80] glass-panel px-3 py-2 rounded-lg text-xs text-white pointer-events-auto cursor-pointer" type="button">🔊 効果音ON</button>
+        <div class="absolute top-16 right-6 z-[80] glass-panel rounded-lg p-2 text-[10px] text-white pointer-events-auto flex flex-col gap-1">
+            <label class="flex items-center gap-2"><input id="bgm-toggle" type="checkbox" checked> BGM</label>
+            <label class="flex items-center gap-2">音量 <input id="audio-volume" type="range" min="0" max="1" step="0.05" value="0.45"></label>
+            <select id="bgm-type" class="bg-black/60 rounded px-1 py-0.5"><option value="宇宙遊泳.mp3">宇宙遊泳.mp3</option><option value="星間宇宙.mp3">星間宇宙.mp3</option><option value="エッジワース・カイパーベルト.mp3">エッジワース・カイパーベルト.mp3</option><option value="Far_away_from_the_Earth.mp3">Far_away_from_the_Earth.mp3</option></select>
+            <label class="flex items-center gap-2"><input id="bgm-auto-next" type="checkbox"> 曲終了で次曲</label>
+            <select id="bgm-transition" class="bg-black/60 rounded px-1 py-0.5"><option value="persist">遷移しても継続</option><option value="change">カテゴリ移動で変更</option></select>
+        </div>
+        <audio id="bgm-audio" loop preload="none"></audio>
         
         <!-- ヘッダー -->
         <div class="absolute top-6 left-6 flex flex-col gap-1 z-50 pointer-events-none">
@@ -409,9 +418,9 @@
                         parentId: group.id,
                         desc: `${bubble.name}に対する主な評価や理由を細分化したバブル群です。`,
                         bubbles: [
-                            { id: `${childId}__feature`, name: `${bubble.name}の特徴`, size: 40, color: baseColor, htmlColor: `#${baseColor.toString(16).padStart(6, '0')}`, pos: [-3, 2, 1], childId: null, desc: `${bubble.name}の代表的な特徴。` },
-                            { id: `${childId}__support`, name: `${bubble.name}を支持する理由`, size: 35, color: baseColor ^ 0x222222, htmlColor: `#${(baseColor ^ 0x222222).toString(16).padStart(6, '0')}`, pos: [3, -1, -1], childId: null, desc: `${bubble.name}を選ぶ主な理由。` },
-                            { id: `${childId}__view`, name: `${bubble.name}への評価`, size: 25, color: baseColor ^ 0x444444, htmlColor: `#${(baseColor ^ 0x444444).toString(16).padStart(6, '0')}`, pos: [0, -3, 2], childId: null, desc: `${bubble.name}に対する周辺的な評価。` }
+                            { id: `${childId}__related`, name: `${bubble.name}に関連する具体例`, size: 40, color: baseColor, htmlColor: `#${baseColor.toString(16).padStart(6, '0')}`, pos: [-3, 2, 1], childId: null, desc: `${bubble.name}に属する具体的な選択肢。` },
+                            { id: `${childId}__faction`, name: `${bubble.name}の代表的な派閥`, size: 35, color: baseColor ^ 0x222222, htmlColor: `#${(baseColor ^ 0x222222).toString(16).padStart(6, '0')}`, pos: [3, -1, -1], childId: null, desc: `${bubble.name}に近い代表的な分類。` },
+                            { id: `${childId}__alternative`, name: `${bubble.name}に近い選択肢`, size: 25, color: baseColor ^ 0x444444, htmlColor: `#${(baseColor ^ 0x444444).toString(16).padStart(6, '0')}`, pos: [0, -3, 2], childId: null, desc: `${bubble.name}と比較できる下位選択肢。` }
                         ]
                     };
                     bubble.childId = childId;
@@ -529,7 +538,7 @@
             properties: {
                 entryGroupId: { type: 'string' },
                 entryBubbleId: { type: 'string' },
-                groups: { type: 'array', items: OPENAI_GROUP_SCHEMA, maxItems: 40 }
+                groups: { type: 'array', items: OPENAI_GROUP_SCHEMA, maxItems: 25 }
             }
         };
 
@@ -544,6 +553,12 @@
             if (input.includes('なろう') || input.includes('小説')) return 'narou_group';
             if (input.includes('米') || input.includes('パン') || input.includes('主食') || input.includes('食事')) return 'staple_group';
             return 'kinoko_takenoko_group';
+        }
+        function fallbackEntryBubbleId(groupId, input) {
+            const group = DB[groupId];
+            if (!group || !group.bubbles.length) return null;
+            const normalized = String(input || '').toLowerCase();
+            return (group.bubbles.find(bubble => normalized.includes(String(bubble.name).toLowerCase()) || String(bubble.name).toLowerCase().includes(normalized)) || group.bubbles[0]).id;
         }
 
         function normalizeColor(value, fallback = 0x4488ff) {
@@ -613,7 +628,7 @@
                 return Math.max(max, Math.hypot(bubble.pos[0] - bubbles[0].pos[0], bubble.pos[1] - bubbles[0].pos[1], bubble.pos[2] - bubbles[0].pos[2]));
             }, 0);
             if (spread < 2) {
-                const radius = Math.max(8, bubbles.length * 1.8);
+                const radius = Math.max(14, bubbles.length * 3.2);
                 bubbles.forEach((bubble, index) => {
                     const angle = (Math.PI * 2 * index) / bubbles.length;
                     bubble.pos = [Math.cos(angle) * radius, Math.sin(angle) * radius * 0.65, Math.sin(angle * 1.7) * 3];
@@ -643,7 +658,7 @@
                 }
                 if (!changed) break;
             }
-            bubbles.forEach(bubble => { bubble.pos = bubble.pos.map(value => Math.max(-50, Math.min(50, value))); });
+            bubbles.forEach(bubble => { bubble.pos = bubble.pos.map(value => Math.max(-90, Math.min(90, value))); });
         }
 
         function limitGeneratedBubbles(rawGroups, raw) {
@@ -690,16 +705,24 @@
                 analysis: normalizeAnalysis(bubble.analysis),
                 sources: bubble.sources
             });
+            const evidenceLabels = [
+                ...(bubble.sources || []).map(source => String(source.title || '').trim()),
+                ...['overview', 'history', 'demographic', 'evaluation'].flatMap(key => (bubble.analysis && bubble.analysis[key] && bubble.analysis[key].metrics || []).map(metric => String(metric.label || '').trim()))
+            ].filter(label => label && !/特徴|評価|理由|支持|見た目|歴史/.test(label));
+            const variantLabels = [...new Set(evidenceLabels)].slice(0, 5);
+            while (variantLabels.length < 5) variantLabels.push(['代表的な系統', '主流の方式', '地域・流派', '専門分野', '関連する選択肢'][variantLabels.length]);
             return {
                 id: childId,
                 title: `${bubble.name}の詳細`,
                 type: '分散型',
                 parentId: parentGroup.id,
-                desc: `${bubble.name}の特徴・理由・評価を分解した下位カテゴリです。`,
+                desc: `${bubble.name}を具体的な選択肢へ分解した下位カテゴリです。`,
                 bubbles: [
-                    makeBubble('feature', `${bubble.name}の特徴`, 40, baseColor, [-3, 2, 1], `${bubble.name}の代表的な特徴。`),
-                    makeBubble('reason', `${bubble.name}を支持する理由`, 35, baseColor ^ 0x222222, [3, -1, -1], `${bubble.name}を選ぶ主な理由。`),
-                    makeBubble('evaluation', `${bubble.name}への評価`, 25, baseColor ^ 0x444444, [0, -3, 2], `${bubble.name}に対する評価。`)
+                    makeBubble('variant_1', `${bubble.name}の${variantLabels[0]}`, 24, baseColor, [-6, 3, 1], `${bubble.name}に属する代表的な下位選択肢。`),
+                    makeBubble('variant_2', `${bubble.name}の${variantLabels[1]}`, 21, baseColor ^ 0x222222, [-2, -2, -1], `${bubble.name}に属する別の下位選択肢。`),
+                    makeBubble('variant_3', `${bubble.name}の${variantLabels[2]}`, 19, baseColor ^ 0x444444, [3, 3, 2], `${bubble.name}に属する下位選択肢。`),
+                    makeBubble('variant_4', `${bubble.name}の${variantLabels[3]}`, 18, baseColor ^ 0x666666, [6, -2, -2], `${bubble.name}に属する下位選択肢。`),
+                    makeBubble('variant_5', `${bubble.name}の${variantLabels[4]}`, 18, baseColor ^ 0x888888, [0, -5, 3], `${bubble.name}に属する下位選択肢。`)
                 ],
                 generatedFromBubble: bubble.id,
                 generatedIndex: index
@@ -736,7 +759,7 @@
                         ? Math.max(0, Number((100 - assigned).toFixed(2)))
                         : Number(((Math.max(0, Number(bubble.size) || 0) / total) * 100).toFixed(2));
                     assigned += normalizedSize;
-                    const pos = Array.isArray(bubble.pos) && bubble.pos.length === 3 ? bubble.pos.map(value => Math.max(-50, Math.min(50, Number(value) || 0))) : [0, 0, 0];
+                    const pos = Array.isArray(bubble.pos) && bubble.pos.length === 3 ? bubble.pos.map(value => Math.max(-90, Math.min(90, Number(value) || 0))) : [0, 0, 0];
                     return {
                         id: String(bubble.id), name: String(bubble.name || '名称未設定'), size: normalizedSize,
                         color: numericColor, htmlColor: normalizeHtmlColor(bubble.htmlColor, numericColor), pos,
@@ -799,24 +822,37 @@
             if (!parentGroup.bubbles.some(bubble => bubble.childId === entryGroupId)) {
                 throw new Error('親カテゴリから中間カテゴリへの接続がありません');
             }
-            const connectedIds = new Set([parentGroup.id, entryGroup.id, ...repairedChildGroups.map(group => group.id)]);
+            // 親カテゴリから中央カテゴリ、中央カテゴリから各下位カテゴリへ続く
+            // APIのツリーだけを保持する。親の各バブルへ人工的な中央群を増殖させない。
+            const connectedIds = new Set([parentGroup.id]);
+            const pendingIds = [parentGroup.id];
+            while (pendingIds.length) {
+                const currentId = pendingIds.shift();
+                const currentGroup = db[currentId];
+                if (!currentGroup) continue;
+                currentGroup.bubbles.forEach(bubble => {
+                    if (bubble.childId && db[bubble.childId] && !connectedIds.has(bubble.childId)) {
+                        connectedIds.add(bubble.childId);
+                        pendingIds.push(bubble.childId);
+                    }
+                });
+            }
             Object.keys(db).forEach(id => { if (!connectedIds.has(id)) delete db[id]; });
             Object.values(db).forEach(group => group.bubbles.forEach(bubble => {
                 if (bubble.childId && !db[bubble.childId]) bubble.childId = null;
             }));
-            repairedChildGroups.forEach(group => group.bubbles.forEach(bubble => { bubble.childId = null; }));
-            return { db, entryGroupId };
+            return { db, entryGroupId, entryBubbleId: entryBubble.id };
         }
 
         function buildOpenAIRequest(input, options = {}) {
             const prompt = `ユーザーの意見: ${input}\n\n日本語圏を中心にWeb Searchで関連する公開情報を調査し、BubbleBreaker用のバブル宇宙を生成してください。\n- groupsは必ず「上位カテゴリ → 入力意見を含む中央カテゴリ → 中央カテゴリの各バブルに対応する下位カテゴリ」の3階層にする。入力確定後に表示するのは中央カテゴリです\n- entryGroupIdは必ず「入力された意見のバブルが含まれる中央カテゴリ」のIDにする。入力意見の細かな理由・属性・詳細を並べる下位カテゴリをentryGroupIdにしてはいけない。例えば「きのこの山が好き」なら、中央カテゴリは「きのこの山派・たけのこの里派・木こりの切り株派」のような選択肢のカテゴリにし、詳細な好みの分類は各バブル固有の下位カテゴリにする\n- entryBubbleIdは中央カテゴリ内でユーザーの入力意見に対応するバブルのIDにする\n- 中央カテゴリの全バブルに、それぞれ異なる下位カテゴリのchildIdを必ず設定する。下位カテゴリは各バブルの詳細・理由・評価を表す\n- 上位カテゴリには中央カテゴリへつながるバブルを1つ以上設定し、上位カテゴリは最低2個、通常5個のバブルを生成する\n- 各グループは通常5個のバブルを生成する。検索で裏付けられる候補が少ない場合は1〜10個を許容し、10個を超えるバブルは絶対に出力しない。下位カテゴリは通常3〜5個にする\n- バブル群のtypeは「分散型」「一極集中型」「多極型」のいずれか\n- sizeは検索ソースの言及量・傾向に基づく相対的な推定値で、グループ内合計を100に正規化する\n- 意見が近いバブルは近いpos、対立するバブルは離れたposにする。バブル同士が重ならないようにposを十分に離す\n- overview/history/demographic/evaluationには要約、インサイト、グラフ用metricsを含める\n- 各バブルのdesc、各分析のsummaryとinsightは短文にする。各分析のmetricsは最大3件、各バブルのsourcesは最大3件、各sourceのclaimsは最大2件にする\n- sizeと解析データが推定である場合はisEstimated=trueにする\n- 使用した公開ソースのURLと、そのソースが裏付ける内容をsourcesに含める\n- JSON Schema以外の文章は出力しない`;
-            const compactInstruction = '\n- 出力を安定させるため、desc・summary・insightは各120文字以内、各metricsは最大3件、各sourcesは最大2件、各claimsは最大2件にしてください。JSON以外は出力しないでください。' + (options.compact ? '\n- 再試行では候補名と要約をさらに短くしてください。' : '');
-            const requestPrompt = `${prompt}${compactInstruction}`;
+            const compactInstruction = '\n- 出力を安定させるため、desc・summary・insightは各120文字以内、各metricsは最大3件、各sourcesは最大2件、各claimsは最大2件にしてください。JSON以外は出力しないでください。' + '\n- 親カテゴリは入力テーマを含む最も広い領域の代表的な選択肢、中央カテゴリは入力意見が属する同一テーマ内の代表的な選択肢、子カテゴリは中央カテゴリ各バブルをさらに具体化した下位の選択肢として作成してください。親・中央・子で抽象度を混在させず、同じ名称や同じ意味のバブルを別階層へ重複させないでください。' + '\n- バブル名に「特徴」「評価」「支持する理由」「理由」「見た目」「歴史」などの分析項目を使わないでください。これらはanalysisのsummary・insight・metricsへ入れ、バブルには実在する選択肢・派閥・方式・製品・作品などを置いてください。' + '\n- 入力意見に応じてカテゴリ軸を自動で選び、固定の題材・固定のカテゴリ名・特定テーマの例を他の入力へ流用しないでください。親から中央、中央から子へ意味的に包含される関係を必ず満たしてください。' + '\n- entryGroupIdに関係なく、親カテゴリの全バブル、親が指す全中央カテゴリの全バブル、さらにその全子カテゴリを生成し、入力意見バブルだけを特別扱いしないでください。すべてのバブルに固有のchildIdを付与してください。' + '\n- 各グループは可能なら7個のバブルを生成し、根拠がない場合や分類上不可能な場合のみ2〜6個へ減らしてください。最大10個を超えてはいけません。' + (options.compact ? '\n- 再試行では候補名と要約をさらに短くしてください。' : '');
+            const requestPrompt = `${prompt}${compactInstruction}`.replace(/例えば「きのこの山が好き」なら、中央カテゴリは[^\n]*/, '');
             return {
                 model: OPENAI_MODEL, store: false, max_output_tokens: 24000, tool_choice: 'required',
                 tools: [{ type: 'web_search', search_context_size: 'low', user_location: { type: 'approximate', country: 'JP', timezone: 'Asia/Tokyo' } }],
                 input: [
-                    { role: 'system', content: [{ type: 'input_text', text: 'あなたはBubbleBreakerの情報分析エンジンです。Web Searchを使って公開情報を調査し、出典と推定の区別を保った構造化データを返してください。上位カテゴリは入力意見より1段抽象度を上げてください。例えば「卓球が好き」なら上位カテゴリは「ラケットスポーツ」、中央カテゴリは「卓球・テニス・バドミントン」などです。' }] },
+                    { role: 'system', content: [{ type: 'input_text', text: 'あなたはBubbleBreakerの情報分析エンジンです。Web Searchを使って公開情報を調査し、出典と推定の区別を保った構造化データを返してください。入力ごとに最適な分類軸を自律的に選び、親・中央・子の各階層が意味的に包含されるようにしてください。特定テーマの固定例やカテゴリ名を他の入力へ流用してはいけません。' }] },
                     { role: 'user', content: [{ type: 'input_text', text: requestPrompt }] }
                 ],
                 text: { format: { type: 'json_schema', name: 'bubble_universe', strict: true, schema: OPENAI_RESPONSE_SCHEMA } }
@@ -859,7 +895,8 @@
             let lastError = null;
             for (let attempt = 0; attempt < OPENAI_MAX_ATTEMPTS; attempt++) {
                 const attemptStartedAt = performance.now();
-                const compactOutput = attempt > 0 && lastError && ['API_TIMEOUT', 'API_NETWORK_ERROR', 'API_INCOMPLETE_OUTPUT', 'API_JSON_PARSE_ERROR', 'API_INVALID_BUBBLE_COUNT', 'API_INVALID_UNIVERSE'].includes(lastError.code);
+                // 初回から短いStructured Outputを要求し、巨大なJSONによる初回タイムアウトを防ぐ。
+                const compactOutput = true;
                 apiLog('APIリクエスト開始', { attempt: attempt + 1, maxAttempts: OPENAI_MAX_ATTEMPTS, timeoutMs: OPENAI_REQUEST_TIMEOUT_MS, model: OPENAI_MODEL, inputLength: input.length, compactOutput });
                 try {
                     const response = await fetchWithTimeout('https://api.openai.com/v1/responses', {
@@ -938,6 +975,8 @@
             groupData: null,       // バブル群の詳細データオブジェクト
             bubbleData: null       // 個別バブルの詳細データオブジェクト
         };
+        let focusEntryGroupId = null;
+        let focusEntryBubbleId = null;
         
         let isDiving = false;          // ワープアニメーション中かどうかの判定フラグ
         let diveStartTime = 0;         // ワープ開始時の時間（アニメーションの進行度計算用）
@@ -945,12 +984,25 @@
         let isZoomingIntoGroup = false;// ワープ終了後、遠距離から目的のバブル群にズームインする演出中かどうかのフラグ
 
         let soundEnabled = localStorage.getItem('bubblebreaker.sound') !== 'off';
+        let audioVolume = Number(localStorage.getItem('bubblebreaker.volume') || 0.45);
+        let bgmEnabled = localStorage.getItem('bubblebreaker.bgm') !== 'off';
+        let bgmType = localStorage.getItem('bubblebreaker.bgmType') || '宇宙遊泳.mp3';
+        let bgmAutoNext = localStorage.getItem('bubblebreaker.bgmAutoNext') === 'on';
+        let bgmTransition = localStorage.getItem('bubblebreaker.bgmTransition') || 'persist';
         let audioContext = null;
+        let bgmAudio = null;
+        const bgmTracks = ['宇宙遊泳.mp3', '星間宇宙.mp3', 'エッジワース・カイパーベルト.mp3', 'Far_away_from_the_Earth.mp3'];
+        let bgmTrackIndex = 0;
+        let zoomSound = null;
+        function ensureAudioContext() {
+            audioContext = audioContext || new (window.AudioContext || window.webkitAudioContext)();
+            if (audioContext.state === 'suspended') audioContext.resume();
+            return audioContext;
+        }
         function playSound(kind = 'click') {
             if (!soundEnabled) return;
             try {
-                audioContext = audioContext || new (window.AudioContext || window.webkitAudioContext)();
-                if (audioContext.state === 'suspended') audioContext.resume();
+                ensureAudioContext();
                 const oscillator = audioContext.createOscillator();
                 const gain = audioContext.createGain();
                 const now = audioContext.currentTime;
@@ -960,12 +1012,61 @@
                 oscillator.frequency.setValueAtTime(frequency, now);
                 oscillator.frequency.exponentialRampToValueAtTime(Math.max(40, frequency * (kind === 'zoom' ? 2.2 : 0.72)), now + duration);
                 gain.gain.setValueAtTime(0.0001, now);
-                gain.gain.exponentialRampToValueAtTime(0.045, now + 0.012);
+                gain.gain.exponentialRampToValueAtTime(0.045 * audioVolume, now + 0.012);
                 gain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
                 oscillator.connect(gain).connect(audioContext.destination);
                 oscillator.start(now);
                 oscillator.stop(now + duration + 0.02);
             } catch (_) { /* Audio API非対応環境では無音で継続 */ }
+        }
+        function startZoomSound(kind = 'zoom') {
+            if (!soundEnabled || zoomSound) return;
+            try {
+                ensureAudioContext();
+                const blackHoleOscillator = audioContext.createOscillator();
+                const blackHoleGain = audioContext.createGain();
+                blackHoleOscillator.type = 'sine';
+                blackHoleOscillator.frequency.setValueAtTime(28, audioContext.currentTime);
+                blackHoleGain.gain.setValueAtTime(0.0001, audioContext.currentTime);
+                blackHoleOscillator.connect(blackHoleGain).connect(audioContext.destination);
+                blackHoleOscillator.start();
+                zoomSound = { blackHoleOscillator, blackHoleGain, startedAt: performance.now(), kind };
+            } catch (_) { zoomSound = null; }
+        }
+        function updateZoomSound(intensity = 0.5) {
+            if (!zoomSound || !audioContext) return;
+            const now = audioContext.currentTime;
+            const value = Math.min(1, Math.max(0.05, intensity));
+            zoomSound.blackHoleOscillator.frequency.setTargetAtTime(28 + value * 120, now, 0.12);
+            zoomSound.blackHoleGain.gain.setTargetAtTime((0.006 + value * value * 0.11) * audioVolume, now, 0.12);
+        }
+        function stopZoomSound() {
+            if (!zoomSound || !audioContext) return;
+            const current = zoomSound;
+            zoomSound = null;
+            const now = audioContext.currentTime;
+            current.blackHoleGain.gain.cancelScheduledValues(now);
+            current.blackHoleGain.gain.setTargetAtTime(0.0001, now, 0.12);
+            try { current.blackHoleOscillator.stop(now + 0.3); } catch (_) { }
+        }
+        function stopBackgroundMusic() {
+            if (!bgmAudio) return;
+            bgmAudio.pause();
+            bgmAudio.currentTime = 0;
+        }
+        function startBackgroundMusic() {
+            if (!bgmEnabled) return;
+            try {
+                bgmAudio = bgmAudio || document.getElementById('bgm-audio');
+                const typeIndex = Math.max(0, bgmTracks.indexOf(bgmType));
+                if (bgmTrackIndex === 0 && typeIndex !== 0) bgmTrackIndex = typeIndex;
+                const selected = `BGM/${bgmTracks[bgmTrackIndex % bgmTracks.length]}`;
+                const selectedUrl = new URL(selected, document.baseURI).href;
+                if (bgmAudio.src !== selectedUrl) bgmAudio.src = selectedUrl;
+                bgmAudio.volume = Math.max(0, Math.min(1, audioVolume * 0.55));
+                bgmAudio.loop = !bgmAutoNext;
+                bgmAudio.play().catch(() => { /* ブラウザの自動再生制限は次の操作で再試行 */ });
+            } catch (_) { bgmAudio = null; }
         }
 
         // 画面左上に一時的なメッセージ（トースト通知）を表示する関数
@@ -980,7 +1081,7 @@
         // HTML側のUI表示を切り替える関数
         // .screen-active クラスを付け外しすることで、フェードイン・フェードアウトを実現
         function switchScreen(screenName) {
-            playSound('ui');
+            if (screenName !== 'GROUP' && screenName !== 'SINGLE') playSound('ui');
             document.querySelectorAll('.screen-container').forEach(el => {
                 el.classList.remove('screen-active');
                 el.classList.add('screen-hidden');
@@ -999,7 +1100,7 @@
         const scene = new THREE.Scene();
         // 宇宙空間の奥が徐々に暗くなるフォグ（霧）効果を設定
         scene.background = new THREE.Color(0x050510);
-        scene.fog = new THREE.FogExp2(0x050510, 0.0012);
+        scene.fog = new THREE.FogExp2(0x050510, 0.00045);
 
         // カメラ（視点）の設定
         const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 10000);
@@ -1041,14 +1142,14 @@
 
         // 星の数と位置・色を定義
         const starsGeometry = new THREE.BufferGeometry();
-        const starsCount = 30000; // 星の数。圧倒的なダイブ感を出すために30,000個に設定
+        const starsCount = 50000;
         const posArray = new Float32Array(starsCount * 3);
         const colorsArray = new Float32Array(starsCount * 3);
 
         for(let i=0; i<starsCount * 3; i+=3) {
             // 星はカメラの全周を包む球殻に固定する。背後を向いても空白にならず、
             // 銀河・バブルと同じワールド空間を共有する。
-            const radius = 900 + Math.random() * 1100;
+            const radius = 300 + Math.random() * 1500;
             const theta = Math.random() * Math.PI * 2;
             const phi = Math.acos(2 * Math.random() - 1);
             posArray[i] = radius * Math.sin(phi) * Math.cos(theta);
@@ -1067,10 +1168,10 @@
 
         // 星の質感（マテリアル）の設定
         const starsMaterial = new THREE.PointsMaterial({
-            size: 3.2,
+            size: 4.5,
             vertexColors: true,
             transparent: true,
-            opacity: 0.3,
+            opacity: 0.52,
             map: createCircleTexture(),
             alphaTest: 0.1,
             blending: THREE.AdditiveBlending // 重なった時に光って見える合成方法
@@ -1081,10 +1182,10 @@
         const galaxyClusters = [];
         const loadingBlackHoles = [];
         const galaxyClusterCenters = [
-            new THREE.Vector3(0, 0, -1800), new THREE.Vector3(1600, 700, -1400),
-            new THREE.Vector3(-1700, -800, -1200), new THREE.Vector3(1300, -1300, -2100),
-            new THREE.Vector3(-1400, 1350, -1550), new THREE.Vector3(2200, -160, -2500),
-            new THREE.Vector3(-2200, 400, -1900), new THREE.Vector3(300, 1900, -2900)
+            new THREE.Vector3(0, 0, -1260), new THREE.Vector3(1120, 490, -980),
+            new THREE.Vector3(-1190, -560, -840), new THREE.Vector3(910, -910, -1470),
+            new THREE.Vector3(-980, 945, -1085), new THREE.Vector3(1540, -110, -1750),
+            new THREE.Vector3(-1540, 280, -1330), new THREE.Vector3(210, 1330, -2030)
         ];
 
         function createGalaxyCluster(center, seed) {
@@ -1098,8 +1199,8 @@
                 const galaxyRadius = 220 + ((seed * 43 + galaxyIndex * 67) % 95);
                 const tilt = 0.18 + ((seed * 0.37 + galaxyIndex * 0.71) % 1) * 1.1;
                 const spin = ((seed * 1.91 + galaxyIndex * 2.37) % 1) * Math.PI * 2;
-                for (let i = 0; i < 900; i++) {
-                    const u = i / 900;
+                for (let i = 0; i < 1200; i++) {
+                    const u = i / 1200;
                     const radius = shape === 1 ? Math.sqrt(u) * galaxyRadius * 0.72 : Math.sqrt(u) * galaxyRadius;
                     const angle = shape === 2 ? Math.random() * Math.PI * 2 : (shape === 4 ? Math.floor(i / 18) * 0.35 : radius * (shape === 3 ? 0.14 : 0.22) + galaxyAngle + (i % 7) * 0.08);
                     const bar = shape === 3 ? (Math.random() - 0.5) * galaxyRadius * 0.42 * (1 - u) : 0;
@@ -1113,16 +1214,16 @@
                 const geometry = new THREE.BufferGeometry();
                 geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
                 const starColors = [];
-                for (let i = 0; i < 900; i++) {
+                for (let i = 0; i < 1200; i++) {
                     const starColor = new THREE.Color().setHSL((0.04 + seed * 0.071 + galaxyIndex * 0.137 + i * 0.61803398875) % 1, 0.65, 0.58 + (i % 5) * 0.07);
                     starColors.push(starColor.r, starColor.g, starColor.b);
                 }
                 geometry.setAttribute('color', new THREE.Float32BufferAttribute(starColors, 3));
                 const material = new THREE.PointsMaterial({
                     vertexColors: true,
-                    size: 3.8 + galaxyIndex * 0.45,
+                    size: 5.2 + galaxyIndex * 0.55,
                     transparent: true,
-                    opacity: 0.85,
+                    opacity: 0.98,
                     blending: THREE.AdditiveBlending
                 });
                 const galaxy = new THREE.Points(geometry, material);
@@ -1145,15 +1246,30 @@
                 horizon.position.copy(galaxyOffset);
                 cluster.add(horizon);
                 // 恒星系の惑星・小惑星帯を少数の明るい軌道として再現する。
-                for (let systemIndex = 0; systemIndex < 6; systemIndex++) {
-                    const orbit = 42 + systemIndex * 14;
-                    const planet = new THREE.Mesh(
-                        new THREE.SphereGeometry(0.8 + (systemIndex % 3) * 0.24, 12, 12),
-                        new THREE.MeshBasicMaterial({ color: new THREE.Color().setHSL((0.08 + systemIndex * 0.11 + seed * 0.03) % 1, 0.72, 0.72), transparent: true, opacity: 0.9 })
+                for (let systemIndex = 0; systemIndex < 12; systemIndex++) {
+                    const systemDistance = 28 + systemIndex * 26;
+                    const systemAngle = spin + systemIndex * 1.047;
+                    const systemPosition = new THREE.Vector3(
+                        galaxyOffset.x + Math.cos(systemAngle) * systemDistance,
+                        galaxyOffset.y + Math.sin(systemAngle * 1.7) * 8,
+                        galaxyOffset.z + Math.sin(systemAngle) * systemDistance
                     );
-                    const orbitAngle = spin + systemIndex * 1.047;
-                    planet.position.set(galaxyOffset.x + Math.cos(orbitAngle) * orbit, galaxyOffset.y + Math.sin(orbitAngle * 1.7) * 2, galaxyOffset.z + Math.sin(orbitAngle) * orbit);
-                    cluster.add(planet);
+                    const star = new THREE.Mesh(
+                        new THREE.SphereGeometry(6.5 + (systemIndex % 3) * 1.1, 16, 16),
+                        new THREE.MeshBasicMaterial({ color: new THREE.Color().setHSL((0.04 + systemIndex * 0.13 + seed * 0.03) % 1, 0.82, 0.72), transparent: true, opacity: 0.95 })
+                    );
+                    star.position.copy(systemPosition);
+                    cluster.add(star);
+                    for (let planetIndex = 0; planetIndex < 2; planetIndex++) {
+                        const orbit = 10 + planetIndex * 4 + (systemIndex % 3) * 1.2;
+                        const orbitAngle = spin + systemIndex * 1.047 + planetIndex * Math.PI;
+                        const planet = new THREE.Mesh(
+                            new THREE.SphereGeometry(1.0 + ((systemIndex + planetIndex) % 3) * 0.3, 12, 12),
+                            new THREE.MeshBasicMaterial({ color: new THREE.Color().setHSL((0.08 + systemIndex * 0.11 + planetIndex * 0.17 + seed * 0.03) % 1, 0.72, 0.72), transparent: true, opacity: 0.9 })
+                        );
+                        planet.position.set(systemPosition.x + Math.cos(orbitAngle) * orbit, systemPosition.y + Math.sin(orbitAngle * 1.7) * 2, systemPosition.z + Math.sin(orbitAngle) * orbit);
+                        cluster.add(planet);
+                    }
                 }
                 loadingBlackHoles.push(new THREE.Vector3().copy(center).add(galaxyOffset));
             }
@@ -1189,6 +1305,7 @@
         let loadingAnimation = null;
         let pendingUniverse = null;
         let groupZoomOutReady = false;
+        let singleViewDirection = new THREE.Vector3(0, 0, 1);
 
         // バブルの3Dモデル(Mesh)を作る関数
         function createBubbleMesh(size, colorHex, position) {
@@ -1228,12 +1345,26 @@
             if (bubble.label) bubble.label.remove();
         }
 
+        function isFocusPathBubble(group, bubble) {
+            if (!focusEntryGroupId) return false;
+            if (group.id === focusEntryGroupId) return bubble.id === focusEntryBubbleId;
+            let targetGroupId = focusEntryGroupId;
+            while (activeDB[targetGroupId] && activeDB[targetGroupId].parentId !== group.id) {
+                targetGroupId = activeDB[targetGroupId].parentId;
+            }
+            return Boolean(activeDB[targetGroupId] && activeDB[targetGroupId].parentId === group.id && bubble.childId === targetGroupId);
+        }
+
         // 【バブル群画面】 を読み込んで表示する関数
         // isAfterDive: ワープ直後に遠くからズームインしてくる演出を入れるかどうかのフラグ
         window.loadGroup = function(groupId, isAfterDive = false) {
             const data = activeDB[groupId];
             if(!data) return;
-            playSound(isAfterDive ? 'warp' : 'zoom');
+            if (bgmTransition === 'change' && !isAfterDive && bgmEnabled) {
+                bgmTrackIndex = (bgmTrackIndex + 1) % bgmTracks.length;
+                startBackgroundMusic();
+            }
+            stopZoomSound();
             // 連続入力で遷移が重なった場合も、前のincoming/outgoingを必ず破棄する。
             // これにより見えないラベルなしバブルがシーンに残らない。
             if (transitionState) {
@@ -1244,6 +1375,10 @@
             groupZoomOutReady = false;
             const previousGroupId = state.groupId;
             const previousScreen = state.screen;
+            const preservedViewDirection = previousScreen === 'SINGLE'
+                ? singleViewDirection.clone().normalize()
+                : camera.position.clone().sub(controls.target).normalize();
+            if (!Number.isFinite(preservedViewDirection.x) || preservedViewDirection.lengthSq() < 0.01) preservedViewDirection.set(0, 0, 1);
             const previousOffset = groupWorldOffset.clone();
             const previousScale = groupWorldScale;
             let nextOffset = previousOffset.clone();
@@ -1327,7 +1462,10 @@
             }
 
             // UIパネルの情報を更新
-            document.getElementById('group-title').innerText = data.title;
+            const parentAnchor = data.parentId && activeDB[data.parentId]
+                ? activeDB[data.parentId].bubbles.find(bubble => bubble.childId === data.id)
+                : null;
+            document.getElementById('group-title').innerText = parentAnchor ? `${data.title}（親カテゴリ: ${parentAnchor.name}）` : data.title;
             document.getElementById('group-type').innerText = data.type;
             document.getElementById('btn-zoomout-group').style.display = data.parentId ? 'flex' : 'none';
             
@@ -1336,12 +1474,13 @@
             listContainer.innerHTML = '';
             data.bubbles.forEach(bData => {
                 const item = document.createElement('div');
-                item.className = 'flex items-center gap-3 cursor-pointer group';
+                const isFocus = isFocusPathBubble(data, bData);
+                item.className = `flex items-center gap-3 cursor-pointer group ${isFocus ? 'rounded-lg border border-yellow-300/80 bg-yellow-300/20 px-2 py-1 shadow-[0_0_14px_rgba(253,224,71,0.45)]' : ''}`;
                 item.onclick = () => loadSingle(bData);
                 item.innerHTML = `
                     <div class="w-3 h-3 rounded-full shadow-[0_0_8px_${bData.htmlColor}]" style="background-color: ${bData.htmlColor};"></div>
                     <div class="flex-1 text-sm group-hover:text-white truncate">${bData.name}</div>
-                    <div class="text-sm font-bold w-8 text-right">${bData.size}%</div>
+                    <div class="text-sm font-bold w-8 text-right">${bData.size}%</div>${isFocus ? '<span class="text-[10px] text-yellow-200">入力意見</span>' : ''}
                 `;
                 listContainer.appendChild(item);
             });
@@ -1355,10 +1494,12 @@
                 isZoomingIntoGroup = true;
             } else {
                 controls.enabled = transitionType === 'instant';
-                if (transitionType === 'instant') camera.position.copy(nextOffset).add(new THREE.Vector3(0, 0, 25 * nextScale));
-                targetCameraPos.copy(nextOffset).add(new THREE.Vector3(0, 0, 25 * nextScale));
+                const viewingDistance = 25 * nextScale;
+                if (transitionType === 'instant') camera.position.copy(nextOffset).add(preservedViewDirection.clone().multiplyScalar(viewingDistance));
+                targetCameraPos.copy(nextOffset).add(preservedViewDirection.clone().multiplyScalar(viewingDistance));
+                if (transitionType === 'instant') stopZoomSound();
             }
-            // カメラの向き（注視点）を空間の中央にリセット
+            // 個別バブルから戻るときも、正面へリセットせず元の視線方向を維持する。
             controls.target.copy(nextOffset);
             targetControlTarget.copy(nextOffset);
             controls.update();
@@ -1371,7 +1512,6 @@
         // 【個別バブル画面】 を読み込んで表示する関数
         // 特定のバブルにカメラがグーッと寄っていく演出を行います。
         window.loadSingle = function(bubbleData) {
-            playSound('zoom');
             state.bubbleId = bubbleData.id;
             state.bubbleData = bubbleData;
 
@@ -1521,7 +1661,6 @@
         let isGenerating = false;
         document.getElementById('btn-dive').addEventListener('click', async () => {
             if (isDiving || isGenerating) return;
-            playSound('warp');
             const input = document.getElementById('input-opinion').value.trim();
             if (!input) {
                 showToast('意見を入力してください');
@@ -1532,6 +1671,7 @@
             const panel = document.getElementById('input-panel');
             button.disabled = true;
             isGenerating = true;
+            startBackgroundMusic();
 
             // API応答をワープ演出と並行して取得する。API失敗時は既存モックDBへ戻す。
             const universePromise = requestDynamicUniverse(input).then(result => {
@@ -1540,11 +1680,13 @@
                     return result;
                 }
                 showToast('APIキー未設定のため固定データを使用します');
-                return { db: DB, entryGroupId: fallbackEntryGroupId(input) };
+                const entryGroupId = fallbackEntryGroupId(input);
+                return { db: DB, entryGroupId, entryBubbleId: fallbackEntryBubbleId(entryGroupId, input) };
             }).catch(error => {
                 apiError('Dynamic BubbleBreaker data generation failed。固定データを使用します', { status: error.status || null, requestId: error.requestId || null, message: redactApiLog(error.message), body: error.body || null });
                 showToast('検索に失敗したため固定データを使用します');
-                return { db: DB, entryGroupId: fallbackEntryGroupId(input) };
+                const entryGroupId = fallbackEntryGroupId(input);
+                return { db: DB, entryGroupId, entryBubbleId: fallbackEntryBubbleId(entryGroupId, input) };
             });
             universePromise.then(universe => { pendingUniverse = universe; });
 
@@ -1559,6 +1701,8 @@
                 pendingUniverse = null;
                 if (!universe) return;
                 activeDB = universe.db;
+                focusEntryGroupId = universe.entryGroupId;
+                focusEntryBubbleId = universe.entryBubbleId || null;
                 document.getElementById('screen-input').classList.remove('screen-active');
                 document.getElementById('screen-input').classList.add('screen-hidden');
                 camera.fov = 60;
@@ -1593,6 +1737,46 @@
             if (soundEnabled) playSound('ui');
         });
         document.getElementById('btn-sound-toggle').innerText = soundEnabled ? '🔊 効果音ON' : '🔇 効果音OFF';
+        const bgmToggle = document.getElementById('bgm-toggle');
+        const volumeControl = document.getElementById('audio-volume');
+        const bgmTypeControl = document.getElementById('bgm-type');
+        const bgmAutoNextControl = document.getElementById('bgm-auto-next');
+        const bgmTransitionControl = document.getElementById('bgm-transition');
+        bgmToggle.checked = bgmEnabled;
+        volumeControl.value = String(audioVolume);
+        bgmTypeControl.value = bgmType;
+        bgmAutoNextControl.checked = bgmAutoNext;
+        bgmTransitionControl.value = bgmTransition;
+        document.getElementById('bgm-audio').addEventListener('ended', () => {
+            if (!bgmAutoNext) return;
+            bgmTrackIndex = (bgmTrackIndex + 1) % bgmTracks.length;
+            startBackgroundMusic();
+        });
+        bgmToggle.addEventListener('change', () => {
+            bgmEnabled = bgmToggle.checked;
+            localStorage.setItem('bubblebreaker.bgm', bgmEnabled ? 'on' : 'off');
+            if (bgmEnabled) startBackgroundMusic(); else stopBackgroundMusic();
+        });
+        volumeControl.addEventListener('input', () => {
+            audioVolume = Number(volumeControl.value);
+            localStorage.setItem('bubblebreaker.volume', String(audioVolume));
+            if (bgmEnabled) startBackgroundMusic();
+        });
+        bgmTypeControl.addEventListener('change', () => {
+            bgmType = bgmTypeControl.value;
+            bgmTrackIndex = Math.max(0, bgmTracks.indexOf(bgmType));
+            localStorage.setItem('bubblebreaker.bgmType', bgmType);
+            if (bgmEnabled) startBackgroundMusic();
+        });
+        bgmAutoNextControl.addEventListener('change', () => {
+            bgmAutoNext = bgmAutoNextControl.checked;
+            localStorage.setItem('bubblebreaker.bgmAutoNext', bgmAutoNext ? 'on' : 'off');
+            if (bgmEnabled) startBackgroundMusic();
+        });
+        bgmTransitionControl.addEventListener('change', () => {
+            bgmTransition = bgmTransitionControl.value;
+            localStorage.setItem('bubblebreaker.bgmTransition', bgmTransition);
+        });
 
         // --- マウスホイール(トラックパッドのスワイプ)操作によるズーム/階層移動 ---
         let wheelTimeout; // 連続スクロールの過剰反応を防ぐためのタイマー
@@ -1610,7 +1794,6 @@
             
             // 一度スクロール判定したら、1秒間は次の判定を受け付けない（誤作動防止）
             if(wheelTimeout) return; 
-            playSound('click');
             wheelTimeout = setTimeout(() => { wheelTimeout = null; }, 1000);
 
             if (e.deltaY > 0) { 
@@ -1619,20 +1802,8 @@
                 else if (state.screen === 'ANALYSIS') loadSingle(state.bubbleData);
                 else if (state.screen === 'SINGLE') loadGroup(state.groupId);
                 else if (state.screen === 'GROUP' && state.groupData && state.groupData.parentId) {
-                    // まず現在のバブル群全体が見える距離まで後退し、さらに一度操作した時だけ親へ抜ける。
-                    const groupCenter = groupWorldOffset.clone();
-                    const visibleDistance = Math.max(42, 30 * groupWorldScale);
-                    const currentDistance = camera.position.distanceTo(groupCenter);
-                    if (!groupZoomOutReady && currentDistance < visibleDistance) {
-                        const retreat = camera.position.clone().sub(groupCenter).normalize().multiplyScalar(visibleDistance * 1.35);
-                        camera.position.copy(groupCenter).add(retreat);
-                        targetCameraPos.copy(camera.position);
-                        targetControlTarget.copy(groupCenter);
-                        groupZoomOutReady = true;
-                        showToast('バブル群の壁を抜けるには、もう一度ズームアウトしてください');
-                    } else {
-                        loadGroup(state.groupData.parentId);
-                    }
+                    // 操作を保留せず、ズームインと同じ補間速度で親の壁をすり抜ける。
+                    loadGroup(state.groupData.parentId);
                 }
             } else if (e.deltaY < 0) { 
                 // 上スクロール（奥へ押し込む）＝ ズームイン（子階層へ進む）
@@ -1650,8 +1821,9 @@
         function startLoadingAnimation() {
             // ひとつの銀河の中心ブラックホールだけを航路に固定する。
             // 入口・出口を大きく離し、周囲の意見（星）を横切る高速移動を見せる。
-            loadingAnimation = { startedAt: performance.now(), cycleDuration: 11000, onReady: null, lastCycle: -1 };
+            loadingAnimation = { startedAt: performance.now(), segmentStartedAt: performance.now(), segmentDuration: 11000, targetIndex: 0, onReady: null };
             isDiving = true;
+            startZoomSound('warp');
             controls.enabled = false;
             const firstHole = loadingBlackHoles[0] || new THREE.Vector3(0, 0, -90);
             camera.position.copy(firstHole).add(new THREE.Vector3(0, 0, 5000));
@@ -1662,47 +1834,35 @@
 
         function updateLoadingAnimation() {
             if (!loadingAnimation) return;
-            const elapsed = performance.now() - loadingAnimation.startedAt;
-            const cycle = Math.floor(elapsed / loadingAnimation.cycleDuration);
-            const phase = (elapsed % loadingAnimation.cycleDuration) / loadingAnimation.cycleDuration;
-            if (cycle !== loadingAnimation.lastCycle) {
-                loadingAnimation.lastCycle = cycle;
-                playSound('warp');
-            }
-            const holeIndex = cycle % loadingBlackHoles.length;
-            const nextHoleIndex = (cycle + 1) % loadingBlackHoles.length;
-            const blackHole = loadingBlackHoles[holeIndex] || new THREE.Vector3(0, 0, -90);
-            const nextBlackHole = loadingBlackHoles[nextHoleIndex] || blackHole;
-            const clusterCenter = galaxyClusterCenters[Math.floor(holeIndex / 5) % galaxyClusterCenters.length];
+            const elapsed = performance.now() - loadingAnimation.segmentStartedAt;
+            const phase = Math.min(1, elapsed / loadingAnimation.segmentDuration);
+            updateZoomSound(phase);
+            const blackHole = loadingBlackHoles[loadingAnimation.targetIndex] || new THREE.Vector3(0, 0, -90);
             const entrance = blackHole.clone().add(new THREE.Vector3(0, 0, 5000));
             const nearHole = blackHole.clone().add(new THREE.Vector3(0, 0, 2.4));
-            const galaxyView = clusterCenter.clone().add(new THREE.Vector3(0, 0, 720));
-            const nextEntrance = nextBlackHole.clone().add(new THREE.Vector3(0, 0, 5000));
-            if (phase < 0.58) {
+            if (phase < 0.98) {
                 // ブラックホールへ向かう間は視線を固定し、終盤ほど指数加速する。
-                const p = phase / 0.58;
+                const p = phase / 0.98;
                 const accelerated = 1 - Math.pow(1 - p, 3.2);
                 camera.position.lerpVectors(entrance, nearHole, accelerated);
                 targetControlTarget.copy(blackHole);
-            } else if (phase < 0.70) {
-                // 吸い込まれた直後は別ブラックホールへ飛ばず、銀河群全体を見渡す。
-                const p = (phase - 0.58) / 0.12;
-                camera.position.lerpVectors(nearHole, galaxyView, p);
-                targetControlTarget.lerpVectors(blackHole, clusterCenter, p);
             } else {
-                // 銀河群全体から新しいブラックホールの入口へ進み、次サイクルで到達する。
-                const p = (phase - 0.70) / 0.30;
-                const accelerated = Math.pow(p, 2.4);
-                camera.position.lerpVectors(galaxyView, nextEntrance, accelerated);
-                targetControlTarget.lerpVectors(clusterCenter, nextBlackHole, accelerated);
+                // 事象の地平面に触れた瞬間、ブラックホール内部で別銀河群へ切り替える。
+                // 遷移はカットで行い、カメラを後退させるアニメーションは一切行わない。
+                loadingAnimation.targetIndex = (loadingAnimation.targetIndex + 1) % loadingBlackHoles.length;
+                loadingAnimation.segmentStartedAt = performance.now();
+                const nextBlackHole = loadingBlackHoles[loadingAnimation.targetIndex] || blackHole;
+                camera.position.copy(nextBlackHole).add(new THREE.Vector3(0, 0, 5000));
+                targetControlTarget.copy(nextBlackHole);
+                if (pendingUniverse && typeof loadingAnimation.onReady === 'function') {
+                    const onReady = loadingAnimation.onReady;
+                    loadingAnimation = null;
+                    isDiving = false;
+                    onReady();
+                    return;
+                }
             }
             camera.lookAt(targetControlTarget);
-            if (pendingUniverse && phase > 0.94 && typeof loadingAnimation.onReady === 'function') {
-                const onReady = loadingAnimation.onReady;
-                loadingAnimation = null;
-                isDiving = false;
-                onReady();
-            }
         }
 
         function updateGroupTransition() {
@@ -1727,6 +1887,7 @@
             if (progress >= 1) {
                 transitionState.outgoing.forEach(disposeBubble);
                 transitionState = null;
+                stopZoomSound();
                 isZoomingIntoGroup = false;
                 controls.enabled = true;
             }
@@ -1764,6 +1925,7 @@
                 // 遠距離(Z=400)から目標(Z=25)へ、毎フレーム0.02の割合で滑らかに(Lerp)接近させる
                 camera.position.lerp(targetCameraPos, 0.02); 
                 controls.target.lerp(targetControlTarget, 0.02);
+                updateZoomSound(1 - Math.min(1, camera.position.distanceTo(targetCameraPos) / 70));
                 camera.lookAt(controls.target); // 常に目標を睨み続ける
                 
                 // 目的地に十分近づいたら自動ズームイン演出を終了し、手動操作(controls)を解禁する
@@ -1775,11 +1937,20 @@
                 // 【ユーザー操作中（通常時）】
                 // マウスドラッグでの視点移動を滑らかに更新
                 controls.update();
+                if (state.screen === 'SINGLE') {
+                    const direction = camera.position.clone().sub(controls.target).normalize();
+                    if (direction.lengthSq() > 0.01) singleViewDirection.copy(direction);
+                }
             } else {
                 // 【画面遷移のカメラ移動中】(loadSingleなどで指定された位置へ移動)
                 camera.position.lerp(targetCameraPos, 0.05);
                 controls.target.lerp(targetControlTarget, 0.05);
                 camera.lookAt(controls.target);
+                updateZoomSound(1 - Math.min(1, camera.position.distanceTo(targetCameraPos) / 50));
+                if (camera.position.distanceTo(targetCameraPos) < 0.6) {
+                    stopZoomSound();
+                    if (state.screen === 'SINGLE') controls.enabled = true;
+                }
             }
             
             // ダイブ中以外は、背景の星屑宇宙をゆっくり回転させて雄大さを出す
@@ -1832,23 +2003,8 @@
 
             // --- 接近ズームイン判定 (カメラが近づいたら自動遷移) ---
             // 自動ズーム中(isZoomingIntoGroup)は、まだ到着していないのに吸い込まれるのを防ぐために除外
-            if (state.screen === 'GROUP' && controls.enabled && !isDiving && !isZoomingIntoGroup) {
-                let minDistance = Infinity;
-                let closestBubble = null;
-                // 一番近くにあるバブルを探す
-                currentBubbles.forEach(b => {
-                    const dist = camera.position.distanceTo(b.mesh.position);
-                    if (dist < minDistance) {
-                        minDistance = dist;
-                        closestBubble = b;
-                    }
-                });
-                
-                // 一番近いバブルが、そのバブルのサイズに応じた距離(ぶつかるくらい)に接近していたら
-                if (closestBubble && minDistance < closestBubble.mesh.scale.x * 2.5) {
-                    loadSingle(closestBubble.data); // 個別バブル画面へ自動で遷移
-                }
-            }
+            // カテゴリ移動後は自動的に個別バブルへ飛ばさず、バブル群全体を見せる。
+            // 個別画面への遷移はクリックまたは明示的なズーム操作だけで行う。
 
             // 最後に、全ての計算結果をもとに画面を描画（レンダリング）する
             renderer.render(scene, camera);
