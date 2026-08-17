@@ -389,6 +389,37 @@
             }
         };
 
+        // API失敗時も中央カテゴリの全バブルから下位層へ進めるよう、
+        // 固定DBに不足している詳細グループを補完する。
+        function ensureFallbackChildGroups() {
+            Object.values(DB).forEach(group => {
+                if (!group.parentId) return;
+                const parent = DB[group.parentId];
+                if (!parent || parent.parentId !== null) return;
+                group.bubbles.forEach((bubble, index) => {
+                    const existing = bubble.childId && DB[bubble.childId];
+                    if (existing && existing.parentId === group.id) return;
+                    const childId = `${group.id}__detail_${index + 1}`;
+                    const baseColor = Number(bubble.color) || colorFromText(String(bubble.name));
+                    DB[childId] = {
+                        id: childId,
+                        title: `${bubble.name}の詳細`,
+                        type: '分散型',
+                        parentId: group.id,
+                        desc: `${bubble.name}に対する主な評価や理由を細分化したバブル群です。`,
+                        bubbles: [
+                            { id: `${childId}__feature`, name: `${bubble.name}の特徴`, size: 40, color: baseColor, htmlColor: `#${baseColor.toString(16).padStart(6, '0')}`, pos: [-3, 2, 1], childId: null, desc: `${bubble.name}の代表的な特徴。` },
+                            { id: `${childId}__support`, name: `${bubble.name}を支持する理由`, size: 35, color: baseColor ^ 0x222222, htmlColor: `#${(baseColor ^ 0x222222).toString(16).padStart(6, '0')}`, pos: [3, -1, -1], childId: null, desc: `${bubble.name}を選ぶ主な理由。` },
+                            { id: `${childId}__view`, name: `${bubble.name}への評価`, size: 25, color: baseColor ^ 0x444444, htmlColor: `#${(baseColor ^ 0x444444).toString(16).padStart(6, '0')}`, pos: [0, -3, 2], childId: null, desc: `${bubble.name}に対する周辺的な評価。` }
+                        ]
+                    };
+                    bubble.childId = childId;
+                });
+            });
+        }
+
+        ensureFallbackChildGroups();
+
         // APIで生成したDBを画面遷移ロジックから透過的に利用するための参照。
         let activeDB = DB;
 
@@ -648,26 +679,31 @@
             if (!entryGroup || !entryBubble || !parentGroup || parentGroup.parentId !== null) {
                 throw new Error('entryGroupIdは入力意見を含む中間カテゴリである必要があります');
             }
-            if (childGroups.length !== 1 || !entryBubble.childId) {
-                throw new Error('入力意見バブルから下位カテゴリへ接続できません');
+            if (parentGroup.bubbles.length < 2) throw new Error('上位カテゴリのバブルが不足しています');
+            const childIds = entryGroup.bubbles.map(bubble => bubble.childId);
+            if (childIds.some(childId => !childId) || new Set(childIds).size !== entryGroup.bubbles.length) {
+                throw new Error('中央カテゴリの全バブルに固有の下位カテゴリ接続が必要です');
             }
-            const childGroup = childGroups[0];
-            if (entryBubble.childId !== childGroup.id) {
+            if (childGroups.length !== entryGroup.bubbles.length || childGroups.some(group => !childIds.includes(group.id))) {
+                throw new Error('中央カテゴリのバブル数と下位カテゴリ数が一致しません');
+            }
+            if (entryBubble.childId && !childGroups.some(group => group.id === entryBubble.childId)) {
                 throw new Error('entryBubbleIdは下位カテゴリへ接続する入力意見バブルである必要があります');
             }
             if (!parentGroup.bubbles.some(bubble => bubble.childId === entryGroupId)) {
                 throw new Error('親カテゴリから中間カテゴリへの接続がありません');
             }
-            const connectedIds = new Set([parentGroup.id, entryGroup.id, childGroup.id]);
+            const connectedIds = new Set([parentGroup.id, entryGroup.id, ...childGroups.map(group => group.id)]);
             Object.keys(db).forEach(id => { if (!connectedIds.has(id)) delete db[id]; });
             Object.values(db).forEach(group => group.bubbles.forEach(bubble => {
                 if (bubble.childId && !db[bubble.childId]) bubble.childId = null;
             }));
+            childGroups.forEach(group => group.bubbles.forEach(bubble => { bubble.childId = null; }));
             return { db, entryGroupId };
         }
 
         function buildOpenAIRequest(input, options = {}) {
-            const prompt = `ユーザーの意見: ${input}\n\n日本語圏を中心にWeb Searchで関連する公開情報を調査し、BubbleBreaker用のバブル宇宙を生成してください。\n- groupsは必ず連結した3階層だけにする（親カテゴリ・入力意見を含む中間カテゴリ・入力意見バブルの下位カテゴリ）。入力確定後に表示するのはこの中間カテゴリです\n- entryGroupIdは必ず「入力された意見のバブルが含まれるカテゴリ」のID（中間カテゴリ）にする。入力意見の細かな理由・属性・詳細を並べる下位カテゴリをentryGroupIdにしてはいけない。例えば「きのこの山が好き」なら、中間カテゴリは「きのこの山派・たけのこの里派・木こりの切り株派」のような選択肢のカテゴリにし、詳細な好みの分類は下位カテゴリにする\n- entryBubbleIdは中間カテゴリ内でユーザーの入力意見に対応するバブルのIDにする\n- 中間カテゴリのbubblesには、ユーザーの入力意見に対応するバブルを必ず1つ含め、そのバブルのchildIdを下位カテゴリへ設定する\n- 親カテゴリには中間カテゴリへつながるバブルを1つ以上、中間カテゴリには下位カテゴリへつながるバブルを設定する。entryGroupの親はルート（さらに親を持たない）にする\n- 各グループは通常10個のバブルを生成する。検索で裏付けられる候補が少ない場合は1〜10個を許容し、根拠のない項目で水増ししない\n- バブル群のtypeは「分散型」「一極集中型」「多極型」のいずれか\n- sizeは検索ソースの言及量・傾向に基づく相対的な推定値で、グループ内合計を100に正規化する\n- 意見が近いバブルは近いpos、対立するバブルは離れたposにする。バブル同士が重ならないようにposを十分に離す\n- overview/history/demographic/evaluationには要約、インサイト、グラフ用metricsを含める\n- 各バブルのdesc、各分析のsummaryとinsightは短文にする。各分析のmetricsは最大3件、各バブルのsourcesは最大3件、各sourceのclaimsは最大2件にする\n- sizeと解析データが推定である場合はisEstimated=trueにする\n- 使用した公開ソースのURLと、そのソースが裏付ける内容をsourcesに含める\n- JSON Schema以外の文章は出力しない`;
+            const prompt = `ユーザーの意見: ${input}\n\n日本語圏を中心にWeb Searchで関連する公開情報を調査し、BubbleBreaker用のバブル宇宙を生成してください。\n- groupsは必ず「上位カテゴリ → 入力意見を含む中央カテゴリ → 中央カテゴリの各バブルに対応する下位カテゴリ」の3階層にする。入力確定後に表示するのは中央カテゴリです\n- entryGroupIdは必ず「入力された意見のバブルが含まれる中央カテゴリ」のIDにする。入力意見の細かな理由・属性・詳細を並べる下位カテゴリをentryGroupIdにしてはいけない。例えば「きのこの山が好き」なら、中央カテゴリは「きのこの山派・たけのこの里派・木こりの切り株派」のような選択肢のカテゴリにし、詳細な好みの分類は各バブル固有の下位カテゴリにする\n- entryBubbleIdは中央カテゴリ内でユーザーの入力意見に対応するバブルのIDにする\n- 中央カテゴリの全バブルに、それぞれ異なる下位カテゴリのchildIdを必ず設定する。下位カテゴリは各バブルの詳細・理由・評価を表す\n- 上位カテゴリには中央カテゴリへつながるバブルを1つ以上設定し、上位カテゴリは最低2個、通常10個のバブルを生成する\n- 各グループは通常10個のバブルを生成する。検索で裏付けられる候補が少ない場合は1〜10個を許容し、根拠のない項目で水増ししない\n- バブル群のtypeは「分散型」「一極集中型」「多極型」のいずれか\n- sizeは検索ソースの言及量・傾向に基づく相対的な推定値で、グループ内合計を100に正規化する\n- 意見が近いバブルは近いpos、対立するバブルは離れたposにする。バブル同士が重ならないようにposを十分に離す\n- overview/history/demographic/evaluationには要約、インサイト、グラフ用metricsを含める\n- 各バブルのdesc、各分析のsummaryとinsightは短文にする。各分析のmetricsは最大3件、各バブルのsourcesは最大3件、各sourceのclaimsは最大2件にする\n- sizeと解析データが推定である場合はisEstimated=trueにする\n- 使用した公開ソースのURLと、そのソースが裏付ける内容をsourcesに含める\n- JSON Schema以外の文章は出力しない`;
             const compactInstruction = options.compact ? '\n- これは再試行です。必ず簡潔なJSONだけを返し、desc・summary・insightは短文、各metricsは最大3件、各sourcesは最大3件、各claimsは最大2件にしてください。' : '';
             const requestPrompt = `${prompt}${compactInstruction}`;
             return {
@@ -824,13 +860,16 @@
         
         const scene = new THREE.Scene();
         // 宇宙空間の奥が徐々に暗くなるフォグ（霧）効果を設定
-        scene.fog = new THREE.FogExp2(0x050510, 0.02);
+        scene.background = new THREE.Color(0x050510);
+        scene.fog = new THREE.FogExp2(0x050510, 0.0012);
 
         // カメラ（視点）の設定
         const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 10000);
         
         // レンダラー（描画エンジン）の設定
-        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+        renderer.setClearColor(0x050510, 1);
+        renderer.outputEncoding = THREE.sRGBEncoding;
         renderer.setSize(window.innerWidth, window.innerHeight);
         renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)); // 高解像度ディスプレイ対応
         container.appendChild(renderer.domElement);
@@ -841,8 +880,9 @@
         controls.dampingFactor = 0.05;
 
         // 照明の設定
-        scene.add(new THREE.AmbientLight(0xffffff, 0.4)); // 全体を照らす環境光
-        const dirLight = new THREE.DirectionalLight(0xffffff, 0.8); // 陰影をつける平行光源
+        scene.add(new THREE.AmbientLight(0xffffff, 0.7)); // 全体を照らす環境光
+        scene.add(new THREE.HemisphereLight(0x8fa8ff, 0x0b0820, 0.7)); // 宇宙色の上空光と反射光
+        const dirLight = new THREE.DirectionalLight(0xffffff, 1.0); // 陰影をつける平行光源
         dirLight.position.set(10, 20, 10);
         scene.add(dirLight);
         
@@ -869,7 +909,7 @@
             // 星の座標(X, Y, Z)をランダムに設定。ワープで奥に進むためZ軸(-10000の奥まで)に細長く配置
             posArray[i] = (Math.random() - 0.5) * 1000;
             posArray[i+1] = (Math.random() - 0.5) * 1000;
-            posArray[i+2] = (Math.random() - 1.0) * 10000;
+            posArray[i+2] = (Math.random() - 1.0) * 2000;
 
             // 星の色(RGB)をHSL色空間を使って青〜紫〜白のランダムに設定
             const color = new THREE.Color();
@@ -903,8 +943,9 @@
         function createBubbleMesh(size, colorHex, position) {
             // ガラスのような質感を出すための物理ベースマテリアル設定
             const material = new THREE.MeshPhysicalMaterial({
-                color: colorHex, metalness: 0.1, roughness: 0.1, transmission: 0.8,
-                transparent: true, opacity: 0.9, ior: 1.5, clearcoat: 1.0, clearcoatRoughness: 0.1
+                color: colorHex, metalness: 0.1, roughness: 0.1, transmission: 0.35,
+                transparent: true, opacity: 0.95, ior: 1.5, clearcoat: 1.0, clearcoatRoughness: 0.1,
+                emissive: colorHex, emissiveIntensity: 0.08
             });
             const mesh = new THREE.Mesh(new THREE.SphereGeometry(1, 64, 64), material);
             const radius = Math.pow(size, 0.45); // サイズ値から半径を計算（極端に大きくなりすぎないように調整）
