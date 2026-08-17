@@ -426,7 +426,7 @@
         const OPENAI_GROUP_TYPES = ['分散型', '一極集中型', '多極型'];
         const OPENAI_MODEL = window.__OPENAI_MODEL__ || 'gpt-5.6-luna';
         const OPENAI_API_KEY = window.__OPENAI_API_KEY__ || '';
-        const OPENAI_REQUEST_TIMEOUT_MS = 120000;
+        const OPENAI_REQUEST_TIMEOUT_MS = 180000;
         const OPENAI_MAX_ATTEMPTS = 2;
         const OPENAI_LOG_PREFIX = '[BubbleBreaker][OpenAI]';
 
@@ -469,7 +469,7 @@
                 url: { type: 'string' },
                 domain: { type: 'string' },
                 publishedAt: { type: ['string', 'null'] },
-                claims: { type: 'array', items: { type: 'string' } }
+                claims: { type: 'array', items: { type: 'string' }, maxItems: 2 }
             }
         };
         const OPENAI_ANALYSIS_SECTION_SCHEMA = {
@@ -478,7 +478,7 @@
             properties: {
                 summary: { type: 'string' },
                 insight: { type: 'string' },
-                metrics: { type: 'array', items: OPENAI_METRIC_SCHEMA },
+            metrics: { type: 'array', items: OPENAI_METRIC_SCHEMA, maxItems: 3 },
                 isEstimated: { type: 'boolean' }
             }
         };
@@ -507,7 +507,7 @@
                 isEstimated: { type: 'boolean' },
                 confidence: { type: 'number' },
                 analysis: OPENAI_ANALYSIS_SCHEMA,
-                sources: { type: 'array', items: OPENAI_SOURCE_SCHEMA }
+            sources: { type: 'array', items: OPENAI_SOURCE_SCHEMA, maxItems: 2 }
             }
         };
         const OPENAI_GROUP_SCHEMA = {
@@ -519,7 +519,7 @@
                 type: { type: 'string', enum: OPENAI_GROUP_TYPES },
                 parentId: { type: ['string', 'null'] },
                 desc: { type: 'string' },
-                bubbles: { type: 'array', items: OPENAI_BUBBLE_SCHEMA }
+                bubbles: { type: 'array', items: OPENAI_BUBBLE_SCHEMA, maxItems: 5 }
             }
         };
         const OPENAI_RESPONSE_SCHEMA = {
@@ -528,7 +528,7 @@
             properties: {
                 entryGroupId: { type: 'string' },
                 entryBubbleId: { type: 'string' },
-                groups: { type: 'array', items: OPENAI_GROUP_SCHEMA }
+                groups: { type: 'array', items: OPENAI_GROUP_SCHEMA, maxItems: 40 }
             }
         };
 
@@ -809,11 +809,11 @@
 
         function buildOpenAIRequest(input, options = {}) {
             const prompt = `ユーザーの意見: ${input}\n\n日本語圏を中心にWeb Searchで関連する公開情報を調査し、BubbleBreaker用のバブル宇宙を生成してください。\n- groupsは必ず「上位カテゴリ → 入力意見を含む中央カテゴリ → 中央カテゴリの各バブルに対応する下位カテゴリ」の3階層にする。入力確定後に表示するのは中央カテゴリです\n- entryGroupIdは必ず「入力された意見のバブルが含まれる中央カテゴリ」のIDにする。入力意見の細かな理由・属性・詳細を並べる下位カテゴリをentryGroupIdにしてはいけない。例えば「きのこの山が好き」なら、中央カテゴリは「きのこの山派・たけのこの里派・木こりの切り株派」のような選択肢のカテゴリにし、詳細な好みの分類は各バブル固有の下位カテゴリにする\n- entryBubbleIdは中央カテゴリ内でユーザーの入力意見に対応するバブルのIDにする\n- 中央カテゴリの全バブルに、それぞれ異なる下位カテゴリのchildIdを必ず設定する。下位カテゴリは各バブルの詳細・理由・評価を表す\n- 上位カテゴリには中央カテゴリへつながるバブルを1つ以上設定し、上位カテゴリは最低2個、通常5個のバブルを生成する\n- 各グループは通常5個のバブルを生成する。検索で裏付けられる候補が少ない場合は1〜10個を許容し、10個を超えるバブルは絶対に出力しない。下位カテゴリは通常3〜5個にする\n- バブル群のtypeは「分散型」「一極集中型」「多極型」のいずれか\n- sizeは検索ソースの言及量・傾向に基づく相対的な推定値で、グループ内合計を100に正規化する\n- 意見が近いバブルは近いpos、対立するバブルは離れたposにする。バブル同士が重ならないようにposを十分に離す\n- overview/history/demographic/evaluationには要約、インサイト、グラフ用metricsを含める\n- 各バブルのdesc、各分析のsummaryとinsightは短文にする。各分析のmetricsは最大3件、各バブルのsourcesは最大3件、各sourceのclaimsは最大2件にする\n- sizeと解析データが推定である場合はisEstimated=trueにする\n- 使用した公開ソースのURLと、そのソースが裏付ける内容をsourcesに含める\n- JSON Schema以外の文章は出力しない`;
-            const compactInstruction = options.compact ? '\n- これは再試行です。必ず簡潔なJSONだけを返し、desc・summary・insightは短文、各metricsは最大3件、各sourcesは最大3件、各claimsは最大2件にしてください。' : '';
+            const compactInstruction = '\n- 出力を安定させるため、desc・summary・insightは各120文字以内、各metricsは最大3件、各sourcesは最大2件、各claimsは最大2件にしてください。JSON以外は出力しないでください。' + (options.compact ? '\n- 再試行では候補名と要約をさらに短くしてください。' : '');
             const requestPrompt = `${prompt}${compactInstruction}`;
             return {
-                model: OPENAI_MODEL, store: false, max_output_tokens: 32000, tool_choice: 'required',
-                tools: [{ type: 'web_search', search_context_size: 'medium', user_location: { type: 'approximate', country: 'JP', timezone: 'Asia/Tokyo' } }],
+                model: OPENAI_MODEL, store: false, max_output_tokens: 24000, tool_choice: 'required',
+                tools: [{ type: 'web_search', search_context_size: 'low', user_location: { type: 'approximate', country: 'JP', timezone: 'Asia/Tokyo' } }],
                 input: [
                     { role: 'system', content: [{ type: 'input_text', text: 'あなたはBubbleBreakerの情報分析エンジンです。Web Searchを使って公開情報を調査し、出典と推定の区別を保った構造化データを返してください。上位カテゴリは入力意見より1段抽象度を上げてください。例えば「卓球が好き」なら上位カテゴリは「ラケットスポーツ」、中央カテゴリは「卓球・テニス・バドミントン」などです。' }] },
                     { role: 'user', content: [{ type: 'input_text', text: requestPrompt }] }
