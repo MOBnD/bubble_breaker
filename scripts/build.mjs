@@ -31,8 +31,14 @@ try {
     if (error.code !== 'ENOENT') throw error;
 }
 
-const apiKey = env.OPENAI_API_KEY || process.env.OPENAI_API_KEY || '';
-const model = env.OPENAI_MODEL || process.env.OPENAI_MODEL || 'gpt-5.6-luna';
+function usableApiKey(value) {
+    const normalized = String(value || '').trim();
+    return normalized && normalized !== 'your_api_key_here' ? normalized : '';
+}
+
+// プロセス環境変数を優先し、シェルで設定したキーが古い.envに隠れないようにする。
+const apiKey = usableApiKey(process.env.OPENAI_API_KEY) || usableApiKey(env.OPENAI_API_KEY);
+const model = String(process.env.OPENAI_MODEL || env.OPENAI_MODEL || 'gpt-5.6-luna').trim() || 'gpt-5.6-luna';
 const source = await readFile(sourcePath, 'utf8');
 const output = source
     .replace('window.__OPENAI_API_KEY__ = "__OPENAI_API_KEY__";', `window.__OPENAI_API_KEY__ = ${JSON.stringify(apiKey)};`)
