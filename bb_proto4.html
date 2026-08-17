@@ -76,6 +76,7 @@
     <div id="labels-container"></div>
 
     <div id="ui-layer">
+        <button id="btn-sound-toggle" class="absolute top-6 right-6 z-[80] glass-panel px-3 py-2 rounded-lg text-xs text-white pointer-events-auto cursor-pointer" type="button">🔊 効果音ON</button>
         
         <!-- ヘッダー -->
         <div class="absolute top-6 left-6 flex flex-col gap-1 z-50 pointer-events-none">
@@ -943,6 +944,30 @@
         let diveVelocity = 0;          // ワープの進行速度
         let isZoomingIntoGroup = false;// ワープ終了後、遠距離から目的のバブル群にズームインする演出中かどうかのフラグ
 
+        let soundEnabled = localStorage.getItem('bubblebreaker.sound') !== 'off';
+        let audioContext = null;
+        function playSound(kind = 'click') {
+            if (!soundEnabled) return;
+            try {
+                audioContext = audioContext || new (window.AudioContext || window.webkitAudioContext)();
+                if (audioContext.state === 'suspended') audioContext.resume();
+                const oscillator = audioContext.createOscillator();
+                const gain = audioContext.createGain();
+                const now = audioContext.currentTime;
+                const presets = { click: [520, 0.06], ui: [740, 0.09], zoom: [180, 0.24], warp: [90, 0.5], error: [120, 0.18] };
+                const [frequency, duration] = presets[kind] || presets.click;
+                oscillator.type = kind === 'warp' ? 'sawtooth' : 'sine';
+                oscillator.frequency.setValueAtTime(frequency, now);
+                oscillator.frequency.exponentialRampToValueAtTime(Math.max(40, frequency * (kind === 'zoom' ? 2.2 : 0.72)), now + duration);
+                gain.gain.setValueAtTime(0.0001, now);
+                gain.gain.exponentialRampToValueAtTime(0.045, now + 0.012);
+                gain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
+                oscillator.connect(gain).connect(audioContext.destination);
+                oscillator.start(now);
+                oscillator.stop(now + duration + 0.02);
+            } catch (_) { /* Audio API非対応環境では無音で継続 */ }
+        }
+
         // 画面左上に一時的なメッセージ（トースト通知）を表示する関数
         function showToast(msg) {
             const toast = document.getElementById('toast');
@@ -955,6 +980,7 @@
         // HTML側のUI表示を切り替える関数
         // .screen-active クラスを付け外しすることで、フェードイン・フェードアウトを実現
         function switchScreen(screenName) {
+            playSound('ui');
             document.querySelectorAll('.screen-container').forEach(el => {
                 el.classList.remove('screen-active');
                 el.classList.add('screen-hidden');
@@ -1022,7 +1048,7 @@
         for(let i=0; i<starsCount * 3; i+=3) {
             // 星はカメラの全周を包む球殻に固定する。背後を向いても空白にならず、
             // 銀河・バブルと同じワールド空間を共有する。
-            const radius = 450 + Math.random() * 550;
+            const radius = 900 + Math.random() * 1100;
             const theta = Math.random() * Math.PI * 2;
             const phi = Math.acos(2 * Math.random() - 1);
             posArray[i] = radius * Math.sin(phi) * Math.cos(theta);
@@ -1041,10 +1067,10 @@
 
         // 星の質感（マテリアル）の設定
         const starsMaterial = new THREE.PointsMaterial({
-            size: 6.0, // 星の大きさ（サイズを大きくしてダイブ感を演出）
+            size: 3.2,
             vertexColors: true,
             transparent: true,
-            opacity: 0.8,
+            opacity: 0.3,
             map: createCircleTexture(),
             alphaTest: 0.1,
             blending: THREE.AdditiveBlending // 重なった時に光って見える合成方法
@@ -1055,10 +1081,10 @@
         const galaxyClusters = [];
         const loadingBlackHoles = [];
         const galaxyClusterCenters = [
-            new THREE.Vector3(0, 0, -820), new THREE.Vector3(720, 320, -620),
-            new THREE.Vector3(-760, -360, -540), new THREE.Vector3(560, -580, -920),
-            new THREE.Vector3(-620, 610, -700), new THREE.Vector3(980, -90, -1120),
-            new THREE.Vector3(-980, 180, -860), new THREE.Vector3(160, 820, -1280)
+            new THREE.Vector3(0, 0, -1800), new THREE.Vector3(1600, 700, -1400),
+            new THREE.Vector3(-1700, -800, -1200), new THREE.Vector3(1300, -1300, -2100),
+            new THREE.Vector3(-1400, 1350, -1550), new THREE.Vector3(2200, -160, -2500),
+            new THREE.Vector3(-2200, 400, -1900), new THREE.Vector3(300, 1900, -2900)
         ];
 
         function createGalaxyCluster(center, seed) {
@@ -1067,7 +1093,7 @@
             for (let galaxyIndex = 0; galaxyIndex < 5; galaxyIndex++) {
                 const positions = [];
                 const galaxyAngle = galaxyIndex * Math.PI * 0.5 + seed * 0.13;
-                const galaxyOffset = new THREE.Vector3(Math.cos(galaxyAngle) * (82 + galaxyIndex * 9), Math.sin(galaxyAngle * 1.7) * (36 + seed * 4), Math.sin(galaxyAngle) * (82 + galaxyIndex * 9));
+                const galaxyOffset = new THREE.Vector3(Math.cos(galaxyAngle) * (700 + galaxyIndex * 100), Math.sin(galaxyAngle * 1.7) * (180 + seed * 22), Math.sin(galaxyAngle) * (700 + galaxyIndex * 100));
                 const shape = (seed + galaxyIndex) % 6; // spiral / elliptical / globular / barred / ring / irregular
                 const galaxyRadius = 220 + ((seed * 43 + galaxyIndex * 67) % 95);
                 const tilt = 0.18 + ((seed * 0.37 + galaxyIndex * 0.71) % 1) * 1.1;
@@ -1207,6 +1233,7 @@
         window.loadGroup = function(groupId, isAfterDive = false) {
             const data = activeDB[groupId];
             if(!data) return;
+            playSound(isAfterDive ? 'warp' : 'zoom');
             // 連続入力で遷移が重なった場合も、前のincoming/outgoingを必ず破棄する。
             // これにより見えないラベルなしバブルがシーンに残らない。
             if (transitionState) {
@@ -1344,6 +1371,7 @@
         // 【個別バブル画面】 を読み込んで表示する関数
         // 特定のバブルにカメラがグーッと寄っていく演出を行います。
         window.loadSingle = function(bubbleData) {
+            playSound('zoom');
             state.bubbleId = bubbleData.id;
             state.bubbleData = bubbleData;
 
@@ -1493,6 +1521,7 @@
         let isGenerating = false;
         document.getElementById('btn-dive').addEventListener('click', async () => {
             if (isDiving || isGenerating) return;
+            playSound('warp');
             const input = document.getElementById('input-opinion').value.trim();
             if (!input) {
                 showToast('意見を入力してください');
@@ -1557,6 +1586,13 @@
         document.getElementById('btn-analyze').addEventListener('click', () => loadAnalysis());
         document.getElementById('analysis-center-title').addEventListener('click', () => loadSingle(state.bubbleData));
         document.getElementById('btn-back-detail').addEventListener('click', () => switchScreen('ANALYSIS'));
+        document.getElementById('btn-sound-toggle').addEventListener('click', () => {
+            soundEnabled = !soundEnabled;
+            localStorage.setItem('bubblebreaker.sound', soundEnabled ? 'on' : 'off');
+            document.getElementById('btn-sound-toggle').innerText = soundEnabled ? '🔊 効果音ON' : '🔇 効果音OFF';
+            if (soundEnabled) playSound('ui');
+        });
+        document.getElementById('btn-sound-toggle').innerText = soundEnabled ? '🔊 効果音ON' : '🔇 効果音OFF';
 
         // --- マウスホイール(トラックパッドのスワイプ)操作によるズーム/階層移動 ---
         let wheelTimeout; // 連続スクロールの過剰反応を防ぐためのタイマー
@@ -1574,6 +1610,7 @@
             
             // 一度スクロール判定したら、1秒間は次の判定を受け付けない（誤作動防止）
             if(wheelTimeout) return; 
+            playSound('click');
             wheelTimeout = setTimeout(() => { wheelTimeout = null; }, 1000);
 
             if (e.deltaY > 0) { 
@@ -1613,7 +1650,7 @@
         function startLoadingAnimation() {
             // ひとつの銀河の中心ブラックホールだけを航路に固定する。
             // 入口・出口を大きく離し、周囲の意見（星）を横切る高速移動を見せる。
-            loadingAnimation = { startedAt: performance.now(), cycleDuration: 9000, onReady: null };
+            loadingAnimation = { startedAt: performance.now(), cycleDuration: 11000, onReady: null, lastCycle: -1 };
             isDiving = true;
             controls.enabled = false;
             const firstHole = loadingBlackHoles[0] || new THREE.Vector3(0, 0, -90);
@@ -1628,6 +1665,10 @@
             const elapsed = performance.now() - loadingAnimation.startedAt;
             const cycle = Math.floor(elapsed / loadingAnimation.cycleDuration);
             const phase = (elapsed % loadingAnimation.cycleDuration) / loadingAnimation.cycleDuration;
+            if (cycle !== loadingAnimation.lastCycle) {
+                loadingAnimation.lastCycle = cycle;
+                playSound('warp');
+            }
             const holeIndex = cycle % loadingBlackHoles.length;
             const nextHoleIndex = (cycle + 1) % loadingBlackHoles.length;
             const blackHole = loadingBlackHoles[holeIndex] || new THREE.Vector3(0, 0, -90);
@@ -1640,7 +1681,7 @@
             if (phase < 0.58) {
                 // ブラックホールへ向かう間は視線を固定し、終盤ほど指数加速する。
                 const p = phase / 0.58;
-                const accelerated = 1 - Math.pow(1 - p, 6);
+                const accelerated = 1 - Math.pow(1 - p, 3.2);
                 camera.position.lerpVectors(entrance, nearHole, accelerated);
                 targetControlTarget.copy(blackHole);
             } else if (phase < 0.70) {
@@ -1668,8 +1709,9 @@
             if (!transitionState) return;
             const progress = Math.min(1, (performance.now() - transitionState.startedAt) / transitionState.duration);
             const eased = progress * progress * (3 - 2 * progress);
-            camera.position.lerp(targetCameraPos, 0.08);
-            controls.target.lerp(targetControlTarget, 0.08);
+            const cameraStep = transitionState.type === 'zoomOut' ? 0.04 : 0.08;
+            camera.position.lerp(targetCameraPos, cameraStep);
+            controls.target.lerp(targetControlTarget, cameraStep);
             camera.lookAt(controls.target);
             transitionState.incoming.forEach(bubble => {
                 const finalScale = bubble.mesh.userData.finalScale || bubble.mesh.scale.x;
