@@ -1055,10 +1055,10 @@
         const galaxyClusters = [];
         const loadingBlackHoles = [];
         const galaxyClusterCenters = [
-            new THREE.Vector3(0, 0, -120), new THREE.Vector3(170, 75, 90),
-            new THREE.Vector3(-190, -95, 140), new THREE.Vector3(120, -155, -285),
-            new THREE.Vector3(-150, 150, 185), new THREE.Vector3(255, -25, -360),
-            new THREE.Vector3(-275, 45, 230), new THREE.Vector3(40, 210, -470)
+            new THREE.Vector3(0, 0, -820), new THREE.Vector3(720, 320, -620),
+            new THREE.Vector3(-760, -360, -540), new THREE.Vector3(560, -580, -920),
+            new THREE.Vector3(-620, 610, -700), new THREE.Vector3(980, -90, -1120),
+            new THREE.Vector3(-980, 180, -860), new THREE.Vector3(160, 820, -1280)
         ];
 
         function createGalaxyCluster(center, seed) {
@@ -1136,13 +1136,16 @@
         }
 
         function updateCosmicDepthVisual(depth) {
-            const hue = (0.58 + (depth % 6) * 0.075) % 1;
+            const variant = (depth * 0.217 + 0.11) % 1;
+            const hue = (0.58 + variant * 0.32) % 1;
             galaxyClusters.forEach((cluster, clusterIndex) => {
                 cluster.scale.setScalar(1 + Math.min(0.65, depth * 0.08));
+                cluster.rotation.set(variant * 0.18 + clusterIndex * 0.03, variant * Math.PI * 2 + clusterIndex * 0.17, variant * 0.11);
                 cluster.traverse(child => {
                     if (!child.material || !child.material.color) return;
                     const lightness = child.material.wireframe ? 0.72 : 0.68;
-                    child.material.color.setHSL((hue + clusterIndex * 0.025) % 1, 0.78, lightness);
+                    child.material.color.setHSL((hue + clusterIndex * 0.041) % 1, 0.72, lightness);
+                    if (child.material.opacity !== undefined) child.material.opacity = child.material.wireframe ? 0.22 + variant * 0.2 : 0.72 + variant * 0.2;
                 });
             });
         }
@@ -1625,27 +1628,32 @@
             const elapsed = performance.now() - loadingAnimation.startedAt;
             const cycle = Math.floor(elapsed / loadingAnimation.cycleDuration);
             const phase = (elapsed % loadingAnimation.cycleDuration) / loadingAnimation.cycleDuration;
-            const blackHole = loadingBlackHoles[cycle % loadingBlackHoles.length] || new THREE.Vector3(0, 0, -90);
-            const nextBlackHole = loadingBlackHoles[(cycle + 1) % loadingBlackHoles.length] || blackHole;
+            const holeIndex = cycle % loadingBlackHoles.length;
+            const nextHoleIndex = (cycle + 1) % loadingBlackHoles.length;
+            const blackHole = loadingBlackHoles[holeIndex] || new THREE.Vector3(0, 0, -90);
+            const nextBlackHole = loadingBlackHoles[nextHoleIndex] || blackHole;
+            const clusterCenter = galaxyClusterCenters[Math.floor(holeIndex / 5) % galaxyClusterCenters.length];
             const entrance = blackHole.clone().add(new THREE.Vector3(0, 0, 5000));
             const nearHole = blackHole.clone().add(new THREE.Vector3(0, 0, 2.4));
-            if (phase < 0.84) {
-                // 1 - (1 - t)^6: 終盤ほど急激に加速し、ブラックホールへ確実に収束する。
-                const p = phase / 0.84;
+            const galaxyView = clusterCenter.clone().add(new THREE.Vector3(0, 0, 720));
+            const nextEntrance = nextBlackHole.clone().add(new THREE.Vector3(0, 0, 5000));
+            if (phase < 0.58) {
+                // ブラックホールへ向かう間は視線を固定し、終盤ほど指数加速する。
+                const p = phase / 0.58;
                 const accelerated = 1 - Math.pow(1 - p, 6);
                 camera.position.lerpVectors(entrance, nearHole, accelerated);
                 targetControlTarget.copy(blackHole);
-            } else if (phase < 0.92) {
-                const p = (phase - 0.84) / 0.08;
-                const accelerated = 1 - Math.pow(1 - p, 4);
-                camera.position.lerpVectors(nearHole, nearHole, accelerated);
-                targetControlTarget.copy(blackHole);
+            } else if (phase < 0.70) {
+                // 吸い込まれた直後は別ブラックホールへ飛ばず、銀河群全体を見渡す。
+                const p = (phase - 0.58) / 0.12;
+                camera.position.lerpVectors(nearHole, galaxyView, p);
+                targetControlTarget.lerpVectors(blackHole, clusterCenter, p);
             } else {
-                const p = (phase - 0.92) / 0.08;
-                // ブラックホール内部から別銀河の中心へ視点だけを連続移送する。
-                // 後退距離を作らないため、プレイヤーにはズームアウトではなく次の宇宙への遷移として見える。
-                camera.position.lerpVectors(nearHole, nextBlackHole.clone().add(new THREE.Vector3(0, 0, 2.4)), p);
-                targetControlTarget.lerpVectors(blackHole, nextBlackHole, p);
+                // 銀河群全体から新しいブラックホールの入口へ進み、次サイクルで到達する。
+                const p = (phase - 0.70) / 0.30;
+                const accelerated = Math.pow(p, 2.4);
+                camera.position.lerpVectors(galaxyView, nextEntrance, accelerated);
+                targetControlTarget.lerpVectors(clusterCenter, nextBlackHole, accelerated);
             }
             camera.lookAt(targetControlTarget);
             if (pendingUniverse && phase > 0.94 && typeof loadingAnimation.onReady === 'function') {
