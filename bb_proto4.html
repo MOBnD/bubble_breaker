@@ -655,6 +655,39 @@
             return { groups, limited };
         }
 
+        function createGeneratedChildGroup(parentGroup, bubble, index) {
+            const childId = `${parentGroup.id}__generated_child_${bubble.id}`;
+            const baseColor = normalizeColor(bubble.color, colorFromText(bubble.name));
+            const makeBubble = (suffix, name, size, color, pos, desc) => ({
+                id: `${childId}__${suffix}`,
+                name,
+                size,
+                color,
+                htmlColor: normalizeHtmlColor(null, color),
+                pos,
+                childId: null,
+                desc,
+                isEstimated: true,
+                confidence: bubble.confidence,
+                analysis: normalizeAnalysis(bubble.analysis),
+                sources: bubble.sources
+            });
+            return {
+                id: childId,
+                title: `${bubble.name}の詳細`,
+                type: '分散型',
+                parentId: parentGroup.id,
+                desc: `${bubble.name}の特徴・理由・評価を分解した下位カテゴリです。`,
+                bubbles: [
+                    makeBubble('feature', `${bubble.name}の特徴`, 40, baseColor, [-3, 2, 1], `${bubble.name}の代表的な特徴。`),
+                    makeBubble('reason', `${bubble.name}を支持する理由`, 35, baseColor ^ 0x222222, [3, -1, -1], `${bubble.name}を選ぶ主な理由。`),
+                    makeBubble('evaluation', `${bubble.name}への評価`, 25, baseColor ^ 0x444444, [0, -3, 2], `${bubble.name}に対する評価。`)
+                ],
+                generatedFromBubble: bubble.id,
+                generatedIndex: index
+            };
+        }
+
         function normalizeGeneratedUniverse(raw) {
             if (!raw || !Array.isArray(raw.groups) || raw.groups.length === 0) throw new Error('API応答にグループがありません');
             const limitedResult = limitGeneratedBubbles(raw.groups, raw);
@@ -709,30 +742,50 @@
             const entryBubble = entryGroup && entryGroup.bubbles.find(bubble => bubble.id === String(raw.entryBubbleId || ''));
             const parentGroup = entryGroup && entryGroup.parentId ? db[entryGroup.parentId] : null;
             const directChildGroups = Object.values(db).filter(group => group.parentId === entryGroupId);
-            const childIds = entryGroup ? entryGroup.bubbles.map(bubble => bubble.childId) : [];
-            const childGroups = directChildGroups.filter(group => childIds.includes(group.id));
             if (!entryGroup || !entryBubble || !parentGroup || parentGroup.parentId !== null) {
                 throw new Error('entryGroupIdは入力意見を含む中間カテゴリである必要があります');
             }
             if (parentGroup.bubbles.length < 2) throw new Error('上位カテゴリのバブルが不足しています');
-            if (childIds.some(childId => !childId) || new Set(childIds).size !== entryGroup.bubbles.length) {
+            const usedChildIds = new Set();
+            let repairedChildLinks = false;
+            const bubblesToLink = [entryBubble, ...entryGroup.bubbles.filter(bubble => bubble.id !== entryBubble.id)];
+            bubblesToLink.forEach((bubble, index) => {
+                const linkedGroup = bubble.childId && db[bubble.childId];
+                if (linkedGroup && linkedGroup.parentId === entryGroupId && !usedChildIds.has(linkedGroup.id)) {
+                    usedChildIds.add(linkedGroup.id);
+                    return;
+                }
+                const reusableGroup = directChildGroups.find(group => !usedChildIds.has(group.id));
+                if (reusableGroup && (bubble.id === entryBubble.id || !entryBubble.childId)) {
+                    bubble.childId = reusableGroup.id;
+                    usedChildIds.add(reusableGroup.id);
+                    repairedChildLinks = true;
+                    return;
+                }
+                const generatedGroup = createGeneratedChildGroup(entryGroup, bubble, index);
+                db[generatedGroup.id] = generatedGroup;
+                bubble.childId = generatedGroup.id;
+                usedChildIds.add(generatedGroup.id);
+                repairedChildLinks = true;
+            });
+            if (repairedChildLinks) apiWarn('中央カテゴリの下位カテゴリ接続を補完しました', { entryGroupId, repairedBubbleCount: entryGroup.bubbles.filter(bubble => bubble.childId && bubble.childId.startsWith(`${entryGroupId}__generated_child_`)).length });
+            const repairedChildIds = entryGroup.bubbles.map(bubble => bubble.childId);
+            const repairedChildGroups = Object.values(db).filter(group => group.parentId === entryGroupId && repairedChildIds.includes(group.id));
+            if (repairedChildIds.some(childId => !childId) || new Set(repairedChildIds).size !== entryGroup.bubbles.length || repairedChildGroups.length !== entryGroup.bubbles.length) {
                 throw new Error('中央カテゴリの全バブルに固有の下位カテゴリ接続が必要です');
             }
-            if (childGroups.length !== entryGroup.bubbles.length) {
-                throw new Error('中央カテゴリのバブル数と下位カテゴリ数が一致しません');
-            }
-            if (entryBubble.childId && !childGroups.some(group => group.id === entryBubble.childId)) {
+            if (!entryBubble.childId || !repairedChildGroups.some(group => group.id === entryBubble.childId)) {
                 throw new Error('entryBubbleIdは下位カテゴリへ接続する入力意見バブルである必要があります');
             }
             if (!parentGroup.bubbles.some(bubble => bubble.childId === entryGroupId)) {
                 throw new Error('親カテゴリから中間カテゴリへの接続がありません');
             }
-            const connectedIds = new Set([parentGroup.id, entryGroup.id, ...childGroups.map(group => group.id)]);
+            const connectedIds = new Set([parentGroup.id, entryGroup.id, ...repairedChildGroups.map(group => group.id)]);
             Object.keys(db).forEach(id => { if (!connectedIds.has(id)) delete db[id]; });
             Object.values(db).forEach(group => group.bubbles.forEach(bubble => {
                 if (bubble.childId && !db[bubble.childId]) bubble.childId = null;
             }));
-            childGroups.forEach(group => group.bubbles.forEach(bubble => { bubble.childId = null; }));
+            repairedChildGroups.forEach(group => group.bubbles.forEach(bubble => { bubble.childId = null; }));
             return { db, entryGroupId };
         }
 
@@ -787,7 +840,7 @@
             let lastError = null;
             for (let attempt = 0; attempt < OPENAI_MAX_ATTEMPTS; attempt++) {
                 const attemptStartedAt = performance.now();
-                const compactOutput = attempt > 0 && lastError && ['API_TIMEOUT', 'API_NETWORK_ERROR', 'API_INCOMPLETE_OUTPUT', 'API_JSON_PARSE_ERROR', 'API_INVALID_BUBBLE_COUNT'].includes(lastError.code);
+                const compactOutput = attempt > 0 && lastError && ['API_TIMEOUT', 'API_NETWORK_ERROR', 'API_INCOMPLETE_OUTPUT', 'API_JSON_PARSE_ERROR', 'API_INVALID_BUBBLE_COUNT', 'API_INVALID_UNIVERSE'].includes(lastError.code);
                 apiLog('APIリクエスト開始', { attempt: attempt + 1, maxAttempts: OPENAI_MAX_ATTEMPTS, timeoutMs: OPENAI_REQUEST_TIMEOUT_MS, model: OPENAI_MODEL, inputLength: input.length, compactOutput });
                 try {
                     const response = await fetchWithTimeout('https://api.openai.com/v1/responses', {
@@ -845,7 +898,7 @@
                     return universe;
                 } catch (error) {
                     lastError = error;
-                    const retryable = error.code === 'API_TIMEOUT' || error.code === 'API_NETWORK_ERROR' || error.code === 'API_INCOMPLETE_OUTPUT' || error.code === 'API_JSON_PARSE_ERROR' || error.code === 'API_INVALID_BUBBLE_COUNT' || error.status === 408 || error.status === 409 || error.status === 429 || error.status >= 500;
+                    const retryable = error.code === 'API_TIMEOUT' || error.code === 'API_NETWORK_ERROR' || error.code === 'API_INCOMPLETE_OUTPUT' || error.code === 'API_JSON_PARSE_ERROR' || error.code === 'API_INVALID_BUBBLE_COUNT' || error.code === 'API_INVALID_UNIVERSE' || error.status === 408 || error.status === 409 || error.status === 429 || error.status >= 500;
                     apiError('APIリクエスト試行に失敗しました', { attempt: attempt + 1, maxAttempts: OPENAI_MAX_ATTEMPTS, code: error.code || null, reason: error.reason || null, status: error.status || null, requestId: error.requestId || null, timeoutMs: error.timeoutMs || null, message: redactApiLog(error.message), body: error.body || null, retryable });
                     if (!retryable || attempt === OPENAI_MAX_ATTEMPTS - 1) break;
                     apiWarn('リトライします', { nextAttempt: attempt + 2, waitMs: 1000 * (attempt + 1) });
