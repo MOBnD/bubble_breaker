@@ -561,6 +561,23 @@
             return /^#[0-9a-f]{6}$/i.test(String(value || '')) ? String(value) : `#${numericColor.toString(16).padStart(6, '0')}`;
         }
 
+        function ensureDistinctBubbleColors(bubbles) {
+            const usedHues = [];
+            bubbles.forEach((bubble, index) => {
+                const color = new THREE.Color(bubble.color);
+                const hsl = {};
+                color.getHSL(hsl);
+                const collides = usedHues.some(hue => Math.abs(hsl.h - hue) < 0.075 || Math.abs(Math.abs(hsl.h - hue) - 1) < 0.075);
+                if (collides) hsl.h = (index * 0.61803398875 + 0.08) % 1;
+                hsl.s = Math.max(0.72, hsl.s);
+                hsl.l = Math.max(0.58, hsl.l);
+                color.setHSL(hsl.h, hsl.s, hsl.l);
+                bubble.color = color.getHex();
+                bubble.htmlColor = `#${bubble.color.toString(16).padStart(6, '0')}`;
+                usedHues.push(hsl.h);
+            });
+        }
+
         function normalizeAnalysis(analysis) {
             const result = {};
             ['overview', 'history', 'demographic', 'evaluation'].forEach(key => {
@@ -615,7 +632,7 @@
                             const angle = (i + j + 1) * 1.618;
                             dx = Math.cos(angle); dy = Math.sin(angle); dz = Math.cos(angle * 0.7); distance = Math.hypot(dx, dy, dz);
                         }
-                        const required = Math.max(3, Math.pow(Math.max(1, a.size), 0.45) + Math.pow(Math.max(1, b.size), 0.45) + 1);
+                        const required = Math.max(3, Math.pow(Math.max(1, a.size), 0.62) + Math.pow(Math.max(1, b.size), 0.62) + 1);
                         if (distance >= required) continue;
                         const push = (required - distance) / distance / 2;
                         a.pos[0] -= dx * push; a.pos[1] -= dy * push; a.pos[2] -= dz * push;
@@ -727,6 +744,7 @@
                         analysis: normalizeAnalysis(bubble.analysis), sources: normalizeSources(bubble.sources)
                     };
                 });
+                ensureDistinctBubbleColors(bubbles);
                 separateBubblePositions(bubbles);
                 db[String(group.id)] = {
                     id: String(group.id), title: String(group.title || group.id), type: group.type,
@@ -797,7 +815,7 @@
                 model: OPENAI_MODEL, store: false, max_output_tokens: 32000, tool_choice: 'required',
                 tools: [{ type: 'web_search', search_context_size: 'medium', user_location: { type: 'approximate', country: 'JP', timezone: 'Asia/Tokyo' } }],
                 input: [
-                    { role: 'system', content: [{ type: 'input_text', text: 'あなたはBubbleBreakerの情報分析エンジンです。Web Searchを使って公開情報を調査し、出典と推定の区別を保った構造化データを返してください。' }] },
+                    { role: 'system', content: [{ type: 'input_text', text: 'あなたはBubbleBreakerの情報分析エンジンです。Web Searchを使って公開情報を調査し、出典と推定の区別を保った構造化データを返してください。上位カテゴリは入力意見より1段抽象度を上げてください。例えば「卓球が好き」なら上位カテゴリは「ラケットスポーツ」、中央カテゴリは「卓球・テニス・バドミントン」などです。' }] },
                     { role: 'user', content: [{ type: 'input_text', text: requestPrompt }] }
                 ],
                 text: { format: { type: 'json_schema', name: 'bubble_universe', strict: true, schema: OPENAI_RESPONSE_SCHEMA } }
@@ -1002,10 +1020,14 @@
         const colorsArray = new Float32Array(starsCount * 3);
 
         for(let i=0; i<starsCount * 3; i+=3) {
-            // 星の座標(X, Y, Z)をランダムに設定。ワープで奥に進むためZ軸(-10000の奥まで)に細長く配置
-            posArray[i] = (Math.random() - 0.5) * 1000;
-            posArray[i+1] = (Math.random() - 0.5) * 1000;
-            posArray[i+2] = (Math.random() - 1.0) * 2000;
+            // 星はカメラの全周を包む球殻に固定する。背後を向いても空白にならず、
+            // 銀河・バブルと同じワールド空間を共有する。
+            const radius = 450 + Math.random() * 550;
+            const theta = Math.random() * Math.PI * 2;
+            const phi = Math.acos(2 * Math.random() - 1);
+            posArray[i] = radius * Math.sin(phi) * Math.cos(theta);
+            posArray[i+1] = radius * Math.cos(phi);
+            posArray[i+2] = radius * Math.sin(phi) * Math.sin(theta);
 
             // 星の色(RGB)をHSL色空間を使って青〜紫〜白のランダムに設定
             const color = new THREE.Color();
@@ -1031,6 +1053,7 @@
         scene.add(starMesh);
 
         const galaxyClusters = [];
+        const loadingBlackHoles = [];
         const galaxyClusterCenters = [
             new THREE.Vector3(0, 0, -90),
             new THREE.Vector3(180, 55, -170),
@@ -1041,16 +1064,16 @@
         function createGalaxyCluster(center, seed) {
             const cluster = new THREE.Group();
             cluster.position.copy(center);
-            for (let galaxyIndex = 0; galaxyIndex < 4; galaxyIndex++) {
+            for (let galaxyIndex = 0; galaxyIndex < 5; galaxyIndex++) {
                 const positions = [];
                 const galaxyAngle = galaxyIndex * Math.PI * 0.5 + seed * 0.13;
-                const galaxyOffset = new THREE.Vector3(Math.cos(galaxyAngle) * 34, Math.sin(galaxyAngle * 1.7) * 20, Math.sin(galaxyAngle) * 34);
-                for (let i = 0; i < 280; i++) {
-                    const radius = Math.sqrt(i / 280) * 28;
+                const galaxyOffset = new THREE.Vector3(Math.cos(galaxyAngle) * 92, Math.sin(galaxyAngle * 1.7) * 48, Math.sin(galaxyAngle) * 92);
+                for (let i = 0; i < 900; i++) {
+                    const radius = Math.sqrt(i / 900) * 88;
                     const angle = radius * 0.22 + galaxyAngle + (i % 7) * 0.08;
                     positions.push(
                         Math.cos(angle) * radius + (Math.random() - 0.5) * 3,
-                        (Math.random() - 0.5) * Math.max(1, radius * 0.18),
+                        (Math.random() - 0.5) * Math.max(2, radius * 0.12),
                         Math.sin(angle) * radius + (Math.random() - 0.5) * 3
                     );
                 }
@@ -1058,7 +1081,7 @@
                 geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
                 const material = new THREE.PointsMaterial({
                     color: new THREE.Color().setHSL(0.58 + galaxyIndex * 0.06, 0.75, 0.68),
-                    size: 1.8,
+                    size: 2.2,
                     transparent: true,
                     opacity: 0.85,
                     blending: THREE.AdditiveBlending
@@ -1068,18 +1091,19 @@
                 cluster.add(galaxy);
 
                 const blackHole = new THREE.Mesh(
-                    new THREE.SphereGeometry(5.5, 32, 32),
+                    new THREE.SphereGeometry(1.8, 32, 32),
                     new THREE.MeshBasicMaterial({ color: 0x020106 })
                 );
                 blackHole.position.copy(galaxyOffset);
                 cluster.add(blackHole);
                 const disk = new THREE.Mesh(
-                    new THREE.TorusGeometry(8, 0.9, 12, 64),
+                    new THREE.TorusGeometry(6.5, 1.1, 16, 96),
                     new THREE.MeshBasicMaterial({ color: 0xff7b38, transparent: true, opacity: 0.8, blending: THREE.AdditiveBlending })
                 );
                 disk.rotation.x = Math.PI * 0.5;
                 disk.position.copy(galaxyOffset);
                 cluster.add(disk);
+                loadingBlackHoles.push(new THREE.Vector3().copy(center).add(galaxyOffset));
             }
             scene.add(cluster);
             galaxyClusters.push(cluster);
@@ -1088,10 +1112,10 @@
         function updateCosmicDepthVisual(depth) {
             const hue = (0.58 + (depth % 6) * 0.075) % 1;
             galaxyClusters.forEach((cluster, clusterIndex) => {
-                cluster.scale.setScalar(1 + Math.min(0.45, depth * 0.06));
+                cluster.scale.setScalar(1 + Math.min(0.65, depth * 0.08));
                 cluster.children.forEach(child => {
                     if (!child.material || !child.material.color) return;
-                    const lightness = child.geometry && child.geometry.type === 'TorusGeometry' ? 0.58 : 0.62;
+                    const lightness = child.geometry && child.geometry.type === 'TorusGeometry' ? 0.64 : 0.68;
                     child.material.color.setHSL((hue + clusterIndex * 0.025) % 1, 0.78, lightness);
                 });
             });
@@ -1123,7 +1147,8 @@
                 emissive: displayColor, emissiveIntensity: 0.22
             });
             const mesh = new THREE.Mesh(new THREE.SphereGeometry(1, 64, 64), material);
-            const radius = Math.pow(size, 0.45); // サイズ値から半径を計算（極端に大きくなりすぎないように調整）
+            // 占有率の差を視覚的に誇張する。sizeはグループ内で100に正規化済み。
+            const radius = Math.max(1.15, Math.pow(Math.max(1, size), 0.62));
             mesh.scale.set(radius, radius, radius);
             mesh.position.set(...position);
             return mesh;
@@ -1201,6 +1226,7 @@
 
             // 新しいバブル群を生成して配置
             // 固定DBとAPIデータのどちらでも、球体の半径を考慮して重なりを解消する。
+            ensureDistinctBubbleColors(data.bubbles);
             separateBubblePositions(data.bubbles);
             data.bubbles.forEach(bData => {
                 const worldPosition = new THREE.Vector3(...bData.pos).multiplyScalar(nextScale).add(nextOffset);
@@ -1232,7 +1258,7 @@
             if (transitionType === 'instant') {
                 outgoingBubbles.forEach(disposeBubble);
             } else {
-                transitionState = { outgoing: outgoingBubbles, incoming: currentBubbles, startedAt: performance.now(), duration: transitionType === 'dive' ? 1800 : 1100, type: transitionType };
+                transitionState = { outgoing: outgoingBubbles, incoming: currentBubbles, startedAt: performance.now(), duration: transitionType === 'dive' ? 1800 : 1350, type: transitionType };
             }
 
             // UIパネルの情報を更新
@@ -1534,13 +1560,16 @@
         const clock = new THREE.Clock(); // 経過時間を計るためのクラス
 
         function startLoadingAnimation() {
-            loadingAnimation = { startedAt: performance.now(), cycleDuration: 5600, onReady: null };
+            // ひとつの銀河の中心ブラックホールだけを航路に固定する。
+            // 入口・出口を大きく離し、周囲の意見（星）を横切る高速移動を見せる。
+            loadingAnimation = { startedAt: performance.now(), cycleDuration: 6400, onReady: null };
             isDiving = true;
             controls.enabled = false;
-            camera.position.set(0, 0, 25);
-            targetControlTarget.set(0, 0, -90);
+            const firstHole = loadingBlackHoles[0] || new THREE.Vector3(0, 0, -90);
+            camera.position.copy(firstHole).add(new THREE.Vector3(0, 0, 1800));
+            targetControlTarget.copy(firstHole);
             camera.lookAt(targetControlTarget);
-            galaxyClusters.forEach((cluster, index) => { cluster.visible = index < 3; });
+            galaxyClusters.forEach(cluster => { cluster.visible = true; });
         }
 
         function updateLoadingAnimation() {
@@ -1548,31 +1577,28 @@
             const elapsed = performance.now() - loadingAnimation.startedAt;
             const cycle = Math.floor(elapsed / loadingAnimation.cycleDuration);
             const phase = (elapsed % loadingAnimation.cycleDuration) / loadingAnimation.cycleDuration;
-            const from = galaxyClusterCenters[cycle % galaxyClusterCenters.length];
-            const to = galaxyClusterCenters[(cycle + 1) % galaxyClusterCenters.length];
-            const blackHole = from.clone().add(new THREE.Vector3(34, 0, 0));
-            const entrance = from.clone().add(new THREE.Vector3(0, 0, 95));
-            const exit = blackHole.clone().add(new THREE.Vector3(0, 0, -32));
-            if (phase < 0.36) {
-                const p = phase / 0.36;
-                camera.position.lerpVectors(entrance, blackHole.clone().add(new THREE.Vector3(0, 0, 18)), p);
-                targetControlTarget.lerpVectors(from, blackHole, p);
-            } else if (phase < 0.62) {
-                const p = (phase - 0.36) / 0.26;
-                camera.position.lerpVectors(blackHole.clone().add(new THREE.Vector3(0, 0, 18)), exit, p);
+            const blackHole = loadingBlackHoles[cycle % loadingBlackHoles.length] || new THREE.Vector3(0, 0, -90);
+            const nextBlackHole = loadingBlackHoles[(cycle + 1) % loadingBlackHoles.length] || blackHole;
+            const entrance = blackHole.clone().add(new THREE.Vector3(0, 0, 1800));
+            const nearHole = blackHole.clone().add(new THREE.Vector3(0, 0, 2.4));
+            const exit = blackHole.clone().add(new THREE.Vector3(0, 0, -1800));
+            if (phase < 0.68) {
+                // 1 - (1 - t)^6: 終盤ほど急激に加速し、ブラックホールへ確実に収束する。
+                const p = phase / 0.68;
+                const accelerated = 1 - Math.pow(1 - p, 6);
+                camera.position.lerpVectors(entrance, nearHole, accelerated);
+                targetControlTarget.copy(blackHole);
+            } else if (phase < 0.76) {
+                const p = (phase - 0.68) / 0.08;
+                const accelerated = 1 - Math.pow(1 - p, 4);
+                camera.position.lerpVectors(nearHole, exit, accelerated);
                 targetControlTarget.copy(blackHole);
             } else {
-                const p = (phase - 0.62) / 0.38;
-                camera.position.lerpVectors(exit, to.clone().add(new THREE.Vector3(0, 0, 95)), p);
-                targetControlTarget.lerpVectors(blackHole, to, p);
+                const p = (phase - 0.76) / 0.24;
+                camera.position.lerpVectors(exit, nextBlackHole.clone().add(new THREE.Vector3(0, 0, 1800)), p);
+                targetControlTarget.lerpVectors(blackHole, nextBlackHole, p);
             }
             camera.lookAt(targetControlTarget);
-            starMesh.rotation.y += 0.01;
-            starMesh.rotation.z += 0.006;
-            galaxyClusters.forEach((cluster, index) => {
-                cluster.rotation.y += 0.0015 + index * 0.0002;
-                cluster.rotation.z += 0.0005;
-            });
             if (pendingUniverse && phase > 0.78 && typeof loadingAnimation.onReady === 'function') {
                 const onReady = loadingAnimation.onReady;
                 loadingAnimation = null;
@@ -1594,8 +1620,10 @@
                 bubble.mesh.material.opacity = 0.02 + eased * 0.93;
             });
             transitionState.outgoing.forEach(bubble => {
-                bubble.mesh.material.opacity = Math.max(0, 0.9 * (1 - eased));
-                bubble.mesh.visible = bubble.mesh.material.opacity > 0.01;
+                // 親（または子）のバブル壁を薄く残したまま通過する。暗転や画面切替を起こさず、
+                // 既存空間の内側が開くフラクタル遷移にする。
+                bubble.mesh.material.opacity = 0.72 - eased * 0.22;
+                bubble.mesh.visible = true;
             });
             if (progress >= 1) {
                 transitionState.outgoing.forEach(disposeBubble);
@@ -1630,9 +1658,7 @@
                 camera.fov = 60 + Math.pow(progress, 8) * 120; 
                 camera.updateProjectionMatrix(); // カメラ設定を変更した時はこれを呼ぶ必要がある
                 
-                // 星屑も回転速度を上げて、流れる星の尾のように見せる
-                starMesh.rotation.y += 0.002 + diveVelocity * 0.0002;
-                starMesh.rotation.z += 0.002 + diveVelocity * 0.0002;
+                // 星は回転させず、カメラの移動だけで同一3D空間を横切る速度感を出す。
                 
             } else if (isZoomingIntoGroup) {
                 // 【ワープ明けの自動ズームイン中】
@@ -1658,9 +1684,7 @@
             }
             
             // ダイブ中以外は、背景の星屑宇宙をゆっくり回転させて雄大さを出す
-            if (!isDiving) {
-                starMesh.rotation.y = time * 0.02; 
-            }
+            // 星・銀河・バブルは同一ワールドの固定オブジェクトとして扱う。
 
             // 現在が解析画面系かどうかを判定（他のバブルを消す処理に使う）
             const isAnalysisOrDetail = (state.screen === 'ANALYSIS' || state.screen === 'DETAIL');
