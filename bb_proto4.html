@@ -666,14 +666,16 @@
             return { db, entryGroupId };
         }
 
-        function buildOpenAIRequest(input) {
-            const prompt = `ユーザーの意見: ${input}\n\n日本語圏を中心にWeb Searchで関連する公開情報を調査し、BubbleBreaker用のバブル宇宙を生成してください。\n- groupsは必ず連結した3階層だけにする（親カテゴリ・入力意見を含む中間カテゴリ・入力意見バブルの下位カテゴリ）。入力確定後に表示するのはこの中間カテゴリです\n- entryGroupIdは必ず「入力された意見のバブルが含まれるカテゴリ」のID（中間カテゴリ）にする。入力意見の細かな理由・属性・詳細を並べる下位カテゴリをentryGroupIdにしてはいけない。例えば「きのこの山が好き」なら、中間カテゴリは「きのこの山派・たけのこの里派・木こりの切り株派」のような選択肢のカテゴリにし、詳細な好みの分類は下位カテゴリにする\n- entryBubbleIdは中間カテゴリ内でユーザーの入力意見に対応するバブルのIDにする\n- 中間カテゴリのbubblesには、ユーザーの入力意見に対応するバブルを必ず1つ含め、そのバブルのchildIdを下位カテゴリへ設定する\n- 親カテゴリには中間カテゴリへつながるバブルを1つ以上、中間カテゴリには下位カテゴリへつながるバブルを設定する。entryGroupの親はルート（さらに親を持たない）にする\n- 各グループは通常10個のバブルを生成する。検索で裏付けられる候補が少ない場合は1〜10個を許容し、根拠のない項目で水増ししない\n- バブル群のtypeは「分散型」「一極集中型」「多極型」のいずれか\n- sizeは検索ソースの言及量・傾向に基づく相対的な推定値で、グループ内合計を100に正規化する\n- 意見が近いバブルは近いpos、対立するバブルは離れたposにする。バブル同士が重ならないようにposを十分に離す\n- overview/history/demographic/evaluationには要約、インサイト、グラフ用metricsを含める\n- sizeと解析データが推定である場合はisEstimated=trueにする\n- 使用した公開ソースのURLと、そのソースが裏付ける内容をsourcesに含める\n- JSON Schema以外の文章は出力しない`;
+        function buildOpenAIRequest(input, options = {}) {
+            const prompt = `ユーザーの意見: ${input}\n\n日本語圏を中心にWeb Searchで関連する公開情報を調査し、BubbleBreaker用のバブル宇宙を生成してください。\n- groupsは必ず連結した3階層だけにする（親カテゴリ・入力意見を含む中間カテゴリ・入力意見バブルの下位カテゴリ）。入力確定後に表示するのはこの中間カテゴリです\n- entryGroupIdは必ず「入力された意見のバブルが含まれるカテゴリ」のID（中間カテゴリ）にする。入力意見の細かな理由・属性・詳細を並べる下位カテゴリをentryGroupIdにしてはいけない。例えば「きのこの山が好き」なら、中間カテゴリは「きのこの山派・たけのこの里派・木こりの切り株派」のような選択肢のカテゴリにし、詳細な好みの分類は下位カテゴリにする\n- entryBubbleIdは中間カテゴリ内でユーザーの入力意見に対応するバブルのIDにする\n- 中間カテゴリのbubblesには、ユーザーの入力意見に対応するバブルを必ず1つ含め、そのバブルのchildIdを下位カテゴリへ設定する\n- 親カテゴリには中間カテゴリへつながるバブルを1つ以上、中間カテゴリには下位カテゴリへつながるバブルを設定する。entryGroupの親はルート（さらに親を持たない）にする\n- 各グループは通常10個のバブルを生成する。検索で裏付けられる候補が少ない場合は1〜10個を許容し、根拠のない項目で水増ししない\n- バブル群のtypeは「分散型」「一極集中型」「多極型」のいずれか\n- sizeは検索ソースの言及量・傾向に基づく相対的な推定値で、グループ内合計を100に正規化する\n- 意見が近いバブルは近いpos、対立するバブルは離れたposにする。バブル同士が重ならないようにposを十分に離す\n- overview/history/demographic/evaluationには要約、インサイト、グラフ用metricsを含める\n- 各バブルのdesc、各分析のsummaryとinsightは短文にする。各分析のmetricsは最大3件、各バブルのsourcesは最大3件、各sourceのclaimsは最大2件にする\n- sizeと解析データが推定である場合はisEstimated=trueにする\n- 使用した公開ソースのURLと、そのソースが裏付ける内容をsourcesに含める\n- JSON Schema以外の文章は出力しない`;
+            const compactInstruction = options.compact ? '\n- これは再試行です。必ず簡潔なJSONだけを返し、desc・summary・insightは短文、各metricsは最大3件、各sourcesは最大3件、各claimsは最大2件にしてください。' : '';
+            const requestPrompt = `${prompt}${compactInstruction}`;
             return {
-                model: OPENAI_MODEL, store: false, max_output_tokens: 12000, tool_choice: 'required',
+                model: OPENAI_MODEL, store: false, max_output_tokens: 24000, tool_choice: 'required',
                 tools: [{ type: 'web_search', search_context_size: 'medium', user_location: { type: 'approximate', country: 'JP', timezone: 'Asia/Tokyo' } }],
                 input: [
                     { role: 'system', content: [{ type: 'input_text', text: 'あなたはBubbleBreakerの情報分析エンジンです。Web Searchを使って公開情報を調査し、出典と推定の区別を保った構造化データを返してください。' }] },
-                    { role: 'user', content: [{ type: 'input_text', text: prompt }] }
+                    { role: 'user', content: [{ type: 'input_text', text: requestPrompt }] }
                 ],
                 text: { format: { type: 'json_schema', name: 'bubble_universe', strict: true, schema: OPENAI_RESPONSE_SCHEMA } }
             };
@@ -715,11 +717,12 @@
             let lastError = null;
             for (let attempt = 0; attempt < OPENAI_MAX_ATTEMPTS; attempt++) {
                 const attemptStartedAt = performance.now();
-                apiLog('APIリクエスト開始', { attempt: attempt + 1, maxAttempts: OPENAI_MAX_ATTEMPTS, timeoutMs: OPENAI_REQUEST_TIMEOUT_MS, model: OPENAI_MODEL, inputLength: input.length });
+                const compactOutput = attempt > 0 && lastError && (lastError.code === 'API_INCOMPLETE_OUTPUT' || lastError.code === 'API_JSON_PARSE_ERROR');
+                apiLog('APIリクエスト開始', { attempt: attempt + 1, maxAttempts: OPENAI_MAX_ATTEMPTS, timeoutMs: OPENAI_REQUEST_TIMEOUT_MS, model: OPENAI_MODEL, inputLength: input.length, compactOutput });
                 try {
                     const response = await fetchWithTimeout('https://api.openai.com/v1/responses', {
                         method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${OPENAI_API_KEY}` },
-                        body: JSON.stringify(buildOpenAIRequest(input))
+                        body: JSON.stringify(buildOpenAIRequest(input, { compact: compactOutput }))
                     });
                     const requestId = response.headers.get('x-request-id');
                     const elapsedMs = Math.round(performance.now() - attemptStartedAt);
@@ -735,14 +738,29 @@
                     apiLog('API HTTP応答を受信', { attempt: attempt + 1, status: response.status, elapsedMs, requestId });
                     const payload = await response.json();
                     const text = extractResponseText(payload);
-                    apiLog('APIレスポンスを解析', { attempt: attempt + 1, outputItems: Array.isArray(payload.output) ? payload.output.length : 0, outputTextLength: text.length });
+                    const incompleteReason = payload.incomplete_details && payload.incomplete_details.reason ? payload.incomplete_details.reason : null;
+                    const usage = payload.usage ? {
+                        inputTokens: payload.usage.input_tokens || null,
+                        outputTokens: payload.usage.output_tokens || null,
+                        totalTokens: payload.usage.total_tokens || null
+                    } : null;
+                    apiLog('APIレスポンスを解析', { attempt: attempt + 1, responseStatus: payload.status || null, incompleteReason, usage, outputItems: Array.isArray(payload.output) ? payload.output.length : 0, outputTextLength: text.length });
+                    if (payload.status === 'incomplete' || incompleteReason) {
+                        const incompleteError = new Error(`OpenAI APIの出力が未完了です${incompleteReason ? `（${incompleteReason}）` : ''}`);
+                        incompleteError.code = 'API_INCOMPLETE_OUTPUT';
+                        incompleteError.reason = incompleteReason;
+                        incompleteError.usage = usage;
+                        throw incompleteError;
+                    }
                     if (!text) throw new Error('OpenAI APIの出力が空です');
                     let parsed;
                     try {
                         parsed = JSON.parse(text);
                     } catch (parseError) {
-                        parseError.message = `JSON解析に失敗しました: ${parseError.message}`;
-                        throw parseError;
+                        const jsonError = new Error(`JSON解析に失敗しました: ${parseError.message}`);
+                        jsonError.code = 'API_JSON_PARSE_ERROR';
+                        jsonError.cause = parseError;
+                        throw jsonError;
                     }
                     apiLog('Structured OutputsのJSON解析に成功', { attempt: attempt + 1, groupCount: Array.isArray(parsed.groups) ? parsed.groups.length : 0, entryGroupId: parsed.entryGroupId || null });
                     const universe = normalizeGeneratedUniverse(parsed);
@@ -750,8 +768,8 @@
                     return universe;
                 } catch (error) {
                     lastError = error;
-                    const retryable = error.code === 'API_TIMEOUT' || error.code === 'API_NETWORK_ERROR' || error.status === 408 || error.status === 409 || error.status === 429 || error.status >= 500;
-                    apiError('APIリクエスト試行に失敗しました', { attempt: attempt + 1, maxAttempts: OPENAI_MAX_ATTEMPTS, code: error.code || null, status: error.status || null, requestId: error.requestId || null, timeoutMs: error.timeoutMs || null, message: redactApiLog(error.message), body: error.body || null, retryable });
+                    const retryable = error.code === 'API_TIMEOUT' || error.code === 'API_NETWORK_ERROR' || error.code === 'API_INCOMPLETE_OUTPUT' || error.code === 'API_JSON_PARSE_ERROR' || error.status === 408 || error.status === 409 || error.status === 429 || error.status >= 500;
+                    apiError('APIリクエスト試行に失敗しました', { attempt: attempt + 1, maxAttempts: OPENAI_MAX_ATTEMPTS, code: error.code || null, reason: error.reason || null, status: error.status || null, requestId: error.requestId || null, timeoutMs: error.timeoutMs || null, message: redactApiLog(error.message), body: error.body || null, retryable });
                     if (!retryable || attempt === OPENAI_MAX_ATTEMPTS - 1) break;
                     apiWarn('リトライします', { nextAttempt: attempt + 2, waitMs: 1000 * (attempt + 1) });
                     await new Promise(resolve => setTimeout(resolve, 1000 * (attempt + 1)));
