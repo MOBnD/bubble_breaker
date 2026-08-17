@@ -1032,6 +1032,18 @@
             galaxyClusters.push(cluster);
         }
 
+        function updateCosmicDepthVisual(depth) {
+            const hue = (0.58 + (depth % 6) * 0.075) % 1;
+            galaxyClusters.forEach((cluster, clusterIndex) => {
+                cluster.scale.setScalar(1 + Math.min(0.45, depth * 0.06));
+                cluster.children.forEach(child => {
+                    if (!child.material || !child.material.color) return;
+                    const lightness = child.geometry && child.geometry.type === 'TorusGeometry' ? 0.58 : 0.62;
+                    child.material.color.setHSL((hue + clusterIndex * 0.025) % 1, 0.78, lightness);
+                });
+            });
+        }
+
         galaxyClusterCenters.forEach((center, index) => createGalaxyCluster(center, index));
 
         // --- 個別のバブル（球体）を生成・管理する仕組み ---
@@ -1039,6 +1051,8 @@
         let targetCameraPos = new THREE.Vector3(0, 0, 25);     // カメラが移動する目標地点
         let targetControlTarget = new THREE.Vector3(0, 0, 0);  // カメラが向くべき注視点の目標地点
         let groupWorldOffset = new THREE.Vector3(0, 0, 0);
+        let groupWorldScale = 1;
+        let navigationStack = [];
         let transitionState = null;
         let loadingAnimation = null;
         let pendingUniverse = null;
@@ -1088,22 +1102,40 @@
             const previousGroupId = state.groupId;
             const previousScreen = state.screen;
             const previousOffset = groupWorldOffset.clone();
+            const previousScale = groupWorldScale;
             let nextOffset = previousOffset.clone();
+            let nextScale = previousScale;
             let transitionType = 'instant';
             if (isAfterDive) {
                 nextOffset.set(0, 0, 0);
+                nextScale = 1;
+                navigationStack = [{ groupId, parentGroupId: data.parentId || null, anchorBubbleId: null, worldPosition: nextOffset.clone(), worldScale: nextScale, depth: 0 }];
                 transitionType = 'dive';
             } else if (previousScreen === 'SINGLE' && groupId === previousGroupId) {
                 transitionType = 'reveal';
             } else if (previousScreen === 'SINGLE' && state.bubbleData && state.bubbleData.childId === groupId) {
-                nextOffset.copy(previousOffset).add(new THREE.Vector3(...state.bubbleData.pos));
+                const anchorPosition = new THREE.Vector3(...state.bubbleData.pos).multiplyScalar(previousScale);
+                nextOffset.copy(previousOffset).add(anchorPosition);
+                nextScale = Math.max(0.42, previousScale * 0.9);
+                navigationStack.push({ groupId, parentGroupId: data.parentId || previousGroupId, anchorBubbleId: state.bubbleData.id, worldPosition: nextOffset.clone(), worldScale: nextScale, depth: navigationStack.length });
                 transitionType = 'zoomIn';
             } else if (previousScreen === 'GROUP' && state.groupData && state.groupData.parentId === groupId) {
-                const parentBubble = data.bubbles.find(bubble => bubble.childId === previousGroupId);
-                if (parentBubble) nextOffset.copy(previousOffset).sub(new THREE.Vector3(...parentBubble.pos));
+                const parentEntryIndex = navigationStack.findIndex(entry => entry.groupId === groupId);
+                const parentEntry = parentEntryIndex >= 0 ? navigationStack[parentEntryIndex] : null;
+                if (parentEntry) {
+                    nextOffset.copy(parentEntry.worldPosition);
+                    nextScale = parentEntry.worldScale;
+                    navigationStack = navigationStack.slice(0, parentEntryIndex + 1);
+                } else {
+                    const parentBubble = data.bubbles.find(bubble => bubble.childId === previousGroupId);
+                    if (parentBubble) nextOffset.copy(previousOffset).sub(new THREE.Vector3(...parentBubble.pos).multiplyScalar(previousScale));
+                    navigationStack = [{ groupId, parentGroupId: data.parentId || null, anchorBubbleId: parentBubble ? parentBubble.id : null, worldPosition: nextOffset.clone(), worldScale: nextScale, depth: 0 }];
+                }
                 transitionType = 'zoomOut';
             }
             groupWorldOffset.copy(nextOffset);
+            groupWorldScale = nextScale;
+            updateCosmicDepthVisual(Math.max(0, navigationStack.length - 1));
             state.groupId = groupId;
             state.groupData = data;
             state.bubbleId = null;
@@ -1118,8 +1150,9 @@
             // 固定DBとAPIデータのどちらでも、球体の半径を考慮して重なりを解消する。
             separateBubblePositions(data.bubbles);
             data.bubbles.forEach(bData => {
-                const worldPosition = new THREE.Vector3(...bData.pos).add(nextOffset);
+                const worldPosition = new THREE.Vector3(...bData.pos).multiplyScalar(nextScale).add(nextOffset);
                 const mesh = createBubbleMesh(bData.size, bData.color, worldPosition.toArray());
+                mesh.scale.multiplyScalar(nextScale);
                 const finalRadius = mesh.scale.x;
                 mesh.userData.finalScale = finalRadius;
                 if (transitionType !== 'instant') {
@@ -1173,13 +1206,13 @@
             if (isAfterDive) {
                 // 銀河団の中心から中央カテゴリへ滑らかに接近する。
                 controls.enabled = false;
-                camera.position.copy(nextOffset).add(new THREE.Vector3(0, 0, 70));
-                targetCameraPos.copy(nextOffset).add(new THREE.Vector3(0, 0, 25));
+                camera.position.copy(nextOffset).add(new THREE.Vector3(0, 0, 70 * nextScale));
+                targetCameraPos.copy(nextOffset).add(new THREE.Vector3(0, 0, 25 * nextScale));
                 isZoomingIntoGroup = true;
             } else {
                 controls.enabled = transitionType === 'instant';
-                if (transitionType === 'instant') camera.position.copy(nextOffset).add(new THREE.Vector3(0, 0, 25));
-                targetCameraPos.copy(nextOffset).add(new THREE.Vector3(0, 0, 25));
+                if (transitionType === 'instant') camera.position.copy(nextOffset).add(new THREE.Vector3(0, 0, 25 * nextScale));
+                targetCameraPos.copy(nextOffset).add(new THREE.Vector3(0, 0, 25 * nextScale));
             }
             // カメラの向き（注視点）を空間の中央にリセット
             controls.target.copy(nextOffset);
