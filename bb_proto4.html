@@ -78,12 +78,15 @@
 
     <div id="ui-layer">
         <button id="btn-sound-toggle" class="absolute top-6 right-6 z-[80] glass-panel px-3 py-2 rounded-lg text-xs text-white pointer-events-auto cursor-pointer" type="button">🔊 効果音ON</button>
-        <div class="absolute top-16 right-6 z-[80] glass-panel rounded-lg p-2 text-[10px] text-white pointer-events-auto flex flex-col gap-1">
+        <button id="btn-reopen-panels" class="hidden absolute bottom-6 right-6 z-[79] glass-panel px-3 py-2 rounded-lg text-xs text-white pointer-events-auto cursor-pointer">▣ パネルを開く</button>
+        <div id="panel-bgm" class="absolute top-16 right-6 z-[80] glass-panel rounded-lg p-2 text-[10px] text-white pointer-events-auto flex flex-col gap-1">
+            <button data-close-panel="panel-bgm" class="self-end text-gray-300 hover:text-white" type="button">×</button>
             <label class="flex items-center gap-2"><input id="bgm-toggle" type="checkbox" checked> BGM</label>
             <label class="flex items-center gap-2">音量 <input id="audio-volume" type="range" min="0" max="1" step="0.05" value="0.45"></label>
             <select id="bgm-type" class="bg-black/60 rounded px-1 py-0.5"><option value="宇宙遊泳.mp3">宇宙遊泳.mp3</option><option value="星間宇宙.mp3">星間宇宙.mp3</option><option value="エッジワース・カイパーベルト.mp3">エッジワース・カイパーベルト.mp3</option><option value="Far_away_from_the_Earth.mp3">Far_away_from_the_Earth.mp3</option></select>
             <label class="flex items-center gap-2"><input id="bgm-auto-next" type="checkbox"> 曲終了で次曲</label>
             <select id="bgm-transition" class="bg-black/60 rounded px-1 py-0.5"><option value="persist">遷移しても継続</option><option value="change">カテゴリ移動で変更</option></select>
+            <label class="flex items-center gap-2"><input id="explorer-mode" type="checkbox"> 探索者モード（階層ズームのみ）</label>
         </div>
         <audio id="bgm-audio" loop preload="none"></audio>
         
@@ -112,7 +115,8 @@
 
         <!-- ② バブル群画面 -->
         <div id="screen-group" class="screen-container screen-hidden flex justify-end p-6 pt-24 z-40">
-            <div class="glass-panel w-80 rounded-xl p-5 flex flex-col gap-5 h-fit max-h-[80vh] overflow-y-auto relative pointer-events-auto">
+            <div id="panel-group" class="glass-panel w-80 rounded-xl p-5 flex flex-col gap-5 h-fit max-h-[80vh] overflow-y-auto relative pointer-events-auto">
+                <button data-close-panel="panel-group" class="absolute top-2 right-3 text-gray-300 hover:text-white text-xl" type="button">×</button>
                 <div>
                     <div class="text-[10px] text-blue-300 font-semibold mb-1 flex items-center justify-between">
                         <span>現在の観測領域 (階層)</span>
@@ -146,7 +150,8 @@
                 <p id="single-desc" class="text-sm text-gray-200 bg-black/50 p-4 rounded-xl backdrop-blur-md border border-white/10 group-hover:border-blue-500/50 transition-colors">--</p>
             </div>
 
-            <div class="glass-panel w-80 rounded-xl p-6 flex flex-col gap-6 h-fit relative pointer-events-auto">
+            <div id="panel-single" class="glass-panel w-80 rounded-xl p-6 flex flex-col gap-6 h-fit relative pointer-events-auto">
+                <button data-close-panel="panel-single" class="absolute top-2 right-3 text-gray-300 hover:text-white text-xl" type="button">×</button>
                 <div>
                     <div class="text-xs text-blue-300 font-semibold mb-1">立ち位置解析</div>
                     <div class="text-sm text-gray-300">あなたが観測しているこの意見は、カテゴリ全体の</div>
@@ -529,7 +534,7 @@
                 type: { type: 'string', enum: OPENAI_GROUP_TYPES },
                 parentId: { type: ['string', 'null'] },
                 desc: { type: 'string' },
-                bubbles: { type: 'array', items: OPENAI_BUBBLE_SCHEMA, maxItems: 5 }
+                bubbles: { type: 'array', items: OPENAI_BUBBLE_SCHEMA, maxItems: 10 }
             }
         };
         const OPENAI_RESPONSE_SCHEMA = {
@@ -538,7 +543,7 @@
             properties: {
                 entryGroupId: { type: 'string' },
                 entryBubbleId: { type: 'string' },
-                groups: { type: 'array', items: OPENAI_GROUP_SCHEMA, maxItems: 25 }
+                groups: { type: 'array', items: OPENAI_GROUP_SCHEMA, maxItems: 80 }
             }
         };
 
@@ -559,6 +564,13 @@
             if (!group || !group.bubbles.length) return null;
             const normalized = String(input || '').toLowerCase();
             return (group.bubbles.find(bubble => normalized.includes(String(bubble.name).toLowerCase()) || String(bubble.name).toLowerCase().includes(normalized)) || group.bubbles[0]).id;
+        }
+
+        function normalizeFallbackUniverse(input) {
+            const entryGroupId = fallbackEntryGroupId(input);
+            const entryBubbleId = fallbackEntryBubbleId(entryGroupId, input);
+            const groups = JSON.parse(JSON.stringify(Object.values(DB)));
+            return normalizeGeneratedUniverse({ groups, entryGroupId, entryBubbleId });
         }
 
         function normalizeColor(value, fallback = 0x4488ff) {
@@ -783,34 +795,49 @@
             const entryGroup = db[entryGroupId];
             const entryBubble = entryGroup && entryGroup.bubbles.find(bubble => bubble.id === String(raw.entryBubbleId || ''));
             const parentGroup = entryGroup && entryGroup.parentId ? db[entryGroup.parentId] : null;
-            const directChildGroups = Object.values(db).filter(group => group.parentId === entryGroupId);
             if (!entryGroup || !entryBubble || !parentGroup || parentGroup.parentId !== null) {
                 throw new Error('entryGroupIdは入力意見を含む中間カテゴリである必要があります');
             }
             if (parentGroup.bubbles.length < 2) throw new Error('上位カテゴリのバブルが不足しています');
-            const usedChildIds = new Set();
             let repairedChildLinks = false;
-            const bubblesToLink = [entryBubble, ...entryGroup.bubbles.filter(bubble => bubble.id !== entryBubble.id)];
-            bubblesToLink.forEach((bubble, index) => {
-                const linkedGroup = bubble.childId && db[bubble.childId];
-                if (linkedGroup && linkedGroup.parentId === entryGroupId && !usedChildIds.has(linkedGroup.id)) {
-                    usedChildIds.add(linkedGroup.id);
-                    return;
-                }
-                const reusableGroup = directChildGroups.find(group => !usedChildIds.has(group.id));
-                if (reusableGroup && (bubble.id === entryBubble.id || !entryBubble.childId)) {
-                    bubble.childId = reusableGroup.id;
-                    usedChildIds.add(reusableGroup.id);
+            const ensureDirectChildren = (group) => {
+                const usedChildIds = new Set();
+                const directChildren = () => Object.values(db).filter(child => child.parentId === group.id);
+                group.bubbles.forEach((bubble, index) => {
+                    const linkedGroup = bubble.childId && db[bubble.childId];
+                    if (linkedGroup && linkedGroup.parentId === group.id && !usedChildIds.has(linkedGroup.id)) {
+                        usedChildIds.add(linkedGroup.id);
+                        return;
+                    }
+                    const reusableGroup = directChildren().find(child => !usedChildIds.has(child.id));
+                    if (reusableGroup) {
+                        bubble.childId = reusableGroup.id;
+                        usedChildIds.add(reusableGroup.id);
+                        repairedChildLinks = true;
+                        return;
+                    }
+                    const generatedGroup = createGeneratedChildGroup(group, bubble, index);
+                    db[generatedGroup.id] = generatedGroup;
+                    bubble.childId = generatedGroup.id;
+                    usedChildIds.add(generatedGroup.id);
                     repairedChildLinks = true;
-                    return;
-                }
-                const generatedGroup = createGeneratedChildGroup(entryGroup, bubble, index);
-                db[generatedGroup.id] = generatedGroup;
-                bubble.childId = generatedGroup.id;
-                usedChildIds.add(generatedGroup.id);
+                });
+                return group.bubbles.map(bubble => db[bubble.childId]).filter(Boolean);
+            };
+
+            // 入力意見を含む中央カテゴリが親カテゴリのバブルから参照されるように固定する。
+            if (!parentGroup.bubbles.some(bubble => bubble.childId === entryGroupId)) {
+                const anchor = parentGroup.bubbles.find(bubble => !bubble.childId || !db[bubble.childId] || db[bubble.childId].parentId !== parentGroup.id)
+                    || parentGroup.bubbles[0];
+                anchor.childId = entryGroupId;
                 repairedChildLinks = true;
-            });
-            if (repairedChildLinks) apiWarn('中央カテゴリの下位カテゴリ接続を補完しました', { entryGroupId, repairedBubbleCount: entryGroup.bubbles.filter(bubble => bubble.childId && bubble.childId.startsWith(`${entryGroupId}__generated_child_`)).length });
+            }
+
+            // 親カテゴリの全バブルに中央カテゴリを割り当て、全中央カテゴリの
+            // 全バブルにも固有の下位カテゴリを割り当てる。入力意見だけを特別扱いしない。
+            const centralGroups = ensureDirectChildren(parentGroup);
+            centralGroups.forEach(group => ensureDirectChildren(group));
+
             const repairedChildIds = entryGroup.bubbles.map(bubble => bubble.childId);
             const repairedChildGroups = Object.values(db).filter(group => group.parentId === entryGroupId && repairedChildIds.includes(group.id));
             if (repairedChildIds.some(childId => !childId) || new Set(repairedChildIds).size !== entryGroup.bubbles.length || repairedChildGroups.length !== entryGroup.bubbles.length) {
@@ -819,11 +846,9 @@
             if (!entryBubble.childId || !repairedChildGroups.some(group => group.id === entryBubble.childId)) {
                 throw new Error('entryBubbleIdは下位カテゴリへ接続する入力意見バブルである必要があります');
             }
-            if (!parentGroup.bubbles.some(bubble => bubble.childId === entryGroupId)) {
-                throw new Error('親カテゴリから中間カテゴリへの接続がありません');
-            }
-            // 親カテゴリから中央カテゴリ、中央カテゴリから各下位カテゴリへ続く
-            // APIのツリーだけを保持する。親の各バブルへ人工的な中央群を増殖させない。
+            if (repairedChildLinks) apiWarn('カテゴリ階層の不足リンクを補完しました', { entryGroupId, centralGroupCount: centralGroups.length });
+
+            // 親カテゴリから到達できない余分なグループを除去し、各バブル群を一つの木にする。
             const connectedIds = new Set([parentGroup.id]);
             const pendingIds = [parentGroup.id];
             while (pendingIds.length) {
@@ -845,11 +870,11 @@
         }
 
         function buildOpenAIRequest(input, options = {}) {
-            const prompt = `ユーザーの意見: ${input}\n\n日本語圏を中心にWeb Searchで関連する公開情報を調査し、BubbleBreaker用のバブル宇宙を生成してください。\n- groupsは必ず「上位カテゴリ → 入力意見を含む中央カテゴリ → 中央カテゴリの各バブルに対応する下位カテゴリ」の3階層にする。入力確定後に表示するのは中央カテゴリです\n- entryGroupIdは必ず「入力された意見のバブルが含まれる中央カテゴリ」のIDにする。入力意見の細かな理由・属性・詳細を並べる下位カテゴリをentryGroupIdにしてはいけない。例えば「きのこの山が好き」なら、中央カテゴリは「きのこの山派・たけのこの里派・木こりの切り株派」のような選択肢のカテゴリにし、詳細な好みの分類は各バブル固有の下位カテゴリにする\n- entryBubbleIdは中央カテゴリ内でユーザーの入力意見に対応するバブルのIDにする\n- 中央カテゴリの全バブルに、それぞれ異なる下位カテゴリのchildIdを必ず設定する。下位カテゴリは各バブルの詳細・理由・評価を表す\n- 上位カテゴリには中央カテゴリへつながるバブルを1つ以上設定し、上位カテゴリは最低2個、通常5個のバブルを生成する\n- 各グループは通常5個のバブルを生成する。検索で裏付けられる候補が少ない場合は1〜10個を許容し、10個を超えるバブルは絶対に出力しない。下位カテゴリは通常3〜5個にする\n- バブル群のtypeは「分散型」「一極集中型」「多極型」のいずれか\n- sizeは検索ソースの言及量・傾向に基づく相対的な推定値で、グループ内合計を100に正規化する\n- 意見が近いバブルは近いpos、対立するバブルは離れたposにする。バブル同士が重ならないようにposを十分に離す\n- overview/history/demographic/evaluationには要約、インサイト、グラフ用metricsを含める\n- 各バブルのdesc、各分析のsummaryとinsightは短文にする。各分析のmetricsは最大3件、各バブルのsourcesは最大3件、各sourceのclaimsは最大2件にする\n- sizeと解析データが推定である場合はisEstimated=trueにする\n- 使用した公開ソースのURLと、そのソースが裏付ける内容をsourcesに含める\n- JSON Schema以外の文章は出力しない`;
-            const compactInstruction = '\n- 出力を安定させるため、desc・summary・insightは各120文字以内、各metricsは最大3件、各sourcesは最大2件、各claimsは最大2件にしてください。JSON以外は出力しないでください。' + '\n- 親カテゴリは入力テーマを含む最も広い領域の代表的な選択肢、中央カテゴリは入力意見が属する同一テーマ内の代表的な選択肢、子カテゴリは中央カテゴリ各バブルをさらに具体化した下位の選択肢として作成してください。親・中央・子で抽象度を混在させず、同じ名称や同じ意味のバブルを別階層へ重複させないでください。' + '\n- バブル名に「特徴」「評価」「支持する理由」「理由」「見た目」「歴史」などの分析項目を使わないでください。これらはanalysisのsummary・insight・metricsへ入れ、バブルには実在する選択肢・派閥・方式・製品・作品などを置いてください。' + '\n- 入力意見に応じてカテゴリ軸を自動で選び、固定の題材・固定のカテゴリ名・特定テーマの例を他の入力へ流用しないでください。親から中央、中央から子へ意味的に包含される関係を必ず満たしてください。' + '\n- entryGroupIdに関係なく、親カテゴリの全バブル、親が指す全中央カテゴリの全バブル、さらにその全子カテゴリを生成し、入力意見バブルだけを特別扱いしないでください。すべてのバブルに固有のchildIdを付与してください。' + '\n- 各グループは可能なら7個のバブルを生成し、根拠がない場合や分類上不可能な場合のみ2〜6個へ減らしてください。最大10個を超えてはいけません。' + (options.compact ? '\n- 再試行では候補名と要約をさらに短くしてください。' : '');
+            const prompt = `ユーザーの意見: ${input}\n\n日本語圏を中心にWeb Searchで関連する公開情報を調査し、BubbleBreaker用のバブル宇宙を生成してください。\n- groupsは必ず「親カテゴリ → 複数の中央カテゴリ → 各中央カテゴリの下位カテゴリ」の3階層にする。入力確定後に表示するのは入力意見が属する中央カテゴリです\n- 親カテゴリは入力テーマを含む最も広い選択肢の集合にし、親カテゴリの全バブルそれぞれに固有の中央カテゴリをchildIdで接続する\n- entryGroupIdは必ず入力された意見のバブルが含まれる中央カテゴリのIDにする。entryBubbleIdはその中央カテゴリ内で入力意見に対応するバブルのIDにする\n- すべての中央カテゴリの全バブルに、それぞれ異なる下位カテゴリのchildIdを必ず設定する。入力意見を含む中央カテゴリだけを特別扱いしてはいけない\n- 下位カテゴリは親バブルや中央バブルの具体的な選択肢・方式・製品・作品・派閥などにし、特徴・評価・支持理由をそのままバブル名にしない\n- 親カテゴリ・各中央カテゴリ・各下位カテゴリは意味的に包含される関係にし、異なる親バブルが同じ中央カテゴリを共有しない\n- 各グループは可能なら7個のバブルを生成し、根拠がない場合や分類上不可能な場合のみ2〜6個へ減らす。最大10個を超えない\n- バブル群のtypeは「分散型」「一極集中型」「多極型」のいずれか\n- sizeは検索ソースの言及量・傾向に基づく相対的な推定値で、グループ内合計を100に正規化する\n- 意見が近いバブルは近いpos、対立するバブルは離れたposにし、重ならないよう十分に離す\n- overview/history/demographic/evaluationには要約、インサイト、グラフ用metricsを含める\n- 各バブルのdesc、各分析のsummaryとinsightは短文にし、sizeと解析データが推定である場合はisEstimated=trueにする\n- 使用した公開ソースのURLと、そのソースが裏付ける内容をsourcesに含める\n- JSON Schema以外の文章は出力しない`;
+            const compactInstruction = '\n- 出力を安定させるため、desc・summary・insightは各120文字以内、各metricsは最大3件、各sourcesは最大2件、各claimsは最大2件にしてください。JSON以外は出力しないでください。' + '\n- 親・中央・子で抽象度を混在させず、同じ名称や同じ意味のバブルを別階層へ重複させないでください。' + '\n- バブル名に「特徴」「評価」「支持する理由」「理由」「見た目」「歴史」などの分析項目を使わないでください。これらはanalysisのsummary・insight・metricsへ入れ、バブルには実在する選択肢・派閥・方式・製品・作品などを置いてください。' + '\n- 入力意見に応じてカテゴリ軸を自動で選び、固定の題材・固定のカテゴリ名・特定テーマの例を他の入力へ流用しないでください。親から中央、中央から子へ意味的に包含される関係を必ず満たしてください。' + '\n- 親カテゴリの全バブルに固有の中央カテゴリを割り当て、全中央カテゴリの全バブルに固有の下位カテゴリを割り当ててください。入力意見バブルだけを特別扱いしてはいけません。' + '\n- 各グループは可能なら7個のバブルを生成し、根拠がない場合や分類上不可能な場合のみ2〜6個へ減らしてください。最大10個を超えてはいけません。' + (options.compact ? '\n- 再試行では候補名と要約をさらに短くしてください。' : '');
             const requestPrompt = `${prompt}${compactInstruction}`.replace(/例えば「きのこの山が好き」なら、中央カテゴリは[^\n]*/, '');
             return {
-                model: OPENAI_MODEL, store: false, max_output_tokens: 24000, tool_choice: 'required',
+                model: OPENAI_MODEL, store: false, max_output_tokens: 48000, tool_choice: 'required',
                 tools: [{ type: 'web_search', search_context_size: 'low', user_location: { type: 'approximate', country: 'JP', timezone: 'Asia/Tokyo' } }],
                 input: [
                     { role: 'system', content: [{ type: 'input_text', text: 'あなたはBubbleBreakerの情報分析エンジンです。Web Searchを使って公開情報を調査し、出典と推定の区別を保った構造化データを返してください。入力ごとに最適な分類軸を自律的に選び、親・中央・子の各階層が意味的に包含されるようにしてください。特定テーマの固定例やカテゴリ名を他の入力へ流用してはいけません。' }] },
@@ -977,6 +1002,7 @@
         };
         let focusEntryGroupId = null;
         let focusEntryBubbleId = null;
+        let explorerMode = localStorage.getItem('bubblebreaker.explorerMode') === 'on';
         
         let isDiving = false;          // ワープアニメーション中かどうかの判定フラグ
         let diveStartTime = 0;         // ワープ開始時の時間（アニメーションの進行度計算用）
@@ -1168,10 +1194,10 @@
 
         // 星の質感（マテリアル）の設定
         const starsMaterial = new THREE.PointsMaterial({
-            size: 4.5,
+            size: 5.0,
             vertexColors: true,
             transparent: true,
-            opacity: 0.52,
+            opacity: 0.66,
             map: createCircleTexture(),
             alphaTest: 0.1,
             blending: THREE.AdditiveBlending // 重なった時に光って見える合成方法
@@ -1192,85 +1218,74 @@
             const cluster = new THREE.Group();
             cluster.position.copy(center);
             for (let galaxyIndex = 0; galaxyIndex < 5; galaxyIndex++) {
-                const positions = [];
                 const galaxyAngle = galaxyIndex * Math.PI * 0.5 + seed * 0.13;
                 const galaxyOffset = new THREE.Vector3(Math.cos(galaxyAngle) * (700 + galaxyIndex * 100), Math.sin(galaxyAngle * 1.7) * (180 + seed * 22), Math.sin(galaxyAngle) * (700 + galaxyIndex * 100));
-                const shape = (seed + galaxyIndex) % 6; // spiral / elliptical / globular / barred / ring / irregular
+                const shape = (seed + galaxyIndex) % 6;
                 const galaxyRadius = 220 + ((seed * 43 + galaxyIndex * 67) % 95);
                 const tilt = 0.18 + ((seed * 0.37 + galaxyIndex * 0.71) % 1) * 1.1;
                 const spin = ((seed * 1.91 + galaxyIndex * 2.37) % 1) * Math.PI * 2;
-                for (let i = 0; i < 1200; i++) {
-                    const u = i / 1200;
-                    const radius = shape === 1 ? Math.sqrt(u) * galaxyRadius * 0.72 : Math.sqrt(u) * galaxyRadius;
-                    const angle = shape === 2 ? Math.random() * Math.PI * 2 : (shape === 4 ? Math.floor(i / 18) * 0.35 : radius * (shape === 3 ? 0.14 : 0.22) + galaxyAngle + (i % 7) * 0.08);
-                    const bar = shape === 3 ? (Math.random() - 0.5) * galaxyRadius * 0.42 * (1 - u) : 0;
-                    const irregular = shape === 5 ? (Math.random() - 0.5) * galaxyRadius * 0.25 : 0;
-                    positions.push(
-                        Math.cos(angle) * radius + bar + irregular + (Math.random() - 0.5) * 8,
-                        (Math.random() - 0.5) * (shape === 2 ? galaxyRadius * 0.6 : Math.max(5, radius * 0.12)),
-                        Math.sin(angle) * radius + irregular + (Math.random() - 0.5) * 8
-                    );
-                }
-                const geometry = new THREE.BufferGeometry();
-                geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-                const starColors = [];
-                for (let i = 0; i < 1200; i++) {
-                    const starColor = new THREE.Color().setHSL((0.04 + seed * 0.071 + galaxyIndex * 0.137 + i * 0.61803398875) % 1, 0.65, 0.58 + (i % 5) * 0.07);
-                    starColors.push(starColor.r, starColor.g, starColor.b);
-                }
-                geometry.setAttribute('color', new THREE.Float32BufferAttribute(starColors, 3));
-                const material = new THREE.PointsMaterial({
-                    vertexColors: true,
-                    size: 5.2 + galaxyIndex * 0.55,
-                    transparent: true,
-                    opacity: 0.98,
-                    blending: THREE.AdditiveBlending
-                });
-                const galaxy = new THREE.Points(geometry, material);
+                const systemCount = 260;
+                const galaxy = new THREE.Group();
                 galaxy.position.copy(galaxyOffset);
                 galaxy.rotation.set(tilt, spin, tilt * 0.63);
-                cluster.add(galaxy);
 
-                const blackHole = new THREE.Mesh(
-                    new THREE.SphereGeometry(4.2, 40, 40),
-                    new THREE.MeshBasicMaterial({ color: 0x020106 })
+                // 独立した星点群は作らず、すべてを「恒星+2惑星」の恒星系として生成する。
+                const starSystems = new THREE.InstancedMesh(
+                    new THREE.SphereGeometry(3.2 + galaxyIndex * 0.18, 8, 8),
+                    new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.98, blending: THREE.AdditiveBlending }),
+                    systemCount
                 );
-                blackHole.position.copy(galaxyOffset);
-                blackHole.rotation.set(tilt, spin, 0);
-                cluster.add(blackHole);
-                // 輪状のアクセサリは使わず、暗い事象の地平面と薄い重力レンズ境界で表現する。
+                const planets = new THREE.InstancedMesh(
+                    new THREE.SphereGeometry(0.9, 6, 6),
+                    new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.95, blending: THREE.AdditiveBlending }),
+                    systemCount * 2
+                );
+                starSystems.userData.preserveInstanceColors = true;
+                planets.userData.preserveInstanceColors = true;
+                const dummy = new THREE.Object3D();
+                for (let i = 0; i < systemCount; i++) {
+                    const u = i / systemCount;
+                    const radius = shape === 1 ? Math.sqrt(u) * galaxyRadius * 0.72 : Math.sqrt(u) * galaxyRadius;
+                    const angle = shape === 2
+                        ? (i * 2.39996 + seed) % (Math.PI * 2)
+                        : (shape === 4 ? Math.floor(i / 8) * 0.35 : radius * (shape === 3 ? 0.14 : 0.22) + galaxyAngle + (i % 7) * 0.08);
+                    const bar = shape === 3 ? Math.sin(i * 0.7 + seed) * galaxyRadius * 0.42 * (1 - u) : 0;
+                    const irregular = shape === 5 ? Math.sin(i * 2.17 + seed) * galaxyRadius * 0.25 : 0;
+                    const position = new THREE.Vector3(
+                        Math.cos(angle) * radius + bar + irregular,
+                        Math.sin(i * 1.73 + seed) * (shape === 2 ? galaxyRadius * 0.6 : Math.max(5, radius * 0.12)),
+                        Math.sin(angle) * radius + irregular
+                    );
+                    dummy.position.copy(position);
+                    dummy.scale.setScalar(0.78 + (i % 7) * 0.07);
+                    dummy.updateMatrix();
+                    starSystems.setMatrixAt(i, dummy.matrix);
+                    starSystems.setColorAt(i, new THREE.Color().setHSL((0.04 + seed * 0.071 + galaxyIndex * 0.137 + i * 0.61803398875) % 1, 0.92, 0.64 + (i % 5) * 0.065));
+                    for (let planetIndex = 0; planetIndex < 2; planetIndex++) {
+                        const orbit = 7 + planetIndex * 3 + (i % 4) * 0.65;
+                        const orbitAngle = angle + planetIndex * Math.PI + i * 0.11;
+                        dummy.position.set(position.x + Math.cos(orbitAngle) * orbit, position.y + Math.sin(orbitAngle * 1.7) * 1.8, position.z + Math.sin(orbitAngle) * orbit);
+                        dummy.scale.setScalar(0.7 + ((i + planetIndex) % 3) * 0.18);
+                        dummy.updateMatrix();
+                        planets.setMatrixAt(i * 2 + planetIndex, dummy.matrix);
+                        planets.setColorAt(i * 2 + planetIndex, new THREE.Color().setHSL((0.08 + seed * 0.03 + i * 0.017 + planetIndex * 0.17) % 1, 0.9, 0.62 + ((i + planetIndex) % 4) * 0.07));
+                    }
+                }
+                starSystems.instanceMatrix.needsUpdate = true;
+                planets.instanceMatrix.needsUpdate = true;
+                if (starSystems.instanceColor) starSystems.instanceColor.needsUpdate = true;
+                if (planets.instanceColor) planets.instanceColor.needsUpdate = true;
+                galaxy.add(starSystems, planets);
+
+                const blackHole = new THREE.Mesh(new THREE.SphereGeometry(4.2, 40, 40), new THREE.MeshBasicMaterial({ color: 0x020106 }));
+                galaxy.add(blackHole);
+                // 輪状アクセサリは使わず、暗い事象の地平面と薄い境界で表現する。
                 const horizon = new THREE.Mesh(
                     new THREE.SphereGeometry(5.3, 32, 32),
                     new THREE.MeshBasicMaterial({ color: 0x1b1024, transparent: true, opacity: 0.32, wireframe: true, blending: THREE.AdditiveBlending })
                 );
-                horizon.position.copy(galaxyOffset);
-                cluster.add(horizon);
-                // 恒星系の惑星・小惑星帯を少数の明るい軌道として再現する。
-                for (let systemIndex = 0; systemIndex < 12; systemIndex++) {
-                    const systemDistance = 28 + systemIndex * 26;
-                    const systemAngle = spin + systemIndex * 1.047;
-                    const systemPosition = new THREE.Vector3(
-                        galaxyOffset.x + Math.cos(systemAngle) * systemDistance,
-                        galaxyOffset.y + Math.sin(systemAngle * 1.7) * 8,
-                        galaxyOffset.z + Math.sin(systemAngle) * systemDistance
-                    );
-                    const star = new THREE.Mesh(
-                        new THREE.SphereGeometry(6.5 + (systemIndex % 3) * 1.1, 16, 16),
-                        new THREE.MeshBasicMaterial({ color: new THREE.Color().setHSL((0.04 + systemIndex * 0.13 + seed * 0.03) % 1, 0.82, 0.72), transparent: true, opacity: 0.95 })
-                    );
-                    star.position.copy(systemPosition);
-                    cluster.add(star);
-                    for (let planetIndex = 0; planetIndex < 2; planetIndex++) {
-                        const orbit = 10 + planetIndex * 4 + (systemIndex % 3) * 1.2;
-                        const orbitAngle = spin + systemIndex * 1.047 + planetIndex * Math.PI;
-                        const planet = new THREE.Mesh(
-                            new THREE.SphereGeometry(1.0 + ((systemIndex + planetIndex) % 3) * 0.3, 12, 12),
-                            new THREE.MeshBasicMaterial({ color: new THREE.Color().setHSL((0.08 + systemIndex * 0.11 + planetIndex * 0.17 + seed * 0.03) % 1, 0.72, 0.72), transparent: true, opacity: 0.9 })
-                        );
-                        planet.position.set(systemPosition.x + Math.cos(orbitAngle) * orbit, systemPosition.y + Math.sin(orbitAngle * 1.7) * 2, systemPosition.z + Math.sin(orbitAngle) * orbit);
-                        cluster.add(planet);
-                    }
-                }
+                galaxy.add(horizon);
+                cluster.add(galaxy);
                 loadingBlackHoles.push(new THREE.Vector3().copy(center).add(galaxyOffset));
             }
             scene.add(cluster);
@@ -1285,8 +1300,12 @@
                 cluster.rotation.set(variant * 0.18 + clusterIndex * 0.03, variant * Math.PI * 2 + clusterIndex * 0.17, variant * 0.11);
                 cluster.traverse(child => {
                     if (!child.material || !child.material.color) return;
+                    if (child.userData && child.userData.preserveInstanceColors) {
+                        if (child.material.opacity !== undefined) child.material.opacity = 0.84 + variant * 0.14;
+                        return;
+                    }
                     const lightness = child.material.wireframe ? 0.72 : 0.68;
-                    child.material.color.setHSL((hue + clusterIndex * 0.041) % 1, 0.72, lightness);
+                    child.material.color.setHSL((hue + clusterIndex * 0.041) % 1, 0.78, lightness);
                     if (child.material.opacity !== undefined) child.material.opacity = child.material.wireframe ? 0.22 + variant * 0.2 : 0.72 + variant * 0.2;
                 });
             });
@@ -1306,6 +1325,7 @@
         let pendingUniverse = null;
         let groupZoomOutReady = false;
         let singleViewDirection = new THREE.Vector3(0, 0, 1);
+        let explorerSelectedBubbleId = null;
 
         // バブルの3Dモデル(Mesh)を作る関数
         function createBubbleMesh(size, colorHex, position) {
@@ -1354,6 +1374,24 @@
             }
             return Boolean(activeDB[targetGroupId] && activeDB[targetGroupId].parentId === group.id && bubble.childId === targetGroupId);
         }
+        function selectBubble(bubbleData) {
+            if (explorerMode && bubbleData.childId && activeDB[bubbleData.childId]) {
+                explorerSelectedBubbleId = bubbleData.id;
+                loadGroup(bubbleData.childId);
+            }
+            else if (!explorerMode) loadSingle(bubbleData);
+        }
+
+        function getExplorerZoomTarget() {
+            if (!state.groupData || !Array.isArray(state.groupData.bubbles)) return null;
+            const selected = state.groupData.bubbles.find(bubble => bubble.id === explorerSelectedBubbleId && bubble.childId && activeDB[bubble.childId]);
+            if (selected) return selected;
+            const focus = state.groupData.bubbles.find(bubble => isFocusPathBubble(state.groupData, bubble) && bubble.childId && activeDB[bubble.childId]);
+            if (focus) return focus;
+            return state.groupData.bubbles
+                .filter(bubble => bubble.childId && activeDB[bubble.childId])
+                .sort((a, b) => (Number(b.size) || 0) - (Number(a.size) || 0))[0] || null;
+        }
 
         // 【バブル群画面】 を読み込んで表示する関数
         // isAfterDive: ワープ直後に遠くからズームインしてくる演出を入れるかどうかのフラグ
@@ -1397,6 +1435,15 @@
                 nextScale = Math.max(0.42, previousScale * 0.9);
                 navigationStack.push({ groupId, parentGroupId: data.parentId || previousGroupId, anchorBubbleId: state.bubbleData.id, worldPosition: nextOffset.clone(), worldScale: nextScale, depth: navigationStack.length });
                 transitionType = 'zoomIn';
+            } else if (explorerMode && previousScreen === 'GROUP' && state.groupData) {
+                const anchorBubble = state.groupData.bubbles.find(bubble => bubble.childId === groupId);
+                if (anchorBubble) {
+                    const anchorPosition = new THREE.Vector3(...anchorBubble.pos).multiplyScalar(previousScale);
+                    nextOffset.copy(previousOffset).add(anchorPosition);
+                    nextScale = Math.max(0.42, previousScale * 0.9);
+                    navigationStack.push({ groupId, parentGroupId: data.parentId || previousGroupId, anchorBubbleId: anchorBubble.id, worldPosition: nextOffset.clone(), worldScale: nextScale, depth: navigationStack.length });
+                    transitionType = 'zoomIn';
+                }
             } else if (previousScreen === 'GROUP' && state.groupData && state.groupData.parentId === groupId) {
                 const parentEntryIndex = navigationStack.findIndex(entry => entry.groupId === groupId);
                 const parentEntry = parentEntryIndex >= 0 ? navigationStack[parentEntryIndex] : null;
@@ -1418,6 +1465,7 @@
             state.groupData = data;
             state.bubbleId = null;
             state.bubbleData = null;
+            explorerSelectedBubbleId = null;
 
             // 古いバブル（3DモデルとHTMLラベル）を画面から削除
             const outgoingBubbles = currentBubbles;
@@ -1447,7 +1495,7 @@
                 // ラベルがクリックされたら、そのバブルの個別画面に飛ぶ
                 label.onclick = (e) => {
                     e.stopPropagation(); // 貫通して裏のバブルもクリックされるのを防ぐ
-                    loadSingle(bData);
+                    selectBubble(bData);
                 };
                 labelsContainer.appendChild(label);
 
@@ -1476,7 +1524,7 @@
                 const item = document.createElement('div');
                 const isFocus = isFocusPathBubble(data, bData);
                 item.className = `flex items-center gap-3 cursor-pointer group ${isFocus ? 'rounded-lg border border-yellow-300/80 bg-yellow-300/20 px-2 py-1 shadow-[0_0_14px_rgba(253,224,71,0.45)]' : ''}`;
-                item.onclick = () => loadSingle(bData);
+                item.onclick = () => selectBubble(bData);
                 item.innerHTML = `
                     <div class="w-3 h-3 rounded-full shadow-[0_0_8px_${bData.htmlColor}]" style="background-color: ${bData.htmlColor};"></div>
                     <div class="flex-1 text-sm group-hover:text-white truncate">${bData.name}</div>
@@ -1521,11 +1569,15 @@
 
             const radius = bObj.mesh.scale.x;
             const targetPos = bObj.mesh.position.clone();
-            
+            const currentDirection = camera.position.clone().sub(controls.target);
+            if (currentDirection.lengthSq() > 0.01 && Number.isFinite(currentDirection.x)) {
+                singleViewDirection.copy(currentDirection.normalize());
+            }
+            const viewDirection = singleViewDirection.clone().normalize();
             controls.enabled = false; // マウスによる視点操作を一時無効化
-            // カメラの注視点と位置を、対象のバブルの目の前に移動するように計算
-            targetControlTarget.copy(targetPos).add(new THREE.Vector3(radius * 0.8, 0, 0)); 
-            targetCameraPos.copy(targetPos).add(new THREE.Vector3(0, 0, radius * 1.5 + 2)); 
+            // 現在の視線方向を維持したまま対象バブルへ寄る。固定の正面方向は使わない。
+            targetControlTarget.copy(targetPos);
+            targetCameraPos.copy(targetPos).add(viewDirection.multiplyScalar(radius * 1.5 + 2));
 
             // UIパネルの情報を更新
             document.getElementById('single-title').innerText = bubbleData.name;
@@ -1648,7 +1700,7 @@
                 if (bubbleObj) {
                     if (state.screen === 'GROUP') {
                         // バブル群画面でクリックされたら → 個別バブル画面へズームイン
-                        loadSingle(bubbleObj.data);
+                        selectBubble(bubbleObj.data);
                     } else if (state.screen === 'SINGLE' && bubbleObj.data.id === state.bubbleId) {
                         // 個別バブル画面で、見ているバブル自身をクリックされたら → 解析画面へ移行
                         loadAnalysis();
@@ -1680,13 +1732,11 @@
                     return result;
                 }
                 showToast('APIキー未設定のため固定データを使用します');
-                const entryGroupId = fallbackEntryGroupId(input);
-                return { db: DB, entryGroupId, entryBubbleId: fallbackEntryBubbleId(entryGroupId, input) };
+                return normalizeFallbackUniverse(input);
             }).catch(error => {
                 apiError('Dynamic BubbleBreaker data generation failed。固定データを使用します', { status: error.status || null, requestId: error.requestId || null, message: redactApiLog(error.message), body: error.body || null });
                 showToast('検索に失敗したため固定データを使用します');
-                const entryGroupId = fallbackEntryGroupId(input);
-                return { db: DB, entryGroupId, entryBubbleId: fallbackEntryBubbleId(entryGroupId, input) };
+                return normalizeFallbackUniverse(input);
             });
             universePromise.then(universe => { pendingUniverse = universe; });
 
@@ -1737,16 +1787,33 @@
             if (soundEnabled) playSound('ui');
         });
         document.getElementById('btn-sound-toggle').innerText = soundEnabled ? '🔊 効果音ON' : '🔇 効果音OFF';
+        const reopenPanelsButton = document.getElementById('btn-reopen-panels');
+        document.querySelectorAll('[data-close-panel]').forEach(button => {
+            button.addEventListener('click', () => {
+                const panel = document.getElementById(button.dataset.closePanel);
+                if (panel) panel.classList.add('hidden');
+                reopenPanelsButton.classList.remove('hidden');
+            });
+        });
+        reopenPanelsButton.addEventListener('click', () => {
+            document.querySelectorAll('[data-close-panel]').forEach(button => {
+                const panel = document.getElementById(button.dataset.closePanel);
+                if (panel) panel.classList.remove('hidden');
+            });
+            reopenPanelsButton.classList.add('hidden');
+        });
         const bgmToggle = document.getElementById('bgm-toggle');
         const volumeControl = document.getElementById('audio-volume');
         const bgmTypeControl = document.getElementById('bgm-type');
         const bgmAutoNextControl = document.getElementById('bgm-auto-next');
         const bgmTransitionControl = document.getElementById('bgm-transition');
+        const explorerModeControl = document.getElementById('explorer-mode');
         bgmToggle.checked = bgmEnabled;
         volumeControl.value = String(audioVolume);
         bgmTypeControl.value = bgmType;
         bgmAutoNextControl.checked = bgmAutoNext;
         bgmTransitionControl.value = bgmTransition;
+        explorerModeControl.checked = explorerMode;
         document.getElementById('bgm-audio').addEventListener('ended', () => {
             if (!bgmAutoNext) return;
             bgmTrackIndex = (bgmTrackIndex + 1) % bgmTracks.length;
@@ -1776,6 +1843,11 @@
         bgmTransitionControl.addEventListener('change', () => {
             bgmTransition = bgmTransitionControl.value;
             localStorage.setItem('bubblebreaker.bgmTransition', bgmTransition);
+        });
+        explorerModeControl.addEventListener('change', () => {
+            explorerMode = explorerModeControl.checked;
+            localStorage.setItem('bubblebreaker.explorerMode', explorerMode ? 'on' : 'off');
+            if (explorerMode && state.screen === 'SINGLE' && state.groupId) loadGroup(state.groupId);
         });
 
         // --- マウスホイール(トラックパッドのスワイプ)操作によるズーム/階層移動 ---
@@ -1809,6 +1881,12 @@
                 // 上スクロール（奥へ押し込む）＝ ズームイン（子階層へ進む）
                 if (state.screen === 'SINGLE' && state.bubbleData && state.bubbleData.childId) {
                     loadGroup(state.bubbleData.childId);
+                } else if (state.screen === 'GROUP' && explorerMode) {
+                    const targetBubble = getExplorerZoomTarget();
+                    if (targetBubble) {
+                        explorerSelectedBubbleId = targetBubble.id;
+                        loadGroup(targetBubble.childId);
+                    }
                 }
             }
         }, { passive: false }); // e.preventDefault()を機能させるために必要
