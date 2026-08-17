@@ -628,15 +628,48 @@
             bubbles.forEach(bubble => { bubble.pos = bubble.pos.map(value => Math.max(-50, Math.min(50, value))); });
         }
 
+        function limitGeneratedBubbles(rawGroups, raw) {
+            let limited = false;
+            const entryGroupId = String(raw && raw.entryGroupId || '');
+            const entryBubbleId = String(raw && raw.entryBubbleId || '');
+            const groups = rawGroups.map(group => {
+                if (!group || !Array.isArray(group.bubbles) || group.bubbles.length <= 10) return group;
+                limited = true;
+                const bubbles = group.bubbles.slice();
+                const selected = [];
+                const selectedIds = new Set();
+                const add = bubble => {
+                    if (!bubble || !bubble.id || selected.length >= 10 || selectedIds.has(String(bubble.id))) return;
+                    selected.push(bubble);
+                    selectedIds.add(String(bubble.id));
+                };
+                if (String(group.id) === entryGroupId) add(bubbles.find(bubble => String(bubble.id) === entryBubbleId));
+                if (String(group.id) === entryGroupId) bubbles.filter(bubble => bubble && bubble.childId).forEach(add);
+                if (group.parentId === null || group.parentId === undefined) bubbles.filter(bubble => String(bubble.childId || '') === entryGroupId).forEach(add);
+                bubbles
+                    .filter(bubble => bubble && !selectedIds.has(String(bubble.id)))
+                    .sort((a, b) => (Number(b.size) || 0) - (Number(a.size) || 0))
+                    .forEach(add);
+                return { ...group, bubbles: selected };
+            });
+            return { groups, limited };
+        }
+
         function normalizeGeneratedUniverse(raw) {
             if (!raw || !Array.isArray(raw.groups) || raw.groups.length === 0) throw new Error('API応答にグループがありません');
-            const groups = raw.groups;
+            const limitedResult = limitGeneratedBubbles(raw.groups, raw);
+            const groups = limitedResult.groups;
+            if (limitedResult.limited) apiWarn('API応答のバブル数を最大10個に調整しました', { maxBubbles: 10 });
             const groupIds = new Set();
             const bubbleIds = new Set();
             groups.forEach(group => {
                 if (!group || !group.id || groupIds.has(group.id)) throw new Error('グループIDが不正です');
                 if (!OPENAI_GROUP_TYPES.includes(group.type)) throw new Error('バブル群の型が不正です');
-                if (!Array.isArray(group.bubbles) || group.bubbles.length < 1 || group.bubbles.length > 10) throw new Error('バブル数が不正です');
+                if (!Array.isArray(group.bubbles) || group.bubbles.length < 1 || group.bubbles.length > 10) {
+                    const error = new Error('バブル数が不正です');
+                    error.code = 'API_INVALID_BUBBLE_COUNT';
+                    throw error;
+                }
                 groupIds.add(String(group.id));
             });
             const db = {};
@@ -675,16 +708,17 @@
             const entryGroup = db[entryGroupId];
             const entryBubble = entryGroup && entryGroup.bubbles.find(bubble => bubble.id === String(raw.entryBubbleId || ''));
             const parentGroup = entryGroup && entryGroup.parentId ? db[entryGroup.parentId] : null;
-            const childGroups = Object.values(db).filter(group => group.parentId === entryGroupId);
+            const directChildGroups = Object.values(db).filter(group => group.parentId === entryGroupId);
+            const childIds = entryGroup ? entryGroup.bubbles.map(bubble => bubble.childId) : [];
+            const childGroups = directChildGroups.filter(group => childIds.includes(group.id));
             if (!entryGroup || !entryBubble || !parentGroup || parentGroup.parentId !== null) {
                 throw new Error('entryGroupIdは入力意見を含む中間カテゴリである必要があります');
             }
             if (parentGroup.bubbles.length < 2) throw new Error('上位カテゴリのバブルが不足しています');
-            const childIds = entryGroup.bubbles.map(bubble => bubble.childId);
             if (childIds.some(childId => !childId) || new Set(childIds).size !== entryGroup.bubbles.length) {
                 throw new Error('中央カテゴリの全バブルに固有の下位カテゴリ接続が必要です');
             }
-            if (childGroups.length !== entryGroup.bubbles.length || childGroups.some(group => !childIds.includes(group.id))) {
+            if (childGroups.length !== entryGroup.bubbles.length) {
                 throw new Error('中央カテゴリのバブル数と下位カテゴリ数が一致しません');
             }
             if (entryBubble.childId && !childGroups.some(group => group.id === entryBubble.childId)) {
@@ -703,11 +737,11 @@
         }
 
         function buildOpenAIRequest(input, options = {}) {
-            const prompt = `ユーザーの意見: ${input}\n\n日本語圏を中心にWeb Searchで関連する公開情報を調査し、BubbleBreaker用のバブル宇宙を生成してください。\n- groupsは必ず「上位カテゴリ → 入力意見を含む中央カテゴリ → 中央カテゴリの各バブルに対応する下位カテゴリ」の3階層にする。入力確定後に表示するのは中央カテゴリです\n- entryGroupIdは必ず「入力された意見のバブルが含まれる中央カテゴリ」のIDにする。入力意見の細かな理由・属性・詳細を並べる下位カテゴリをentryGroupIdにしてはいけない。例えば「きのこの山が好き」なら、中央カテゴリは「きのこの山派・たけのこの里派・木こりの切り株派」のような選択肢のカテゴリにし、詳細な好みの分類は各バブル固有の下位カテゴリにする\n- entryBubbleIdは中央カテゴリ内でユーザーの入力意見に対応するバブルのIDにする\n- 中央カテゴリの全バブルに、それぞれ異なる下位カテゴリのchildIdを必ず設定する。下位カテゴリは各バブルの詳細・理由・評価を表す\n- 上位カテゴリには中央カテゴリへつながるバブルを1つ以上設定し、上位カテゴリは最低2個、通常10個のバブルを生成する\n- 各グループは通常10個のバブルを生成する。検索で裏付けられる候補が少ない場合は1〜10個を許容し、根拠のない項目で水増ししない\n- バブル群のtypeは「分散型」「一極集中型」「多極型」のいずれか\n- sizeは検索ソースの言及量・傾向に基づく相対的な推定値で、グループ内合計を100に正規化する\n- 意見が近いバブルは近いpos、対立するバブルは離れたposにする。バブル同士が重ならないようにposを十分に離す\n- overview/history/demographic/evaluationには要約、インサイト、グラフ用metricsを含める\n- 各バブルのdesc、各分析のsummaryとinsightは短文にする。各分析のmetricsは最大3件、各バブルのsourcesは最大3件、各sourceのclaimsは最大2件にする\n- sizeと解析データが推定である場合はisEstimated=trueにする\n- 使用した公開ソースのURLと、そのソースが裏付ける内容をsourcesに含める\n- JSON Schema以外の文章は出力しない`;
+            const prompt = `ユーザーの意見: ${input}\n\n日本語圏を中心にWeb Searchで関連する公開情報を調査し、BubbleBreaker用のバブル宇宙を生成してください。\n- groupsは必ず「上位カテゴリ → 入力意見を含む中央カテゴリ → 中央カテゴリの各バブルに対応する下位カテゴリ」の3階層にする。入力確定後に表示するのは中央カテゴリです\n- entryGroupIdは必ず「入力された意見のバブルが含まれる中央カテゴリ」のIDにする。入力意見の細かな理由・属性・詳細を並べる下位カテゴリをentryGroupIdにしてはいけない。例えば「きのこの山が好き」なら、中央カテゴリは「きのこの山派・たけのこの里派・木こりの切り株派」のような選択肢のカテゴリにし、詳細な好みの分類は各バブル固有の下位カテゴリにする\n- entryBubbleIdは中央カテゴリ内でユーザーの入力意見に対応するバブルのIDにする\n- 中央カテゴリの全バブルに、それぞれ異なる下位カテゴリのchildIdを必ず設定する。下位カテゴリは各バブルの詳細・理由・評価を表す\n- 上位カテゴリには中央カテゴリへつながるバブルを1つ以上設定し、上位カテゴリは最低2個、通常5個のバブルを生成する\n- 各グループは通常5個のバブルを生成する。検索で裏付けられる候補が少ない場合は1〜10個を許容し、10個を超えるバブルは絶対に出力しない。下位カテゴリは通常3〜5個にする\n- バブル群のtypeは「分散型」「一極集中型」「多極型」のいずれか\n- sizeは検索ソースの言及量・傾向に基づく相対的な推定値で、グループ内合計を100に正規化する\n- 意見が近いバブルは近いpos、対立するバブルは離れたposにする。バブル同士が重ならないようにposを十分に離す\n- overview/history/demographic/evaluationには要約、インサイト、グラフ用metricsを含める\n- 各バブルのdesc、各分析のsummaryとinsightは短文にする。各分析のmetricsは最大3件、各バブルのsourcesは最大3件、各sourceのclaimsは最大2件にする\n- sizeと解析データが推定である場合はisEstimated=trueにする\n- 使用した公開ソースのURLと、そのソースが裏付ける内容をsourcesに含める\n- JSON Schema以外の文章は出力しない`;
             const compactInstruction = options.compact ? '\n- これは再試行です。必ず簡潔なJSONだけを返し、desc・summary・insightは短文、各metricsは最大3件、各sourcesは最大3件、各claimsは最大2件にしてください。' : '';
             const requestPrompt = `${prompt}${compactInstruction}`;
             return {
-                model: OPENAI_MODEL, store: false, max_output_tokens: 24000, tool_choice: 'required',
+                model: OPENAI_MODEL, store: false, max_output_tokens: 32000, tool_choice: 'required',
                 tools: [{ type: 'web_search', search_context_size: 'medium', user_location: { type: 'approximate', country: 'JP', timezone: 'Asia/Tokyo' } }],
                 input: [
                     { role: 'system', content: [{ type: 'input_text', text: 'あなたはBubbleBreakerの情報分析エンジンです。Web Searchを使って公開情報を調査し、出典と推定の区別を保った構造化データを返してください。' }] },
@@ -753,7 +787,7 @@
             let lastError = null;
             for (let attempt = 0; attempt < OPENAI_MAX_ATTEMPTS; attempt++) {
                 const attemptStartedAt = performance.now();
-                const compactOutput = attempt > 0 && lastError && (lastError.code === 'API_INCOMPLETE_OUTPUT' || lastError.code === 'API_JSON_PARSE_ERROR');
+                const compactOutput = attempt > 0 && lastError && ['API_TIMEOUT', 'API_NETWORK_ERROR', 'API_INCOMPLETE_OUTPUT', 'API_JSON_PARSE_ERROR', 'API_INVALID_BUBBLE_COUNT'].includes(lastError.code);
                 apiLog('APIリクエスト開始', { attempt: attempt + 1, maxAttempts: OPENAI_MAX_ATTEMPTS, timeoutMs: OPENAI_REQUEST_TIMEOUT_MS, model: OPENAI_MODEL, inputLength: input.length, compactOutput });
                 try {
                     const response = await fetchWithTimeout('https://api.openai.com/v1/responses', {
@@ -799,12 +833,19 @@
                         throw jsonError;
                     }
                     apiLog('Structured OutputsのJSON解析に成功', { attempt: attempt + 1, groupCount: Array.isArray(parsed.groups) ? parsed.groups.length : 0, entryGroupId: parsed.entryGroupId || null });
-                    const universe = normalizeGeneratedUniverse(parsed);
+                    let universe;
+                    try {
+                        universe = normalizeGeneratedUniverse(parsed);
+                    } catch (normalizationError) {
+                        if (!normalizationError.code && normalizationError.message.includes('バブル数')) normalizationError.code = 'API_INVALID_BUBBLE_COUNT';
+                        if (!normalizationError.code) normalizationError.code = 'API_INVALID_UNIVERSE';
+                        throw normalizationError;
+                    }
                     apiLog('バブル宇宙の正規化に成功', { attempt: attempt + 1, groupCount: Object.keys(universe.db).length, entryGroupId: universe.entryGroupId, bubbleCounts: Object.values(universe.db).map(group => ({ groupId: group.id, count: group.bubbles.length })) });
                     return universe;
                 } catch (error) {
                     lastError = error;
-                    const retryable = error.code === 'API_TIMEOUT' || error.code === 'API_NETWORK_ERROR' || error.code === 'API_INCOMPLETE_OUTPUT' || error.code === 'API_JSON_PARSE_ERROR' || error.status === 408 || error.status === 409 || error.status === 429 || error.status >= 500;
+                    const retryable = error.code === 'API_TIMEOUT' || error.code === 'API_NETWORK_ERROR' || error.code === 'API_INCOMPLETE_OUTPUT' || error.code === 'API_JSON_PARSE_ERROR' || error.code === 'API_INVALID_BUBBLE_COUNT' || error.status === 408 || error.status === 409 || error.status === 429 || error.status >= 500;
                     apiError('APIリクエスト試行に失敗しました', { attempt: attempt + 1, maxAttempts: OPENAI_MAX_ATTEMPTS, code: error.code || null, reason: error.reason || null, status: error.status || null, requestId: error.requestId || null, timeoutMs: error.timeoutMs || null, message: redactApiLog(error.message), body: error.body || null, retryable });
                     if (!retryable || attempt === OPENAI_MAX_ATTEMPTS - 1) break;
                     apiWarn('リトライします', { nextAttempt: attempt + 2, waitMs: 1000 * (attempt + 1) });
