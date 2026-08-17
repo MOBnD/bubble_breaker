@@ -911,6 +911,8 @@
         const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
         renderer.setClearColor(0x050510, 1);
         renderer.outputEncoding = THREE.sRGBEncoding;
+        renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        renderer.toneMappingExposure = 1.25;
         renderer.setSize(window.innerWidth, window.innerHeight);
         renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)); // 高解像度ディスプレイ対応
         container.appendChild(renderer.domElement);
@@ -975,18 +977,83 @@
         const starMesh = new THREE.Points(starsGeometry, starsMaterial);
         scene.add(starMesh);
 
+        const galaxyClusters = [];
+        const galaxyClusterCenters = [
+            new THREE.Vector3(0, 0, -90),
+            new THREE.Vector3(180, 55, -170),
+            new THREE.Vector3(-210, -70, -250),
+            new THREE.Vector3(90, -120, -330)
+        ];
+
+        function createGalaxyCluster(center, seed) {
+            const cluster = new THREE.Group();
+            cluster.position.copy(center);
+            for (let galaxyIndex = 0; galaxyIndex < 4; galaxyIndex++) {
+                const positions = [];
+                const galaxyAngle = galaxyIndex * Math.PI * 0.5 + seed * 0.13;
+                const galaxyOffset = new THREE.Vector3(Math.cos(galaxyAngle) * 34, Math.sin(galaxyAngle * 1.7) * 20, Math.sin(galaxyAngle) * 34);
+                for (let i = 0; i < 280; i++) {
+                    const radius = Math.sqrt(i / 280) * 28;
+                    const angle = radius * 0.22 + galaxyAngle + (i % 7) * 0.08;
+                    positions.push(
+                        Math.cos(angle) * radius + (Math.random() - 0.5) * 3,
+                        (Math.random() - 0.5) * Math.max(1, radius * 0.18),
+                        Math.sin(angle) * radius + (Math.random() - 0.5) * 3
+                    );
+                }
+                const geometry = new THREE.BufferGeometry();
+                geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+                const material = new THREE.PointsMaterial({
+                    color: new THREE.Color().setHSL(0.58 + galaxyIndex * 0.06, 0.75, 0.68),
+                    size: 1.8,
+                    transparent: true,
+                    opacity: 0.85,
+                    blending: THREE.AdditiveBlending
+                });
+                const galaxy = new THREE.Points(geometry, material);
+                galaxy.position.copy(galaxyOffset);
+                cluster.add(galaxy);
+
+                const blackHole = new THREE.Mesh(
+                    new THREE.SphereGeometry(5.5, 32, 32),
+                    new THREE.MeshBasicMaterial({ color: 0x020106 })
+                );
+                blackHole.position.copy(galaxyOffset);
+                cluster.add(blackHole);
+                const disk = new THREE.Mesh(
+                    new THREE.TorusGeometry(8, 0.9, 12, 64),
+                    new THREE.MeshBasicMaterial({ color: 0xff7b38, transparent: true, opacity: 0.8, blending: THREE.AdditiveBlending })
+                );
+                disk.rotation.x = Math.PI * 0.5;
+                disk.position.copy(galaxyOffset);
+                cluster.add(disk);
+            }
+            scene.add(cluster);
+            galaxyClusters.push(cluster);
+        }
+
+        galaxyClusterCenters.forEach((center, index) => createGalaxyCluster(center, index));
+
         // --- 個別のバブル（球体）を生成・管理する仕組み ---
         let currentBubbles = []; // 現在画面に表示されているバブルの配列を保存
         let targetCameraPos = new THREE.Vector3(0, 0, 25);     // カメラが移動する目標地点
         let targetControlTarget = new THREE.Vector3(0, 0, 0);  // カメラが向くべき注視点の目標地点
+        let groupWorldOffset = new THREE.Vector3(0, 0, 0);
+        let transitionState = null;
+        let loadingAnimation = null;
+        let pendingUniverse = null;
 
         // バブルの3Dモデル(Mesh)を作る関数
         function createBubbleMesh(size, colorHex, position) {
             // ガラスのような質感を出すための物理ベースマテリアル設定
+            const displayColor = new THREE.Color(colorHex);
+            const hsl = {};
+            displayColor.getHSL(hsl);
+            displayColor.setHSL(hsl.h, Math.max(0.58, hsl.s), Math.max(0.48, hsl.l));
             const material = new THREE.MeshPhysicalMaterial({
-                color: colorHex, metalness: 0.1, roughness: 0.1, transmission: 0.35,
+                color: displayColor, metalness: 0.05, roughness: 0.2, transmission: 0.18,
                 transparent: true, opacity: 0.95, ior: 1.5, clearcoat: 1.0, clearcoatRoughness: 0.1,
-                emissive: colorHex, emissiveIntensity: 0.08
+                emissive: displayColor, emissiveIntensity: 0.22
             });
             const mesh = new THREE.Mesh(new THREE.SphereGeometry(1, 64, 64), material);
             const radius = Math.pow(size, 0.45); // サイズ値から半径を計算（極端に大きくなりすぎないように調整）
@@ -1018,14 +1085,32 @@
         window.loadGroup = function(groupId, isAfterDive = false) {
             const data = activeDB[groupId];
             if(!data) return;
-            
+            const previousGroupId = state.groupId;
+            const previousScreen = state.screen;
+            const previousOffset = groupWorldOffset.clone();
+            let nextOffset = previousOffset.clone();
+            let transitionType = 'instant';
+            if (isAfterDive) {
+                nextOffset.set(0, 0, 0);
+                transitionType = 'dive';
+            } else if (previousScreen === 'SINGLE' && groupId === previousGroupId) {
+                transitionType = 'reveal';
+            } else if (previousScreen === 'SINGLE' && state.bubbleData && state.bubbleData.childId === groupId) {
+                nextOffset.copy(previousOffset).add(new THREE.Vector3(...state.bubbleData.pos));
+                transitionType = 'zoomIn';
+            } else if (previousScreen === 'GROUP' && state.groupData && state.groupData.parentId === groupId) {
+                const parentBubble = data.bubbles.find(bubble => bubble.childId === previousGroupId);
+                if (parentBubble) nextOffset.copy(previousOffset).sub(new THREE.Vector3(...parentBubble.pos));
+                transitionType = 'zoomOut';
+            }
+            groupWorldOffset.copy(nextOffset);
             state.groupId = groupId;
             state.groupData = data;
             state.bubbleId = null;
             state.bubbleData = null;
 
             // 古いバブル（3DモデルとHTMLラベル）を画面から削除
-            currentBubbles.forEach(disposeBubble);
+            const outgoingBubbles = currentBubbles;
             currentBubbles = [];
             labelsContainer.innerHTML = '';
 
@@ -1033,7 +1118,14 @@
             // 固定DBとAPIデータのどちらでも、球体の半径を考慮して重なりを解消する。
             separateBubblePositions(data.bubbles);
             data.bubbles.forEach(bData => {
-                const mesh = createBubbleMesh(bData.size, bData.color, bData.pos);
+                const worldPosition = new THREE.Vector3(...bData.pos).add(nextOffset);
+                const mesh = createBubbleMesh(bData.size, bData.color, worldPosition.toArray());
+                const finalRadius = mesh.scale.x;
+                mesh.userData.finalScale = finalRadius;
+                if (transitionType !== 'instant') {
+                    mesh.scale.setScalar(finalRadius * 0.12);
+                    mesh.material.opacity = 0.02;
+                }
                 scene.add(mesh);
 
                 // 3Dバブルに追従させるためのHTMLラベルを作成
@@ -1050,6 +1142,12 @@
                 // 生成したデータを配列に保存
                 currentBubbles.push({ mesh, label, data: bData, baseX: mesh.position.x, baseY: mesh.position.y });
             });
+
+            if (transitionType === 'instant') {
+                outgoingBubbles.forEach(disposeBubble);
+            } else {
+                transitionState = { outgoing: outgoingBubbles, incoming: currentBubbles, startedAt: performance.now(), duration: transitionType === 'dive' ? 1800 : 1100, type: transitionType };
+            }
 
             // UIパネルの情報を更新
             document.getElementById('group-title').innerText = data.title;
@@ -1073,20 +1171,19 @@
 
             // カメラ位置の設定（ダイブ後か、通常の移動かで動きを変える）
             if (isAfterDive) {
-                // ワープ明けの演出：超遠距離(Z=400)に瞬間移動させ、そこから目標(Z=25)へ滑らかにアニメーションさせる
+                // 銀河団の中心から中央カテゴリへ滑らかに接近する。
                 controls.enabled = false;
-                camera.position.set(0, 0, 400); 
-                targetCameraPos.set(0, 0, 25); 
+                camera.position.copy(nextOffset).add(new THREE.Vector3(0, 0, 70));
+                targetCameraPos.copy(nextOffset).add(new THREE.Vector3(0, 0, 25));
                 isZoomingIntoGroup = true;
             } else {
-                // 通常の移動：最初から標準距離にセット
-                controls.enabled = true;
-                camera.position.set(0, 0, 25);
-                targetCameraPos.set(0, 0, 25);
+                controls.enabled = transitionType === 'instant';
+                if (transitionType === 'instant') camera.position.copy(nextOffset).add(new THREE.Vector3(0, 0, 25));
+                targetCameraPos.copy(nextOffset).add(new THREE.Vector3(0, 0, 25));
             }
             // カメラの向き（注視点）を空間の中央にリセット
-            controls.target.set(0, 0, 0);
-            targetControlTarget.set(0, 0, 0);
+            controls.target.copy(nextOffset);
+            targetControlTarget.copy(nextOffset);
             controls.update();
             
             // 画面UIをバブル群画面(GROUP)に切り替え
@@ -1270,31 +1367,28 @@
                 showToast('検索に失敗したため固定データを使用します');
                 return { db: DB, entryGroupId: fallbackEntryGroupId(input) };
             });
+            universePromise.then(universe => { pendingUniverse = universe; });
 
             panel.style.transform = 'scale(0.5)';
             panel.style.opacity = '0';
             panel.style.pointerEvents = 'none';
             showToast('Web Searchで対象のバブル宇宙を調査しています... 🚀');
 
-            isDiving = true;
-            diveStartTime = clock.getElapsedTime();
-
-            // ワープの最低演出時間を確保し、APIが遅い場合は生成完了まで待つ。
-            setTimeout(async () => {
-                isDiving = false;
-                const universe = await universePromise;
+            startLoadingAnimation();
+            loadingAnimation.onReady = () => {
+                const universe = pendingUniverse;
+                pendingUniverse = null;
+                if (!universe) return;
                 activeDB = universe.db;
-
                 document.getElementById('screen-input').classList.remove('screen-active');
                 document.getElementById('screen-input').classList.add('screen-hidden');
                 camera.fov = 60;
                 camera.updateProjectionMatrix();
                 camera.rotation.set(0, 0, 0);
-
                 isGenerating = false;
                 button.disabled = false;
                 loadGroup(universe.entryGroupId, true);
-            }, 4000);
+            };
         });
 
         // テキストボックスでEnterキーを押した時もダイブボタンをクリックした扱いにする
@@ -1353,13 +1447,89 @@
         // ==========================================
         const clock = new THREE.Clock(); // 経過時間を計るためのクラス
 
+        function startLoadingAnimation() {
+            loadingAnimation = { startedAt: performance.now(), cycleDuration: 5600, onReady: null };
+            isDiving = true;
+            controls.enabled = false;
+            camera.position.set(0, 0, 25);
+            targetControlTarget.set(0, 0, -90);
+            camera.lookAt(targetControlTarget);
+            galaxyClusters.forEach((cluster, index) => { cluster.visible = index < 3; });
+        }
+
+        function updateLoadingAnimation() {
+            if (!loadingAnimation) return;
+            const elapsed = performance.now() - loadingAnimation.startedAt;
+            const cycle = Math.floor(elapsed / loadingAnimation.cycleDuration);
+            const phase = (elapsed % loadingAnimation.cycleDuration) / loadingAnimation.cycleDuration;
+            const from = galaxyClusterCenters[cycle % galaxyClusterCenters.length];
+            const to = galaxyClusterCenters[(cycle + 1) % galaxyClusterCenters.length];
+            const blackHole = from.clone().add(new THREE.Vector3(34, 0, 0));
+            const entrance = from.clone().add(new THREE.Vector3(0, 0, 95));
+            const exit = blackHole.clone().add(new THREE.Vector3(0, 0, -32));
+            if (phase < 0.36) {
+                const p = phase / 0.36;
+                camera.position.lerpVectors(entrance, blackHole.clone().add(new THREE.Vector3(0, 0, 18)), p);
+                targetControlTarget.lerpVectors(from, blackHole, p);
+            } else if (phase < 0.62) {
+                const p = (phase - 0.36) / 0.26;
+                camera.position.lerpVectors(blackHole.clone().add(new THREE.Vector3(0, 0, 18)), exit, p);
+                targetControlTarget.copy(blackHole);
+            } else {
+                const p = (phase - 0.62) / 0.38;
+                camera.position.lerpVectors(exit, to.clone().add(new THREE.Vector3(0, 0, 95)), p);
+                targetControlTarget.lerpVectors(blackHole, to, p);
+            }
+            camera.lookAt(targetControlTarget);
+            starMesh.rotation.y += 0.01;
+            starMesh.rotation.z += 0.006;
+            galaxyClusters.forEach((cluster, index) => {
+                cluster.rotation.y += 0.0015 + index * 0.0002;
+                cluster.rotation.z += 0.0005;
+            });
+            if (pendingUniverse && phase > 0.78 && typeof loadingAnimation.onReady === 'function') {
+                const onReady = loadingAnimation.onReady;
+                loadingAnimation = null;
+                isDiving = false;
+                onReady();
+            }
+        }
+
+        function updateGroupTransition() {
+            if (!transitionState) return;
+            const progress = Math.min(1, (performance.now() - transitionState.startedAt) / transitionState.duration);
+            const eased = progress * progress * (3 - 2 * progress);
+            camera.position.lerp(targetCameraPos, 0.08);
+            controls.target.lerp(targetControlTarget, 0.08);
+            camera.lookAt(controls.target);
+            transitionState.incoming.forEach(bubble => {
+                const finalScale = bubble.mesh.userData.finalScale || bubble.mesh.scale.x;
+                bubble.mesh.scale.setScalar(finalScale * (0.12 + eased * 0.88));
+                bubble.mesh.material.opacity = 0.02 + eased * 0.93;
+            });
+            transitionState.outgoing.forEach(bubble => {
+                bubble.mesh.material.opacity = Math.max(0, 0.9 * (1 - eased));
+                bubble.mesh.visible = bubble.mesh.material.opacity > 0.01;
+            });
+            if (progress >= 1) {
+                transitionState.outgoing.forEach(disposeBubble);
+                transitionState = null;
+                isZoomingIntoGroup = false;
+                controls.enabled = true;
+            }
+        }
+
         function animate() {
             // ブラウザの描画タイミングに合わせて次のフレームを予約（ループの仕組み）
             requestAnimationFrame(animate);
             const time = clock.getElapsedTime(); // アプリ起動からの経過秒数
 
             // --- 状態に応じたカメラ・演出の制御 ---
-            if (isDiving) {
+            if (loadingAnimation) {
+                updateLoadingAnimation();
+            } else if (transitionState) {
+                updateGroupTransition();
+            } else if (isDiving) {
                 // 【ダイブアニメーション中】
                 // 経過時間(0~4秒)から進捗率(0~1)を計算
                 const t = time - diveStartTime; 
@@ -1418,9 +1588,9 @@
                 const isTarget = (state.bubbleId === b.data.id);
                 // 対象バブル以外は目標不透明度を 0 にしてフェードアウトさせる
                 const targetOpacity = (isAnalysisOrDetail && !isTarget) ? 0.0 : 0.9;
-                
-                // 不透明度を滑らかに変化させる
-                b.mesh.material.opacity += (targetOpacity - b.mesh.material.opacity) * 0.1;
+
+                // グループ遷移中は専用アニメーションが不透明度と縮尺を制御する。
+                if (!transitionState) b.mesh.material.opacity += (targetOpacity - b.mesh.material.opacity) * 0.1;
                 // 完全に透明になったら、3D的な描画やクリック判定の対象から外す
                 b.mesh.visible = b.mesh.material.opacity > 0.01; 
                 
