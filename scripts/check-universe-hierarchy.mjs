@@ -30,7 +30,7 @@ const context = {
     fetch
 };
 vm.createContext(context);
-vm.runInContext(`${dataSource}\n${apiSource}\nglobalThis.__bubbleBreakerTest = { normalizeGeneratedUniverse, normalizeFallbackUniverse, buildOpenAIRootRequest, buildOpenAICentralGroupRequest, buildOpenAILeafGroupRequest, buildOpenAIBubbleAnalysisRequest, requestBubbleAnalysis, requestBubbleGroupAnalyses };`, context);
+vm.runInContext(`${dataSource}\n${apiSource}\nglobalThis.__bubbleBreakerTest = { normalizeGeneratedUniverse, normalizeFallbackUniverse, compactHierarchyBubbleName, buildOpenAIRootRequest, buildOpenAICentralGroupRequest, buildOpenAILeafGroupRequest, buildOpenAIBubbleAnalysisRequest, requestBubbleAnalysis, requestBubbleGroupAnalyses };`, context);
 
 const bubble = (id, childId = null) => ({
     id, name: id, size: 1, color: 0x4488ff, htmlColor: '#4488ff',
@@ -50,6 +50,8 @@ const groups = [
 ];
 
 const normalize = context.__bubbleBreakerTest.normalizeGeneratedUniverse;
+assert.equal(context.__bubbleBreakerTest.compactHierarchyBubbleName('選択肢A・選択肢B・選択肢C', 'central'), '選択肢A・選択肢Bなど', 'hierarchy bubble names should not enumerate every lower option');
+assert.ok(context.__bubbleBreakerTest.compactHierarchyBubbleName('これは非常に長い上位カテゴリ名称です', 'root').length <= 24, 'hierarchy bubble names should have a safe display length');
 const rootRequest = context.__bubbleBreakerTest.buildOpenAIRootRequest('テスト意見');
 assert.equal(rootRequest.reasoning.effort, 'low', 'root generation should use low reasoning effort');
 assert.equal(rootRequest.tools[0].search_context_size, 'medium', 'root generation should keep medium web search context');

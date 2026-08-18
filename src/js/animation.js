@@ -4,7 +4,11 @@
         const clock = new THREE.Clock(); // 経過時間を計るためのクラス
 
         function getLoadingBlackHoleTarget(index) {
-            if (galaxyBlackHoleTargets[index]) return galaxyBlackHoleTargets[index];
+            if (galaxyBlackHoleTargets[index]) {
+                const target = galaxyBlackHoleTargets[index];
+                if (target.galaxy && target.blackHole) target.blackHole.getWorldPosition(target.position);
+                return target;
+            }
             if (loadingBlackHoles[index]) return { position: loadingBlackHoles[index], galaxy: null, blackHole: null };
             return { position: new THREE.Vector3(0, 0, -90), galaxy: null, blackHole: null };
         }
@@ -109,6 +113,21 @@
         }
 
         function updateCosmicEnvironment(time) {
+            starMesh.rotation.y += 0.000004;
+            starMesh.rotation.x += 0.000001;
+            galaxyStructures.forEach((entry, index) => {
+                entry.galaxy.rotation.y += entry.speed;
+                entry.galaxy.rotation.z = Math.sin(time * 0.08 + entry.phase) * 0.025;
+            });
+            galaxyClusters.forEach((cluster, index) => {
+                cluster.rotation.y += 0.000008 + index * 0.0000015;
+            });
+            shootingStars.forEach((entry, index) => {
+                entry.streak.position.add(entry.velocity);
+                entry.life -= 0.016;
+                entry.streak.material.opacity = Math.min(0.78, Math.max(0, entry.life * 0.28));
+                if (entry.life <= 0 || entry.streak.position.length() > 9200) resetShootingStar(entry, index);
+            });
             cosmicSystems.forEach((entry, index) => {
                 entry.system.rotation.y += 0.00018 + index * 0.00003;
                 entry.planets.forEach(planet => {
@@ -123,9 +142,8 @@
                 cloud.rotation.y += 0.00004 + index * 0.000006;
                 cloud.rotation.z += 0.000018;
             });
-            const milkyWay = cosmicBackgroundGroup.userData.milkyWay;
-            if (milkyWay) milkyWay.rotation.y = -0.24 + Math.sin(time * 0.012) * 0.025;
-            cosmicBackgroundGroup.rotation.y = Math.sin(time * 0.008) * 0.012;
+            cosmicBackgroundGroup.rotation.y += 0.000012;
+            cosmicBackgroundGroup.rotation.x += 0.0000025;
         }
 
         function animate() {

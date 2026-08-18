@@ -643,7 +643,7 @@
             const repairInstruction = options.repair
                 ? '\n- 前回のroot応答を検証できませんでした。rootだけを再生成し、childIdを必ずnullにしてください。'
                 : '';
-            const prompt = `ユーザーの意見: ${input}\n\nWeb Searchを使って、入力意見を含むテーマ全体の最上位カテゴリだけを生成してください。\n- groupsはroot 1つだけにし、rootのバブルは2〜${OPENAI_STRUCTURE_MAX_BUBBLES}個の意味的に異なる上位分類にしてください。\n- 入力意見が意味的に属するrootバブルを1つ選び、その実在するバブルIDをentryRootBubbleIdに設定してください。entryRootBubbleIdは必須で、曖昧でもnullにしてはいけません。\n- levelはroot、parentIdとparentBubbleIdはnull、すべてのchildIdはnullにしてください。中央・下位カテゴリはこの要求では生成しないでください。\n- 入力意見の経路だけを特別扱いせず、あとで各rootバブルを同じ調査深度で展開できる分類軸にしてください。\n- カテゴリ名・バブル名は具体的な意味内容を持たせ、テンプレート名、機械的な接尾辞、代表的な系統などの汎用ラベルは禁止です。\n- 全IDは一意な短いASCII文字列にし、analysis、metrics、sourcesは生成しないでください。JSON Schema以外の文章は出力しないでください。${repairInstruction}`;
+            const prompt = `ユーザーの意見: ${input}\n\nWeb Searchを使って、入力意見を含むテーマ全体の最上位カテゴリだけを生成してください。\n- groupsはroot 1つだけにし、rootのバブルは2〜${OPENAI_STRUCTURE_MAX_BUBBLES}個の意味的に異なる上位分類にしてください。\n- rootバブル名は下位候補を列挙せず、全体を包む短い名称にしてください。原則24文字以内にし、「・」「、」などで3つ以上の候補を並べないでください。\n- 入力意見が意味的に属するrootバブルを1つ選び、その実在するバブルIDをentryRootBubbleIdに設定してください。entryRootBubbleIdは必須で、曖昧でもnullにしてはいけません。\n- levelはroot、parentIdとparentBubbleIdはnull、すべてのchildIdはnullにしてください。中央・下位カテゴリはこの要求では生成しないでください。\n- 入力意見の経路だけを特別扱いせず、あとで各rootバブルを同じ調査深度で展開できる分類軸にしてください。\n- カテゴリ名・バブル名は具体的な意味内容を持たせ、テンプレート名、機械的な接尾辞、代表的な系統などの汎用ラベルは禁止です。\n- 全IDは一意な短いASCII文字列にし、analysis、metrics、sourcesは生成しないでください。JSON Schema以外の文章は出力しないでください。${repairInstruction}`;
             return {
                 model: OPENAI_MODEL, store: false, reasoning: { effort: 'low' }, max_output_tokens: 7000,
                 tool_choice: 'required',
@@ -664,7 +664,7 @@
             const entryInstruction = isEntryBranch
                 ? '- このcentralはroot段階で入力意見の所属先として指定された枝です。入力意見に対応するcentralバブルを必ず1つ含め、その実在IDをentryBubbleIdに設定してください。'
                 : '- このcentralは入力意見の所属先ではありません。entryBubbleIdは必ずnullにし、入力意見バブルを作らないでください。';
-            const prompt = `ユーザーの意見: ${input}\nrootカテゴリ: ${rootGroup.title}（${rootGroup.id}）\n展開対象のrootバブル: ${rootBubble.name}（${rootBubble.id}）\n\nWeb Searchを使って、指定されたrootバブルの直下にあるcentralカテゴリを1つだけ生成してください。\n- groupsはcentral 1つだけにし、levelはcentral、parentIdは${rootGroup.id}、parentBubbleIdは${rootBubble.id}と完全一致させてください。\n- centralのバブルは2〜${OPENAI_STRUCTURE_MAX_BUBBLES}個の具体的な、互いに意味の異なる内容にしてください。各childIdはnullにしてください。\n${entryInstruction}\n- rootバブルの意味に直接包含される一段下だけを生成し、二段下の内容をcentralバブルに混ぜないでください。\n- 入力意見の経路だけを特別扱いせず、他のrootバブルと同じ具体性で生成してください。テンプレート名、親名への機械的な接尾辞、汎用ラベルは禁止です。\n- 全IDは一意な短いASCII文字列にし、analysis、metrics、sourcesは生成しないでください。JSON Schema以外の文章は出力しないでください。${repairInstruction}`;
+            const prompt = `ユーザーの意見: ${input}\nrootカテゴリ: ${rootGroup.title}（${rootGroup.id}）\n展開対象のrootバブル: ${rootBubble.name}（${rootBubble.id}）\n\nWeb Searchを使って、指定されたrootバブルの直下にあるcentralカテゴリを1つだけ生成してください。\n- groupsはcentral 1つだけにし、levelはcentral、parentIdは${rootGroup.id}、parentBubbleIdは${rootBubble.id}と完全一致させてください。\n- centralのバブルは2〜${OPENAI_STRUCTURE_MAX_BUBBLES}個の具体的な、互いに意味の異なる内容にしてください。各childIdはnullにしてください。\n- centralバブル名は下位候補をすべて列挙せず、意味を包む短い名称にしてください。原則24文字以内にし、「・」「、」などで3つ以上の候補を並べないでください。\n${entryInstruction}\n- rootバブルの意味に直接包含される一段下だけを生成し、二段下の内容をcentralバブルに混ぜないでください。\n- 入力意見の経路だけを特別扱いせず、他のrootバブルと同じ具体性で生成してください。テンプレート名、親名への機械的な接尾辞、汎用ラベルは禁止です。\n- 全IDは一意な短いASCII文字列にし、analysis、metrics、sourcesは生成しないでください。JSON Schema以外の文章は出力しないでください。${repairInstruction}`;
             return {
                 model: OPENAI_MODEL, store: false, reasoning: { effort: 'low' }, max_output_tokens: 7000,
                 tool_choice: 'required',
@@ -794,6 +794,23 @@
             return error;
         }
 
+        function compactHierarchyBubbleName(value, level) {
+            const name = String(value || '').replace(/\s+/g, ' ').trim();
+            if (!name || !['root', 'central'].includes(level)) return name || '名称未設定';
+            const limit = 24;
+            const segments = name.split(/[・、,，／/|]/).map(segment => segment.trim()).filter(Boolean);
+            if (segments.length >= 3) {
+                const compact = `${segments.slice(0, 2).join('・')}など`;
+                return compact.length <= limit ? compact : `${segments[0].slice(0, limit - 2)}など`;
+            }
+            if (name.length <= limit) return name;
+            if (segments.length > 1) {
+                const compact = `${segments[0]}など`;
+                return compact.length <= limit ? compact : `${segments[0].slice(0, limit - 2)}など`;
+            }
+            return `${name.slice(0, limit - 1)}…`;
+        }
+
         function validateStageGroup(group, expectedLevel, expectedParentId, expectedParentBubbleId) {
             if (!group || !group.id || !group.title || !group.level) throw new Error(`${expectedLevel}カテゴリの構造が空です`);
             if (group.level !== expectedLevel) throw new Error(`${expectedLevel}カテゴリのlevelが不正です`);
@@ -819,7 +836,12 @@
                 id: String(group.id),
                 parentId: expectedParent,
                 parentBubbleId: expectedParentBubble,
-                bubbles: group.bubbles.map(bubble => ({ ...bubble, id: String(bubble.id), childId: null }))
+                bubbles: group.bubbles.map(bubble => ({
+                    ...bubble,
+                    id: String(bubble.id),
+                    name: compactHierarchyBubbleName(bubble.name, expectedLevel),
+                    childId: null
+                }))
             };
         }
 

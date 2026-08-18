@@ -95,6 +95,7 @@
         scene.add(starMesh);
 
         const galaxyClusters = [];
+        const galaxyStructures = [];
         const loadingBlackHoles = [];
         const galaxyBlackHoleTargets = [];
         const GALAXY_SHAPE_NAMES = ['楕円銀河', '球状銀河', '渦巻銀河', '棒渦巻銀河', 'レンズ状銀河', '不規則銀河'];
@@ -154,6 +155,16 @@
             return new THREE.Vector3(x, y, z);
         }
 
+        function keepGalaxyCenterClear(position, radius, seed) {
+            const minimumRadius = radius * 0.2;
+            const length = position.length();
+            if (length >= minimumRadius) return position;
+            const direction = length > 0.001
+                ? position.normalize()
+                : new THREE.Vector3(1, (cosmicRandom(seed) - 0.5) * 0.2, cosmicRandom(seed + 1) - 0.5).normalize();
+            return direction.multiplyScalar(minimumRadius + cosmicRandom(seed + 2) * radius * 0.08);
+        }
+
         function createGalaxyCluster(center, seed) {
             const cluster = new THREE.Group();
             cluster.position.copy(center);
@@ -164,7 +175,7 @@
                 const galaxyRadius = 220 + ((seed * 43 + galaxyIndex * 67) % 95);
                 const tilt = 0.18 + ((seed * 0.37 + galaxyIndex * 0.71) % 1) * 1.1;
                 const spin = ((seed * 1.91 + galaxyIndex * 2.37) % 1) * Math.PI * 2;
-                const systemCount = 420;
+                const systemCount = 1000;
                 const planetsPerStar = 3;
                 const galaxy = new THREE.Group();
                 galaxy.position.copy(galaxyOffset);
@@ -174,7 +185,7 @@
                 // 銀河の恒星は必ず形状に沿って配置し、それぞれに複数の惑星を連ねる。
                 const starSystems = new THREE.InstancedMesh(
                     new THREE.SphereGeometry(2.8 + galaxyIndex * 0.18, 8, 8),
-                    new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.98, blending: THREE.AdditiveBlending }),
+                    new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, opacity: 1, blending: THREE.AdditiveBlending }),
                     systemCount
                 );
                 const planets = new THREE.InstancedMesh(
@@ -186,12 +197,12 @@
                 planets.userData.preserveInstanceColors = true;
                 const dummy = new THREE.Object3D();
                 for (let i = 0; i < systemCount; i++) {
-                    const position = getGalaxyStarPosition(shape, i, systemCount, galaxyRadius, seed, galaxyIndex);
+                    const position = keepGalaxyCenterClear(getGalaxyStarPosition(shape, i, systemCount, galaxyRadius, seed, galaxyIndex), galaxyRadius, seed + i * 0.43);
                     dummy.position.copy(position);
                     dummy.scale.setScalar(0.78 + (i % 7) * 0.07);
                     dummy.updateMatrix();
                     starSystems.setMatrixAt(i, dummy.matrix);
-                    starSystems.setColorAt(i, new THREE.Color().setHSL((0.04 + seed * 0.071 + galaxyIndex * 0.137 + i * 0.61803398875) % 1, 0.92, 0.64 + (i % 5) * 0.065));
+                    starSystems.setColorAt(i, new THREE.Color().setHSL((0.04 + seed * 0.071 + galaxyIndex * 0.137 + i * 0.61803398875) % 1, 0.94, 0.74 + (i % 5) * 0.045));
                     for (let planetIndex = 0; planetIndex < planetsPerStar; planetIndex++) {
                         const orbit = 6 + planetIndex * 2.8 + (i % 4) * 0.65;
                         const orbitAngle = Math.atan2(position.z, position.x) + planetIndex * Math.PI * 0.67 + i * 0.11;
@@ -209,10 +220,10 @@
                 galaxy.add(starSystems, planets);
 
                 // 恒星点だけでも銀河の輪郭が読めるよう、同じ形状の淡い恒星雲を重ねる。
-                const dustCount = 1100;
+                const dustCount = 2200;
                 const dustPositions = new Float32Array(dustCount * 3);
                 for (let i = 0; i < dustCount; i++) {
-                    const position = getGalaxyStarPosition(shape, i, dustCount, galaxyRadius * 1.04, seed + 31, galaxyIndex);
+                    const position = keepGalaxyCenterClear(getGalaxyStarPosition(shape, i, dustCount, galaxyRadius * 1.04, seed + 31, galaxyIndex), galaxyRadius, seed + i * 0.71 + 31);
                     dustPositions[i * 3] = position.x;
                     dustPositions[i * 3 + 1] = position.y;
                     dustPositions[i * 3 + 2] = position.z;
@@ -220,8 +231,8 @@
                 const dustGeometry = new THREE.BufferGeometry();
                 dustGeometry.setAttribute('position', new THREE.BufferAttribute(dustPositions, 3));
                 galaxy.add(new THREE.Points(dustGeometry, new THREE.PointsMaterial({
-                    size: 2.8, color: new THREE.Color().setHSL((0.04 + seed * 0.07 + galaxyIndex * 0.12) % 1, 0.72, 0.58),
-                    transparent: true, opacity: 0.26, depthWrite: false, blending: THREE.AdditiveBlending, map: createCircleTexture()
+                    size: 3.4, color: new THREE.Color().setHSL((0.04 + seed * 0.07 + galaxyIndex * 0.12) % 1, 0.78, 0.66),
+                    transparent: true, opacity: 0.38, depthWrite: false, blending: THREE.AdditiveBlending, map: createCircleTexture()
                 })));
 
                 const coreGlow = new THREE.Sprite(new THREE.SpriteMaterial({
@@ -248,6 +259,7 @@
                 );
                 galaxy.add(horizon);
                 cluster.add(galaxy);
+                galaxyStructures.push({ galaxy, speed: 0.00012 + galaxyIndex * 0.000018, phase: cosmicRandom(seed + galaxyIndex * 4.7) * Math.PI * 2 });
                 const worldBlackHolePosition = new THREE.Vector3().copy(center).add(galaxyOffset);
                 loadingBlackHoles.push(worldBlackHolePosition);
                 galaxyBlackHoleTargets.push({ position: worldBlackHolePosition, galaxy, blackHole });
@@ -261,6 +273,7 @@
         const cosmicBackgroundGroup = new THREE.Group();
         const cosmicSystems = [];
         const nebulaClouds = [];
+        const shootingStars = [];
         scene.add(cosmicBackgroundGroup);
 
         function cosmicRandom(seed) {
@@ -297,21 +310,42 @@
             return new THREE.CanvasTexture(canvas);
         }
 
-        function addNebula(position, scale, hue, seed) {
+        const GAS_NEBULA_PRESETS = [
+            { name: 'カリーナ星雲', primaryHue: 0.98, secondaryHue: 0.58 },
+            { name: 'オリオン星雲', primaryHue: 0.92, secondaryHue: 0.58 },
+            { name: 'わし星雲', primaryHue: 0.04, secondaryHue: 0.58 },
+            { name: '干潟星雲', primaryHue: 0.96, secondaryHue: 0.08 },
+            { name: 'ばら星雲', primaryHue: 0.98, secondaryHue: 0.72 },
+            { name: 'かに星雲', primaryHue: 0.08, secondaryHue: 0.58 },
+            { name: 'らせん星雲', primaryHue: 0.48, secondaryHue: 0.72 },
+            { name: '馬頭星雲', primaryHue: 0.02, secondaryHue: 0.58 }
+        ];
+
+        function addGasNebula(position, scale, preset, seed) {
             const cloud = new THREE.Group();
             cloud.position.copy(position);
             cloud.rotation.set(cosmicRandom(seed) * 0.8, cosmicRandom(seed + 1) * Math.PI, cosmicRandom(seed + 2) * 0.5);
-            const color = new THREE.Color().setHSL(hue, 0.82, 0.56);
-            const texture = createGlowTexture(`rgba(${Math.round(color.r * 255)},${Math.round(color.g * 255)},${Math.round(color.b * 255)},1)`);
-            const sprite = new THREE.Sprite(new THREE.SpriteMaterial({
-                map: texture, color, transparent: true, opacity: 0.23,
+            cloud.userData.gasNebulaName = preset.name;
+            const primaryColor = new THREE.Color().setHSL(preset.primaryHue, 0.86, 0.58);
+            const secondaryColor = new THREE.Color().setHSL(preset.secondaryHue, 0.8, 0.58);
+            const primaryTexture = createGlowTexture(`rgba(${Math.round(primaryColor.r * 255)},${Math.round(primaryColor.g * 255)},${Math.round(primaryColor.b * 255)},1)`);
+            const secondaryTexture = createGlowTexture(`rgba(${Math.round(secondaryColor.r * 255)},${Math.round(secondaryColor.g * 255)},${Math.round(secondaryColor.b * 255)},1)`);
+            const primaryCloud = new THREE.Sprite(new THREE.SpriteMaterial({
+                map: primaryTexture, color: primaryColor, transparent: true, opacity: 0.28,
                 blending: THREE.AdditiveBlending, depthWrite: false, fog: false
             }));
-            sprite.scale.set(scale * 2.5, scale * 1.35, 1);
-            cloud.add(sprite);
+            primaryCloud.scale.set(scale * 2.5, scale * 1.35, 1);
+            cloud.add(primaryCloud);
+            const secondaryCloud = new THREE.Sprite(new THREE.SpriteMaterial({
+                map: secondaryTexture, color: secondaryColor, transparent: true, opacity: 0.16,
+                blending: THREE.AdditiveBlending, depthWrite: false, fog: false
+            }));
+            secondaryCloud.scale.set(scale * 1.65, scale * 2.1, 1);
+            secondaryCloud.rotation.z = cosmicRandom(seed + 4) * Math.PI;
+            cloud.add(secondaryCloud);
 
             const geometry = new THREE.BufferGeometry();
-            const count = 900;
+            const count = 1600;
             const positions = new Float32Array(count * 3);
             const colors = new Float32Array(count * 3);
             for (let index = 0; index < count; index++) {
@@ -319,8 +353,9 @@
                 const angle = cosmicRandom(seed + index * 4.7) * Math.PI * 2;
                 positions[index * 3] = Math.cos(angle) * radius;
                 positions[index * 3 + 1] = Math.sin(angle) * radius * (0.35 + cosmicRandom(seed + index * 1.7) * 0.55);
-                positions[index * 3 + 2] = (cosmicRandom(seed + index * 2.3) - 0.5) * scale * 0.35;
-                const pointColor = new THREE.Color().setHSL((hue + cosmicRandom(seed + index) * 0.12) % 1, 0.72, 0.48 + cosmicRandom(seed + index * 0.5) * 0.22);
+                positions[index * 3 + 2] = (cosmicRandom(seed + index * 2.3) - 0.5) * scale * 0.55;
+                const pointHue = cosmicRandom(seed + index * 0.83) > 0.48 ? preset.primaryHue : preset.secondaryHue;
+                const pointColor = new THREE.Color().setHSL(pointHue, 0.76, 0.5 + cosmicRandom(seed + index * 0.5) * 0.26);
                 colors[index * 3] = pointColor.r;
                 colors[index * 3 + 1] = pointColor.g;
                 colors[index * 3 + 2] = pointColor.b;
@@ -328,44 +363,12 @@
             geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
             geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
             cloud.add(new THREE.Points(geometry, new THREE.PointsMaterial({
-                size: Math.max(3, scale * 0.025), vertexColors: true,
-                transparent: true, opacity: 0.3, depthWrite: false,
+                size: Math.max(3, scale * 0.022), vertexColors: true,
+                transparent: true, opacity: 0.42, depthWrite: false,
                 blending: THREE.AdditiveBlending, map: createCircleTexture()
             })));
             cosmicBackgroundGroup.add(cloud);
             nebulaClouds.push(cloud);
-        }
-
-        function createMilkyWayBand() {
-            const geometry = new THREE.BufferGeometry();
-            const count = 14000;
-            const positions = new Float32Array(count * 3);
-            const colors = new Float32Array(count * 3);
-            for (let index = 0; index < count; index++) {
-                const angle = cosmicRandom(index + 10) * Math.PI * 2;
-                const radius = 14000 + (cosmicRandom(index + 11) - 0.5) * 720;
-                const bandWidth = 105 + cosmicRandom(index + 12) * 180;
-                // 原点を中心にした巨大な傾いた天の川の帯。遠景の一方向画像ではなく、
-                // どの角度からも見える銀河面として描く。
-                positions[index * 3] = Math.cos(angle) * radius;
-                positions[index * 3 + 1] = Math.sin(angle) * radius * 0.28 + (cosmicRandom(index + 20) - 0.5) * bandWidth;
-                positions[index * 3 + 2] = Math.sin(angle) * radius * 0.96 + (cosmicRandom(index + 30) - 0.5) * bandWidth * 0.7;
-                const color = new THREE.Color().setHSL(0.56 + cosmicRandom(index + 40) * 0.16, 0.5, 0.55 + cosmicRandom(index + 50) * 0.3);
-                colors[index * 3] = color.r;
-                colors[index * 3 + 1] = color.g;
-                colors[index * 3 + 2] = color.b;
-            }
-            geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-            geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-            const band = new THREE.Points(geometry, new THREE.PointsMaterial({
-                size: 5.5, vertexColors: true, transparent: true, opacity: 0.42,
-                depthWrite: false, depthTest: false, fog: false,
-                blending: THREE.AdditiveBlending, map: createCircleTexture()
-            }));
-            band.rotation.set(0.42, -0.24, 0.18);
-            band.userData.isMilkyWay = true;
-            cosmicBackgroundGroup.add(band);
-            cosmicBackgroundGroup.userData.milkyWay = band;
         }
 
         function addGalaxyGlow(position, scale, hue) {
@@ -439,20 +442,53 @@
             cosmicBackgroundGroup.add(system);
         }
 
+        function resetShootingStar(entry, index) {
+            const origin = createSphericalBackgroundPosition(index, 12, 2600, 7200, 900 + index * 23 + entry.respawnCount * 41);
+            const direction = new THREE.Vector3(
+                cosmicRandom(index * 3.7 + entry.respawnCount * 5.1) - 0.5,
+                cosmicRandom(index * 4.9 + entry.respawnCount * 6.3) - 0.5,
+                cosmicRandom(index * 6.1 + entry.respawnCount * 7.7) - 0.5
+            ).normalize();
+            entry.streak.position.copy(origin);
+            entry.streak.lookAt(origin.clone().add(direction));
+            entry.velocity.copy(direction).multiplyScalar(2.2 + cosmicRandom(index + entry.respawnCount * 2.7) * 2.4);
+            entry.life = 2.8 + cosmicRandom(index + entry.respawnCount * 3.9) * 3.2;
+            entry.respawnCount += 1;
+            entry.streak.material.opacity = 0.72;
+        }
+
+        function createShootingStars() {
+            for (let index = 0; index < 14; index++) {
+                const geometry = new THREE.BufferGeometry().setFromPoints([
+                    new THREE.Vector3(0, 0, 0),
+                    new THREE.Vector3(0, 0, -150 - (index % 4) * 45)
+                ]);
+                const streak = new THREE.Line(geometry, new THREE.LineBasicMaterial({
+                    color: index % 3 === 0 ? 0xb9e6ff : 0xffffff,
+                    transparent: true, opacity: 0.72, depthWrite: false,
+                    blending: THREE.AdditiveBlending
+                }));
+                const entry = { streak, velocity: new THREE.Vector3(), life: 0, respawnCount: index };
+                cosmicBackgroundGroup.add(streak);
+                shootingStars.push(entry);
+                resetShootingStar(entry, index);
+            }
+        }
+
         function createCosmicEnvironment() {
-            createMilkyWayBand();
             Array.from({ length: 12 }, (_, index) => [
                 createSphericalBackgroundPosition(index, 12, 2200, 6200, 101 + index * 13),
                 420 + (index % 5) * 120,
-                (0.76 + index * 0.083) % 1,
+                GAS_NEBULA_PRESETS[index % GAS_NEBULA_PRESETS.length],
                 101 + index * 37
-            ]).forEach(([position, scale, hue, seed]) => addNebula(position, scale, hue, seed));
+            ]).forEach(([position, scale, preset, seed]) => addGasNebula(position, scale, preset, seed));
             galaxyClusterCenters.forEach((center, index) => addGalaxyGlow(center, 180 + index * 22, (0.58 + index * 0.047) % 1));
             Array.from({ length: 10 }, (_, index) => [
                 createSphericalBackgroundPosition(index, 10, 1450, 4800, 601 + index * 19),
                 86 + (index % 5) * 18,
                 601 + index * 17
             ]).forEach(([center, scale, seed]) => addSolarSystem(center, scale, seed));
+            createShootingStars();
         }
 
         createCosmicEnvironment();
@@ -782,7 +818,8 @@
             const parentAnchor = data.parentId && activeDB[data.parentId]
                 ? activeDB[data.parentId].bubbles.find(bubble => bubble.childId === data.id)
                 : null;
-            document.getElementById('group-title').innerText = parentAnchor ? `${data.title}（親カテゴリ: ${parentAnchor.name}）` : data.title;
+            const groupDisplayTitle = parentAnchor ? parentAnchor.name : data.title;
+            document.getElementById('group-title').innerText = groupDisplayTitle;
             document.getElementById('group-type').innerText = data.type;
             document.getElementById('btn-zoomout-group').style.display = data.parentId ? 'flex' : 'none';
             
@@ -825,7 +862,7 @@
             
             // 画面UIをバブル群画面(GROUP)に切り替え
             switchScreen('GROUP');
-            showToast(`${data.title} の宇宙を観測中`);
+            showToast(`${groupDisplayTitle} の宇宙を観測中`);
         }
 
         // 【個別バブル画面】 を読み込んで表示する関数
