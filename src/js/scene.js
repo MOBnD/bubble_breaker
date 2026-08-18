@@ -30,9 +30,6 @@
         controls.enableZoom = true;
         controls.minDistance = 0.5;
         controls.maxDistance = 24000;
-        controls.addEventListener('start', () => {
-            if (typeof markGroupCameraInteraction === 'function') markGroupCameraInteraction();
-        });
 
         // 照明の設定
         scene.add(new THREE.AmbientLight(0xffffff, 0.7)); // 全体を照らす環境光
@@ -60,6 +57,8 @@
         const starsCount = 12000;
         const posArray = new Float32Array(starsCount * 3);
         const colorsArray = new Float32Array(starsCount * 3);
+        const sizesArray = new Float32Array(starsCount);
+        const STAR_SPECTRAL_PALETTE = [0x9ecbff, 0xd9e9ff, 0xffffff, 0xfff1b0, 0xffc27a, 0xff8d70];
 
         for(let i=0; i<starsCount * 3; i+=3) {
             // 星はカメラの全周を包む球殻に固定する。背後を向いても空白にならず、
@@ -71,25 +70,44 @@
             posArray[i+1] = radius * Math.cos(phi);
             posArray[i+2] = radius * Math.sin(phi) * Math.sin(theta);
 
-            // 星の色(RGB)をHSL色空間を使って青〜紫〜白のランダムに設定
-            const color = new THREE.Color();
-            color.setHSL(0.6 + Math.random() * 0.2, 0.8, 0.6 + Math.random() * 0.4);
+            // 星のスペクトルを青白色から赤色まで広げ、恒星ごとに明度と大きさを変える。
+            const color = new THREE.Color(STAR_SPECTRAL_PALETTE[Math.floor(Math.random() * STAR_SPECTRAL_PALETTE.length)]);
+            color.multiplyScalar(0.58 + Math.random() * 0.52);
             colorsArray[i] = color.r;
             colorsArray[i+1] = color.g;
             colorsArray[i+2] = color.b;
+            sizesArray[i / 3] = 7 + Math.pow(Math.random(), 2.2) * 26;
         }
         starsGeometry.setAttribute('position', new THREE.BufferAttribute(posArray, 3));
         starsGeometry.setAttribute('color', new THREE.BufferAttribute(colorsArray, 3));
+        starsGeometry.setAttribute('aSize', new THREE.BufferAttribute(sizesArray, 1));
 
         // 星の質感（マテリアル）の設定
-        const starsMaterial = new THREE.PointsMaterial({
-            size: 4.2,
-            vertexColors: true,
+        const starsMaterial = new THREE.ShaderMaterial({
             transparent: true,
-            opacity: 0.44,
-            map: createCircleTexture(),
-            alphaTest: 0.1,
-            blending: THREE.AdditiveBlending // 重なった時に光って見える合成方法
+            depthWrite: false,
+            blending: THREE.AdditiveBlending,
+            uniforms: { pixelRatio: { value: Math.min(window.devicePixelRatio, 2) } },
+            vertexColors: true,
+            vertexShader: `
+                attribute float aSize;
+                varying vec3 vColor;
+                uniform float pixelRatio;
+                void main() {
+                    vColor = color;
+                    vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+                    gl_PointSize = aSize * pixelRatio * (420.0 / max(1.0, -mvPosition.z));
+                    gl_Position = projectionMatrix * mvPosition;
+                }
+            `,
+            fragmentShader: `
+                varying vec3 vColor;
+                void main() {
+                    vec2 centered = gl_PointCoord - vec2(0.5);
+                    float glow = 1.0 - smoothstep(0.05, 0.5, dot(centered, centered));
+                    gl_FragColor = vec4(vColor, glow * 0.72);
+                }
+            `
         });
         const starMesh = new THREE.Points(starsGeometry, starsMaterial);
         scene.add(starMesh);
@@ -99,6 +117,8 @@
         const loadingBlackHoles = [];
         const galaxyBlackHoleTargets = [];
         const GALAXY_SHAPE_NAMES = ['楕円銀河', '球状銀河', '渦巻銀河', '棒渦巻銀河', 'レンズ状銀河', '不規則銀河'];
+        const GALAXIES_PER_CLUSTER = 5;
+        const GALAXY_CLUSTER_SPREAD = 4;
         const galaxyClusterCenters = [
             // 初期カメラの正面だけに偏らないよう、前後・上下・左右へ配置する。
             new THREE.Vector3(0, 0, -1260), new THREE.Vector3(1120, 490, -980),
@@ -167,34 +187,29 @@
 
         function createGalaxyCluster(center, seed) {
             const cluster = new THREE.Group();
-            cluster.position.copy(center);
-            for (let galaxyIndex = 0; galaxyIndex < 5; galaxyIndex++) {
-                const galaxyAngle = galaxyIndex * Math.PI * 0.5 + seed * 0.13;
+            // クラスター間の余白を確保し、外縁の銀河同士が接触しない距離へ広げる。
+            cluster.position.copy(center).multiplyScalar(GALAXY_CLUSTER_SPREAD);
+            for (let galaxyIndex = 0; galaxyIndex < GALAXIES_PER_CLUSTER; galaxyIndex++) {
+                const galaxyAngle = galaxyIndex * Math.PI * 2 / GALAXIES_PER_CLUSTER + seed * 0.13;
                 const galaxyOffset = new THREE.Vector3(Math.cos(galaxyAngle) * (700 + galaxyIndex * 100), Math.sin(galaxyAngle * 1.7) * (180 + seed * 22), Math.sin(galaxyAngle) * (700 + galaxyIndex * 100));
                 const shape = (seed + galaxyIndex) % 6;
                 const galaxyRadius = 220 + ((seed * 43 + galaxyIndex * 67) % 95);
                 const tilt = 0.18 + ((seed * 0.37 + galaxyIndex * 0.71) % 1) * 1.1;
                 const spin = ((seed * 1.91 + galaxyIndex * 2.37) % 1) * Math.PI * 2;
                 const systemCount = 1000;
-                const planetsPerStar = 3;
                 const galaxy = new THREE.Group();
                 galaxy.position.copy(galaxyOffset);
                 galaxy.rotation.set(tilt, spin, tilt * 0.63);
                 galaxy.userData.shape = GALAXY_SHAPE_NAMES[shape];
+                galaxy.userData.galaxyRadius = galaxyRadius;
 
-                // 銀河の恒星は必ず形状に沿って配置し、それぞれに複数の惑星を連ねる。
+                // 銀河の恒星は必ず形状に沿って配置する。惑星を伴う恒星系は銀河外へ分離する。
                 const starSystems = new THREE.InstancedMesh(
                     new THREE.SphereGeometry(2.8 + galaxyIndex * 0.18, 8, 8),
-                    new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, opacity: 1, blending: THREE.AdditiveBlending }),
+                    new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, opacity: 1, blending: THREE.AdditiveBlending, fog: false }),
                     systemCount
                 );
-                const planets = new THREE.InstancedMesh(
-                    new THREE.SphereGeometry(0.78, 6, 6),
-                    new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.95, blending: THREE.AdditiveBlending }),
-                    systemCount * planetsPerStar
-                );
                 starSystems.userData.preserveInstanceColors = true;
-                planets.userData.preserveInstanceColors = true;
                 const dummy = new THREE.Object3D();
                 for (let i = 0; i < systemCount; i++) {
                     const position = keepGalaxyCenterClear(getGalaxyStarPosition(shape, i, systemCount, galaxyRadius, seed, galaxyIndex), galaxyRadius, seed + i * 0.43);
@@ -202,25 +217,16 @@
                     dummy.scale.setScalar(0.78 + (i % 7) * 0.07);
                     dummy.updateMatrix();
                     starSystems.setMatrixAt(i, dummy.matrix);
-                    starSystems.setColorAt(i, new THREE.Color().setHSL((0.04 + seed * 0.071 + galaxyIndex * 0.137 + i * 0.61803398875) % 1, 0.94, 0.74 + (i % 5) * 0.045));
-                    for (let planetIndex = 0; planetIndex < planetsPerStar; planetIndex++) {
-                        const orbit = 6 + planetIndex * 2.8 + (i % 4) * 0.65;
-                        const orbitAngle = Math.atan2(position.z, position.x) + planetIndex * Math.PI * 0.67 + i * 0.11;
-                        dummy.position.set(position.x + Math.cos(orbitAngle) * orbit, position.y + Math.sin(orbitAngle * 1.7) * 1.8, position.z + Math.sin(orbitAngle) * orbit);
-                        dummy.scale.setScalar(0.7 + ((i + planetIndex) % 3) * 0.18);
-                        dummy.updateMatrix();
-                        planets.setMatrixAt(i * planetsPerStar + planetIndex, dummy.matrix);
-                        planets.setColorAt(i * planetsPerStar + planetIndex, new THREE.Color().setHSL((0.08 + seed * 0.03 + i * 0.017 + planetIndex * 0.17) % 1, 0.9, 0.62 + ((i + planetIndex) % 4) * 0.07));
-                    }
+                    const spectralHue = (0.58 + (i % 6) * 0.083 + seed * 0.017 + galaxyIndex * 0.031) % 1;
+                    const spectralLightness = 0.58 + ((i * 7 + seed) % 7) * 0.055;
+                    starSystems.setColorAt(i, new THREE.Color().setHSL(spectralHue, 0.78, Math.min(0.94, spectralLightness)));
                 }
                 starSystems.instanceMatrix.needsUpdate = true;
-                planets.instanceMatrix.needsUpdate = true;
                 if (starSystems.instanceColor) starSystems.instanceColor.needsUpdate = true;
-                if (planets.instanceColor) planets.instanceColor.needsUpdate = true;
-                galaxy.add(starSystems, planets);
+                galaxy.add(starSystems);
 
                 // 恒星点だけでも銀河の輪郭が読めるよう、同じ形状の淡い恒星雲を重ねる。
-                const dustCount = 2200;
+                const dustCount = 3200;
                 const dustPositions = new Float32Array(dustCount * 3);
                 for (let i = 0; i < dustCount; i++) {
                     const position = keepGalaxyCenterClear(getGalaxyStarPosition(shape, i, dustCount, galaxyRadius * 1.04, seed + 31, galaxyIndex), galaxyRadius, seed + i * 0.71 + 31);
@@ -232,7 +238,7 @@
                 dustGeometry.setAttribute('position', new THREE.BufferAttribute(dustPositions, 3));
                 galaxy.add(new THREE.Points(dustGeometry, new THREE.PointsMaterial({
                     size: 3.4, color: new THREE.Color().setHSL((0.04 + seed * 0.07 + galaxyIndex * 0.12) % 1, 0.78, 0.66),
-                    transparent: true, opacity: 0.38, depthWrite: false, blending: THREE.AdditiveBlending, map: createCircleTexture()
+                    transparent: true, opacity: 0.38, depthWrite: false, blending: THREE.AdditiveBlending, map: createCircleTexture(), fog: false
                 })));
 
                 const coreGlow = new THREE.Sprite(new THREE.SpriteMaterial({
@@ -243,24 +249,26 @@
                 galaxy.add(coreGlow);
 
                 // ブラックホールは銀河の中心に1つだけ置く。恒星系や星雲には生成しない。
-                const blackHole = new THREE.Mesh(new THREE.SphereGeometry(Math.max(10, galaxyRadius * 0.055), 40, 40), new THREE.MeshBasicMaterial({ color: 0x010107 }));
+                const eventHorizonRadius = Math.max(10, galaxyRadius * 0.055);
+                const blackHole = new THREE.Mesh(new THREE.SphereGeometry(eventHorizonRadius, 48, 32), new THREE.MeshBasicMaterial({ color: 0x000000 }));
                 blackHole.position.set(0, 0, 0);
                 blackHole.userData.isGalaxyCenterBlackHole = true;
+                blackHole.userData.eventHorizonRadius = eventHorizonRadius;
                 galaxy.add(blackHole);
                 const disk = new THREE.Mesh(
-                    new THREE.RingGeometry(galaxyRadius * 0.08, galaxyRadius * 0.18, 96),
-                    new THREE.MeshBasicMaterial({ color: 0xff8e4a, transparent: true, opacity: 0.38, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false })
+                    new THREE.RingGeometry(eventHorizonRadius * 1.05, eventHorizonRadius * 2.5, 128),
+                    new THREE.MeshBasicMaterial({ color: 0xff8e4a, transparent: true, opacity: 0.28, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })
                 );
                 disk.rotation.x = Math.PI * 0.5;
                 galaxy.add(disk);
-                const horizon = new THREE.Mesh(
-                    new THREE.SphereGeometry(Math.max(12, galaxyRadius * 0.07), 32, 32),
-                    new THREE.MeshBasicMaterial({ color: 0x6d3c77, transparent: true, opacity: 0.36, wireframe: true, blending: THREE.AdditiveBlending })
+                const photonRing = new THREE.Mesh(
+                    new THREE.TorusGeometry(eventHorizonRadius * 1.16, Math.max(0.9, eventHorizonRadius * 0.045), 10, 96),
+                    new THREE.MeshBasicMaterial({ color: 0xffc36b, transparent: true, opacity: 0.76, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })
                 );
-                galaxy.add(horizon);
+                galaxy.add(photonRing);
                 cluster.add(galaxy);
                 galaxyStructures.push({ galaxy, speed: 0.00012 + galaxyIndex * 0.000018, phase: cosmicRandom(seed + galaxyIndex * 4.7) * Math.PI * 2 });
-                const worldBlackHolePosition = new THREE.Vector3().copy(center).add(galaxyOffset);
+                const worldBlackHolePosition = new THREE.Vector3().copy(cluster.position).add(galaxyOffset);
                 loadingBlackHoles.push(worldBlackHolePosition);
                 galaxyBlackHoleTargets.push({ position: worldBlackHolePosition, galaxy, blackHole });
             }
@@ -272,7 +280,6 @@
         // 固定シードにすることで、カテゴリを再表示しても宇宙の配置がちらつかない。
         const cosmicBackgroundGroup = new THREE.Group();
         const cosmicSystems = [];
-        const nebulaClouds = [];
         const shootingStars = [];
         scene.add(cosmicBackgroundGroup);
 
@@ -310,26 +317,20 @@
             return new THREE.CanvasTexture(canvas);
         }
 
-        const GAS_NEBULA_PRESETS = [
-            { name: 'カリーナ星雲', primaryHue: 0.98, secondaryHue: 0.58 },
-            { name: 'オリオン星雲', primaryHue: 0.92, secondaryHue: 0.58 },
-            { name: 'わし星雲', primaryHue: 0.04, secondaryHue: 0.58 },
-            { name: '干潟星雲', primaryHue: 0.96, secondaryHue: 0.08 },
-            { name: 'ばら星雲', primaryHue: 0.98, secondaryHue: 0.72 },
-            { name: 'かに星雲', primaryHue: 0.08, secondaryHue: 0.58 },
-            { name: 'らせん星雲', primaryHue: 0.48, secondaryHue: 0.72 },
-            { name: '馬頭星雲', primaryHue: 0.02, secondaryHue: 0.58 }
-        ];
-
-        function addGasNebula(position, scale, preset, seed) {
+        function createNGC3324Background() {
             const cloud = new THREE.Group();
-            cloud.position.copy(position);
-            cloud.rotation.set(cosmicRandom(seed) * 0.8, cosmicRandom(seed + 1) * Math.PI, cosmicRandom(seed + 2) * 0.5);
-            cloud.userData.gasNebulaName = preset.name;
-            const primaryColor = new THREE.Color().setHSL(preset.primaryHue, 0.86, 0.58);
-            const secondaryColor = new THREE.Color().setHSL(preset.secondaryHue, 0.8, 0.58);
+            // NGC 3324を他の天体より十分遠い背面へ置き、宇宙の奥行きを作る。
+            cloud.position.set(0, 900, -18500);
+            cloud.rotation.set(-0.18, 0.24, -0.12);
+            cloud.userData.gasNebulaName = 'NGC 3324';
+            cloud.userData.isFarthestBackground = true;
+            const scale = 3600;
+            const primaryColor = new THREE.Color().setHSL(0.98, 0.9, 0.56);
+            const secondaryColor = new THREE.Color().setHSL(0.58, 0.86, 0.58);
+            const warmColor = new THREE.Color().setHSL(0.07, 0.88, 0.58);
             const primaryTexture = createGlowTexture(`rgba(${Math.round(primaryColor.r * 255)},${Math.round(primaryColor.g * 255)},${Math.round(primaryColor.b * 255)},1)`);
             const secondaryTexture = createGlowTexture(`rgba(${Math.round(secondaryColor.r * 255)},${Math.round(secondaryColor.g * 255)},${Math.round(secondaryColor.b * 255)},1)`);
+            const warmTexture = createGlowTexture(`rgba(${Math.round(warmColor.r * 255)},${Math.round(warmColor.g * 255)},${Math.round(warmColor.b * 255)},1)`);
             const primaryCloud = new THREE.Sprite(new THREE.SpriteMaterial({
                 map: primaryTexture, color: primaryColor, transparent: true, opacity: 0.28,
                 blending: THREE.AdditiveBlending, depthWrite: false, fog: false
@@ -341,21 +342,32 @@
                 blending: THREE.AdditiveBlending, depthWrite: false, fog: false
             }));
             secondaryCloud.scale.set(scale * 1.65, scale * 2.1, 1);
-            secondaryCloud.rotation.z = cosmicRandom(seed + 4) * Math.PI;
+            secondaryCloud.rotation.z = 1.12;
             cloud.add(secondaryCloud);
+            const warmCloud = new THREE.Sprite(new THREE.SpriteMaterial({
+                map: warmTexture, color: warmColor, transparent: true, opacity: 0.18,
+                blending: THREE.AdditiveBlending, depthWrite: false, fog: false
+            }));
+            warmCloud.scale.set(scale * 1.15, scale * 0.74, 1);
+            warmCloud.rotation.z = -0.42;
+            cloud.add(warmCloud);
 
             const geometry = new THREE.BufferGeometry();
-            const count = 1600;
+            const count = 6200;
             const positions = new Float32Array(count * 3);
             const colors = new Float32Array(count * 3);
             for (let index = 0; index < count; index++) {
-                const radius = Math.sqrt(cosmicRandom(seed + index * 3.1)) * scale;
-                const angle = cosmicRandom(seed + index * 4.7) * Math.PI * 2;
+                const filament = cosmicRandom(3324 + index * 0.71);
+                const radius = Math.sqrt(filament) * scale;
+                const angle = cosmicRandom(3324 + index * 4.7) * Math.PI * 2 + radius / scale * 2.4;
                 positions[index * 3] = Math.cos(angle) * radius;
-                positions[index * 3 + 1] = Math.sin(angle) * radius * (0.35 + cosmicRandom(seed + index * 1.7) * 0.55);
-                positions[index * 3 + 2] = (cosmicRandom(seed + index * 2.3) - 0.5) * scale * 0.55;
-                const pointHue = cosmicRandom(seed + index * 0.83) > 0.48 ? preset.primaryHue : preset.secondaryHue;
-                const pointColor = new THREE.Color().setHSL(pointHue, 0.76, 0.5 + cosmicRandom(seed + index * 0.5) * 0.26);
+                positions[index * 3 + 1] = Math.sin(angle) * radius * (0.34 + cosmicRandom(3324 + index * 1.7) * 0.62);
+                positions[index * 3 + 2] = (cosmicRandom(3324 + index * 2.3) - 0.5) * scale * 0.55;
+                const pointColor = new THREE.Color().setHSL(
+                    filament > 0.74 ? 0.07 : (filament > 0.38 ? 0.98 : 0.58),
+                    0.78,
+                    0.42 + cosmicRandom(3324 + index * 0.5) * 0.34
+                );
                 colors[index * 3] = pointColor.r;
                 colors[index * 3 + 1] = pointColor.g;
                 colors[index * 3 + 2] = pointColor.b;
@@ -365,10 +377,9 @@
             cloud.add(new THREE.Points(geometry, new THREE.PointsMaterial({
                 size: Math.max(3, scale * 0.022), vertexColors: true,
                 transparent: true, opacity: 0.42, depthWrite: false,
-                blending: THREE.AdditiveBlending, map: createCircleTexture()
+                blending: THREE.AdditiveBlending, map: createCircleTexture(), fog: false
             })));
             cosmicBackgroundGroup.add(cloud);
-            nebulaClouds.push(cloud);
         }
 
         function addGalaxyGlow(position, scale, hue) {
@@ -388,13 +399,15 @@
             const system = new THREE.Group();
             system.position.copy(center);
             system.rotation.set(cosmicRandom(seed) * 0.6, cosmicRandom(seed + 1) * Math.PI, cosmicRandom(seed + 2) * 0.4);
-            const starColor = new THREE.Color().setHSL(0.04 + cosmicRandom(seed + 3) * 0.12, 0.8, 0.65);
+            const starSpectra = [0.60, 0.63, 0.08, 0.13, 0.04, 0.98];
+            const starHue = starSpectra[seed % starSpectra.length];
+            const starColor = new THREE.Color().setHSL(starHue, 0.82, 0.58 + cosmicRandom(seed + 3) * 0.26);
             const star = new THREE.Sprite(new THREE.SpriteMaterial({
                 map: createGlowTexture('rgba(255,245,190,1)'), color: starColor,
                 transparent: true, opacity: 0.95, blending: THREE.AdditiveBlending,
                 depthWrite: false, fog: false
             }));
-            star.scale.set(scale * 0.42, scale * 0.42, 1);
+            star.scale.set(scale * (0.28 + cosmicRandom(seed + 4) * 0.12), scale * (0.28 + cosmicRandom(seed + 4) * 0.12), 1);
             system.add(star);
             const planets = [];
             for (let index = 0; index < 4; index++) {
@@ -404,7 +417,7 @@
                 const orbit = new THREE.LineLoop(orbitGeometry, new THREE.LineBasicMaterial({ color: 0x8da7d8, transparent: true, opacity: 0.16, depthWrite: false }));
                 system.add(orbit);
                 const planet = new THREE.Mesh(
-                    new THREE.SphereGeometry(Math.max(3, scale * (0.045 + index * 0.012)), 10, 8),
+                    new THREE.SphereGeometry(Math.max(1.2, scale * (0.022 + index * 0.006)), 10, 8),
                     new THREE.MeshBasicMaterial({
                         color: new THREE.Color().setHSL((0.1 + index * 0.14 + seed * 0.01) % 1, 0.72, 0.58),
                         transparent: true, opacity: 0.9, fog: false
@@ -464,7 +477,7 @@
                     new THREE.Vector3(0, 0, -150 - (index % 4) * 45)
                 ]);
                 const streak = new THREE.Line(geometry, new THREE.LineBasicMaterial({
-                    color: index % 3 === 0 ? 0xb9e6ff : 0xffffff,
+                color: index % 3 === 0 ? 0xb9e6ff : (index % 3 === 1 ? 0xffd9a3 : 0xffffff),
                     transparent: true, opacity: 0.72, depthWrite: false,
                     blending: THREE.AdditiveBlending
                 }));
@@ -476,16 +489,12 @@
         }
 
         function createCosmicEnvironment() {
-            Array.from({ length: 12 }, (_, index) => [
-                createSphericalBackgroundPosition(index, 12, 2200, 6200, 101 + index * 13),
-                420 + (index % 5) * 120,
-                GAS_NEBULA_PRESETS[index % GAS_NEBULA_PRESETS.length],
-                101 + index * 37
-            ]).forEach(([position, scale, preset, seed]) => addGasNebula(position, scale, preset, seed));
-            galaxyClusterCenters.forEach((center, index) => addGalaxyGlow(center, 180 + index * 22, (0.58 + index * 0.047) % 1));
-            Array.from({ length: 10 }, (_, index) => [
-                createSphericalBackgroundPosition(index, 10, 1450, 4800, 601 + index * 19),
-                86 + (index % 5) * 18,
+            createNGC3324Background();
+            galaxyClusterCenters.forEach((center, index) => addGalaxyGlow(center.clone().multiplyScalar(GALAXY_CLUSTER_SPREAD), 180 + index * 22, (0.58 + index * 0.047) % 1));
+            const externalSystemCount = galaxyClusterCenters.length * GALAXIES_PER_CLUSTER;
+            Array.from({ length: externalSystemCount }, (_, index) => [
+                createSphericalBackgroundPosition(index, externalSystemCount, 1450, 5200, 601 + index * 19),
+                34 + (index % 5) * 4,
                 601 + index * 17
             ]).forEach(([center, scale, seed]) => addSolarSystem(center, scale, seed));
             createShootingStars();
@@ -590,7 +599,11 @@
             return true;
         };
 
-        window.markGroupCameraInteraction = function() {
+        window.markGroupCameraInteraction = function(direction = 'zoomIn') {
+            if (direction !== 'zoomIn') {
+                groupCameraInteractionArmed = false;
+                return;
+            }
             if (state.screen !== 'GROUP' || transitionState || isZoomingIntoGroup || loadingAnimation) return;
             groupCameraInteractionArmed = true;
         };

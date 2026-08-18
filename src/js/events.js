@@ -196,12 +196,11 @@
             e.preventDefault();
             
             // 一度スクロール判定したら、1秒間は次の判定を受け付けない（誤作動防止）
-            if(wheelTimeout) return; 
-            wheelTimeout = setTimeout(() => { wheelTimeout = null; }, 1000);
-
             if (state.screen === 'GROUP' && typeof markGroupCameraInteraction === 'function') {
-                markGroupCameraInteraction();
+                markGroupCameraInteraction(e.deltaY < 0 ? 'zoomIn' : 'zoomOut');
             }
+            if(wheelTimeout) return;
+            wheelTimeout = setTimeout(() => { wheelTimeout = null; }, 1000);
 
             if (e.deltaY > 0) { 
                 // 下スクロール（手前に引く）＝ ズームアウト（親階層へ戻る）

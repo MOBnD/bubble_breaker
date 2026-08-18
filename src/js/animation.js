@@ -16,12 +16,22 @@
         function startLoadingAnimation() {
             // ひとつの銀河の中心ブラックホールだけを航路に固定する。
             // 入口・出口を大きく離し、周囲の意見（星）を横切る高速移動を見せる。
-            loadingAnimation = { startedAt: performance.now(), segmentStartedAt: performance.now(), segmentDuration: 11000, targetIndex: 0, onReady: null };
+            const now = performance.now();
+            const firstTarget = getLoadingBlackHoleTarget(0);
+            loadingAnimation = {
+                startedAt: now,
+                segmentStartedAt: now,
+                segmentDuration: 10000,
+                approachDistance: 5000,
+                maxSpeed: 900,
+                approachDirection: new THREE.Vector3(0, 0, 1),
+                targetIndex: 0,
+                onReady: null
+            };
             isDiving = true;
             startZoomSound('warp');
             controls.enabled = false;
-            const firstTarget = getLoadingBlackHoleTarget(0);
-            camera.position.copy(firstTarget.position).add(new THREE.Vector3(0, 0, 5000));
+            camera.position.copy(firstTarget.position).addScaledVector(loadingAnimation.approachDirection, loadingAnimation.approachDistance);
             targetControlTarget.copy(firstTarget.position);
             if (firstTarget.galaxy) firstTarget.galaxy.visible = true;
             camera.lookAt(targetControlTarget);
@@ -35,21 +45,23 @@
             updateZoomSound(phase);
             const target = getLoadingBlackHoleTarget(loadingAnimation.targetIndex);
             const blackHole = target.position;
-            const entrance = blackHole.clone().add(new THREE.Vector3(0, 0, 5000));
-            const nearHole = blackHole.clone().add(new THREE.Vector3(0, 0, 2.4));
-            if (phase < 0.98) {
-                // ブラックホールへ向かう間は視線を固定し、終盤ほど指数加速する。
-                const p = phase / 0.98;
-                const accelerated = 1 - Math.pow(1 - p, 3.2);
-                camera.position.lerpVectors(entrance, nearHole, accelerated);
-                targetControlTarget.copy(blackHole);
-            } else {
-                // 事象の地平面に触れた瞬間、ブラックホール内部で別銀河群へ切り替える。
-                // 遷移はカットで行い、カメラを後退させるアニメーションは一切行わない。
+            const eventHorizonRadius = target.blackHole?.userData?.eventHorizonRadius || 10;
+            const travelDistance = Math.max(1, loadingAnimation.approachDistance - eventHorizonRadius);
+            // 速度は初速から単調増加し、最終速度は約900 units/secを上限にする。
+            const durationSeconds = loadingAnimation.segmentDuration / 1000;
+            const initialSpeedRatio = Math.max(0.05, Math.min(0.5, 2 - loadingAnimation.maxSpeed * durationSeconds / travelDistance));
+            const distanceProgress = Math.min(1, initialSpeedRatio * phase + (1 - initialSpeedRatio) * phase * phase);
+            const remainingDistance = eventHorizonRadius + travelDistance * (1 - distanceProgress);
+            camera.position.copy(blackHole).addScaledVector(loadingAnimation.approachDirection, remainingDistance);
+            targetControlTarget.copy(blackHole);
+            camera.lookAt(targetControlTarget);
+
+            // カメラが事象の地平面表面へ触れた瞬間に切り替える。内部座標は一度も生成しない。
+            if (remainingDistance <= eventHorizonRadius + 0.05 || phase >= 1) {
                 loadingAnimation.targetIndex = (loadingAnimation.targetIndex + 1) % loadingBlackHoles.length;
                 loadingAnimation.segmentStartedAt = performance.now();
                 const nextTarget = getLoadingBlackHoleTarget(loadingAnimation.targetIndex);
-                camera.position.copy(nextTarget.position).add(new THREE.Vector3(0, 0, 5000));
+                camera.position.copy(nextTarget.position).addScaledVector(loadingAnimation.approachDirection, loadingAnimation.approachDistance);
                 targetControlTarget.copy(nextTarget.position);
                 if (nextTarget.galaxy) nextTarget.galaxy.visible = true;
                 if (pendingUniverse && typeof loadingAnimation.onReady === 'function') {
@@ -60,7 +72,6 @@
                     return;
                 }
             }
-            camera.lookAt(targetControlTarget);
         }
 
         function updateGroupTransition() {
@@ -137,10 +148,6 @@
                 const cometAngle = entry.phase + time * 0.12;
                 entry.comet.position.set(Math.cos(cometAngle) * entry.scale * 1.75, Math.sin(cometAngle * 1.4) * entry.scale * 0.24, Math.sin(cometAngle) * entry.scale * 1.75);
                 entry.comet.rotation.y = cometAngle + Math.PI;
-            });
-            nebulaClouds.forEach((cloud, index) => {
-                cloud.rotation.y += 0.00004 + index * 0.000006;
-                cloud.rotation.z += 0.000018;
             });
             cosmicBackgroundGroup.rotation.y += 0.000012;
             cosmicBackgroundGroup.rotation.x += 0.0000025;

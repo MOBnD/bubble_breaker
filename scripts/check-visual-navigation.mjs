@@ -4,9 +4,10 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const [scene, animation] = await Promise.all([
+const [scene, animation, events] = await Promise.all([
     readFile(path.join(root, 'src', 'js', 'scene.js'), 'utf8'),
-    readFile(path.join(root, 'src', 'js', 'animation.js'), 'utf8')
+    readFile(path.join(root, 'src', 'js', 'animation.js'), 'utf8'),
+    readFile(path.join(root, 'src', 'js', 'events.js'), 'utf8')
 ]);
 
 const shapeMatch = scene.match(/const GALAXY_SHAPE_NAMES\s*=\s*\[([^\]]+)\]/);
@@ -21,19 +22,29 @@ assert.doesNotMatch(scene, /createMilkyWayBand|milkyWay|isMilkyWay/, 'the Milky 
 assert.match(scene, /const systemCount = 1000;/, 'galaxy-shaping star systems should be dense');
 assert.match(scene, /function keepGalaxyCenterClear\(/, 'galaxy centers should remain clear around black holes');
 assert.match(scene, /const galaxyStructures = \[\];/, 'galaxy structures should be independently rotatable');
-assert.match(scene, /const GAS_NEBULA_PRESETS = \[/, 'gas nebula presets should be declared');
-assert.match(scene, /カリーナ星雲/, 'real gas nebula examples should be represented');
+assert.match(scene, /function createNGC3324Background\(\)/, 'NGC 3324 should be the single farthest nebula');
+assert.match(scene, /gasNebulaName = 'NGC 3324'/, 'the farthest nebula should be identified as NGC 3324');
+assert.doesNotMatch(scene, /GAS_NEBULA_PRESETS|addGasNebula|nebulaClouds/, 'legacy multiple nebula generation should be removed');
 assert.match(scene, /const shootingStars = \[\];/, 'shooting stars should be part of the cosmic background');
 assert.match(animation, /starMesh\.rotation\.y \+=/, 'the starfield should rotate with the background');
 assert.match(animation, /cosmicBackgroundGroup\.rotation\.y \+=/, 'the distant background should continuously rotate');
 assert.match(animation, /galaxyClusters\.forEach\(\(cluster, index\) =>/, 'galaxy clusters should rotate independently');
 assert.match(scene, /function createSphericalBackgroundPosition\(/, 'background objects should use a full-sphere placement helper');
-assert.match(scene, /Array\.from\(\{ length: 12 \}/, 'nebulae should surround the bubble groups in every direction');
-assert.match(scene, /Array\.from\(\{ length: 10 \}/, 'solar systems should surround the bubble groups in every direction');
+assert.match(scene, /const externalSystemCount = galaxyClusterCenters\.length \* GALAXIES_PER_CLUSTER;/, 'solar systems should match the galaxy count');
+assert.match(scene, /Array\.from\(\{ length: externalSystemCount \}/, 'solar systems should surround the bubble groups in every direction');
 assert.match(scene, /new THREE\.Vector3\(620, -720, 1180\)/, 'galaxy clusters should also exist behind the initial view');
+assert.match(scene, /const GALAXY_CLUSTER_SPREAD = 4;/, 'galaxy clusters should have collision-safe spacing');
+assert.match(scene, /galaxyIndex \* Math\.PI \* 2 \/ GALAXIES_PER_CLUSTER/, 'galaxies in a cluster should use distinct angular slots');
+assert.match(scene, /blackHole\.userData\.eventHorizonRadius = eventHorizonRadius;/, 'black holes should expose their event horizon radius');
+assert.doesNotMatch(scene, /const horizon = new THREE\.Mesh|wireframe: true/, 'the enclosing wireframe horizon sphere should be removed');
 assert.match(scene, /function updateAutomaticBubbleApproach\(\)/, 'automatic bubble proximity handling should exist');
 assert.match(scene, /loadSingle\(nearest\.data\)/, 'proximity should enter the nearest bubble detail view');
+assert.match(events, /markGroupCameraInteraction\(e\.deltaY < 0 \? 'zoomIn' : 'zoomOut'\)/, 'only zoom-in wheel input should arm proximity transition');
 assert.doesNotMatch(scene.match(/function addSolarSystem[\s\S]*?\n        function createCosmicEnvironment/)?.[0] || '', /blackHole/i, 'solar systems must not create black holes');
 assert.match(animation, /getLoadingBlackHoleTarget\(loadingAnimation\.targetIndex\)/, 'warp animation should target galaxy-center black holes');
+assert.match(animation, /segmentDuration: 10000/, 'black hole approach should take about ten seconds');
+assert.match(animation, /maxSpeed: 900/, 'black hole approach should have a speed ceiling');
+assert.match(animation, /remainingDistance <= eventHorizonRadius/, 'warp should transition at the event horizon surface');
+assert.doesNotMatch(animation, /nearHole|Math\.pow\(1 - p/, 'warp should not enter the black hole or decelerate at the end');
 
 console.log('Visual navigation invariants: OK');
