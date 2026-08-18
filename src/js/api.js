@@ -111,8 +111,11 @@
             }
         };
         const OPENAI_ROOT_RESPONSE_SCHEMA = {
-            type: 'object', additionalProperties: false, required: ['groups'],
-            properties: { groups: { type: 'array', minItems: 1, maxItems: 1, items: OPENAI_ROOT_GROUP_SCHEMA } }
+            type: 'object', additionalProperties: false, required: ['entryRootBubbleId', 'groups'],
+            properties: {
+                entryRootBubbleId: { type: 'string' },
+                groups: { type: 'array', minItems: 1, maxItems: 1, items: OPENAI_ROOT_GROUP_SCHEMA }
+            }
         };
         const OPENAI_CENTRAL_RESPONSE_SCHEMA = {
             type: 'object', additionalProperties: false, required: ['entryBubbleId', 'groups'],
@@ -640,7 +643,7 @@
             const repairInstruction = options.repair
                 ? '\n- 前回のroot応答を検証できませんでした。rootだけを再生成し、childIdを必ずnullにしてください。'
                 : '';
-            const prompt = `ユーザーの意見: ${input}\n\nWeb Searchを使って、入力意見を含むテーマ全体の最上位カテゴリだけを生成してください。\n- groupsはroot 1つだけにし、rootのバブルは2〜${OPENAI_STRUCTURE_MAX_BUBBLES}個の意味的に異なる上位分類にしてください。\n- levelはroot、parentIdとparentBubbleIdはnull、すべてのchildIdはnullにしてください。中央・下位カテゴリはこの要求では生成しないでください。\n- 入力意見の経路だけを特別扱いせず、あとで各rootバブルを同じ調査深度で展開できる分類軸にしてください。\n- カテゴリ名・バブル名は具体的な意味内容を持たせ、テンプレート名、機械的な接尾辞、代表的な系統などの汎用ラベルは禁止です。\n- 全IDは一意な短いASCII文字列にし、analysis、metrics、sourcesは生成しないでください。JSON Schema以外の文章は出力しないでください。${repairInstruction}`;
+            const prompt = `ユーザーの意見: ${input}\n\nWeb Searchを使って、入力意見を含むテーマ全体の最上位カテゴリだけを生成してください。\n- groupsはroot 1つだけにし、rootのバブルは2〜${OPENAI_STRUCTURE_MAX_BUBBLES}個の意味的に異なる上位分類にしてください。\n- 入力意見が意味的に属するrootバブルを1つ選び、その実在するバブルIDをentryRootBubbleIdに設定してください。entryRootBubbleIdは必須で、曖昧でもnullにしてはいけません。\n- levelはroot、parentIdとparentBubbleIdはnull、すべてのchildIdはnullにしてください。中央・下位カテゴリはこの要求では生成しないでください。\n- 入力意見の経路だけを特別扱いせず、あとで各rootバブルを同じ調査深度で展開できる分類軸にしてください。\n- カテゴリ名・バブル名は具体的な意味内容を持たせ、テンプレート名、機械的な接尾辞、代表的な系統などの汎用ラベルは禁止です。\n- 全IDは一意な短いASCII文字列にし、analysis、metrics、sourcesは生成しないでください。JSON Schema以外の文章は出力しないでください。${repairInstruction}`;
             return {
                 model: OPENAI_MODEL, store: false, reasoning: { effort: 'low' }, max_output_tokens: 7000,
                 tool_choice: 'required',
@@ -654,10 +657,14 @@
         }
 
         function buildOpenAICentralGroupRequest(input, rootGroup, rootBubble, options = {}) {
+            const isEntryBranch = options.isEntryBranch === true;
             const repairInstruction = options.repair
-                ? '\n- 前回のcentral応答を検証できませんでした。指定されたrootバブルだけを親として、central groupを1つ再生成してください。entryBubbleIdも実在確認してください。'
+                ? `\n- 前回のcentral応答を検証できませんでした。指定されたrootバブルだけを親として、central groupを1つ再生成してください。${isEntryBranch ? '入力意見に対応するentryBubbleIdも実在確認してください。' : 'entryBubbleIdはnullにしてください。'}`
                 : '';
-            const prompt = `ユーザーの意見: ${input}\nrootカテゴリ: ${rootGroup.title}（${rootGroup.id}）\n展開対象のrootバブル: ${rootBubble.name}（${rootBubble.id}）\n\nWeb Searchを使って、指定されたrootバブルの直下にあるcentralカテゴリを1つだけ生成してください。\n- groupsはcentral 1つだけにし、levelはcentral、parentIdは${rootGroup.id}、parentBubbleIdは${rootBubble.id}と完全一致させてください。\n- centralのバブルは2〜${OPENAI_STRUCTURE_MAX_BUBBLES}個の具体的な、互いに意味の異なる内容にしてください。各childIdはnullにしてください。\n- 入力意見がこのcentralに含まれる場合だけ、entryBubbleIdにそのcentralバブルの実在するidを設定してください。それ以外はnullにしてください。入力意見を無理に含めないでください。\n- rootバブルの意味に直接包含される一段下だけを生成し、二段下の内容をcentralバブルに混ぜないでください。\n- 入力意見の経路だけを特別扱いせず、他のrootバブルと同じ具体性で生成してください。テンプレート名、親名への機械的な接尾辞、汎用ラベルは禁止です。\n- 全IDは一意な短いASCII文字列にし、analysis、metrics、sourcesは生成しないでください。JSON Schema以外の文章は出力しないでください。${repairInstruction}`;
+            const entryInstruction = isEntryBranch
+                ? '- このcentralはroot段階で入力意見の所属先として指定された枝です。入力意見に対応するcentralバブルを必ず1つ含め、その実在IDをentryBubbleIdに設定してください。'
+                : '- このcentralは入力意見の所属先ではありません。entryBubbleIdは必ずnullにし、入力意見バブルを作らないでください。';
+            const prompt = `ユーザーの意見: ${input}\nrootカテゴリ: ${rootGroup.title}（${rootGroup.id}）\n展開対象のrootバブル: ${rootBubble.name}（${rootBubble.id}）\n\nWeb Searchを使って、指定されたrootバブルの直下にあるcentralカテゴリを1つだけ生成してください。\n- groupsはcentral 1つだけにし、levelはcentral、parentIdは${rootGroup.id}、parentBubbleIdは${rootBubble.id}と完全一致させてください。\n- centralのバブルは2〜${OPENAI_STRUCTURE_MAX_BUBBLES}個の具体的な、互いに意味の異なる内容にしてください。各childIdはnullにしてください。\n${entryInstruction}\n- rootバブルの意味に直接包含される一段下だけを生成し、二段下の内容をcentralバブルに混ぜないでください。\n- 入力意見の経路だけを特別扱いせず、他のrootバブルと同じ具体性で生成してください。テンプレート名、親名への機械的な接尾辞、汎用ラベルは禁止です。\n- 全IDは一意な短いASCII文字列にし、analysis、metrics、sourcesは生成しないでください。JSON Schema以外の文章は出力しないでください。${repairInstruction}`;
             return {
                 model: OPENAI_MODEL, store: false, reasoning: { effort: 'low' }, max_output_tokens: 7000,
                 tool_choice: 'required',
@@ -816,6 +823,28 @@
             };
         }
 
+        // central/leafは別リクエストで生成されるため、モデルが各応答で
+        // 同じ短いIDを再利用しても、全体マージ時に衝突しないようにする。
+        // モデルIDは段階内の対応確認にだけ使い、統合後はこの正規IDを使う。
+        function canonicalizeStageGroupIds(group, canonicalGroupId, canonicalParentId, canonicalParentBubbleId) {
+            const modelToCanonicalBubbleId = new Map();
+            const bubbles = group.bubbles.map((bubble, index) => {
+                const canonicalBubbleId = `${canonicalGroupId}_b${index + 1}`;
+                modelToCanonicalBubbleId.set(bubble.id, canonicalBubbleId);
+                return { ...bubble, id: canonicalBubbleId, childId: null };
+            });
+            return {
+                group: {
+                    ...group,
+                    id: canonicalGroupId,
+                    parentId: canonicalParentId,
+                    parentBubbleId: canonicalParentBubbleId,
+                    bubbles
+                },
+                modelToCanonicalBubbleId
+            };
+        }
+
         function isRetryableHierarchyError(error) {
             return error.code === 'API_TIMEOUT' || error.code === 'API_NETWORK_ERROR' || error.code === 'API_INCOMPLETE_OUTPUT' || error.code === 'API_JSON_PARSE_ERROR' || error.code === 'API_EMPTY_OUTPUT' || error.code === 'API_INVALID_BUBBLE_COUNT' || error.code === 'API_INVALID_UNIVERSE' || error.status === 408 || error.status === 409 || error.status === 429 || error.status >= 500;
         }
@@ -844,28 +873,44 @@
         async function requestRootGroup(input) {
             const result = await requestStage('root', options => buildOpenAIRootRequest(input, options), parsed => {
                 if (!parsed || !Array.isArray(parsed.groups) || parsed.groups.length !== 1) throw new Error('rootカテゴリは1つだけ必要です');
-                return validateStageGroup(parsed.groups[0], 'root', null, null);
+                const group = validateStageGroup(parsed.groups[0], 'root', null, null);
+                const entryRootBubbleId = parsed.entryRootBubbleId == null ? '' : String(parsed.entryRootBubbleId);
+                if (!entryRootBubbleId || !group.bubbles.some(bubble => bubble.id === entryRootBubbleId)) {
+                    throw new Error('entryRootBubbleIdがrootバブルに存在しません');
+                }
+                const canonicalized = canonicalizeStageGroupIds(group, 'root', null, null);
+                return {
+                    group: canonicalized.group,
+                    entryRootBubbleId: canonicalized.modelToCanonicalBubbleId.get(entryRootBubbleId)
+                };
             });
-            apiLog('rootカテゴリを確定しました', { groupId: result.id, bubbleCount: result.bubbles.length });
+            apiLog('rootカテゴリを確定しました', { groupId: result.group.id, bubbleCount: result.group.bubbles.length, entryRootBubbleId: result.entryRootBubbleId });
             return result;
         }
 
-        async function requestCentralGroup(input, rootGroup, rootBubble) {
-            const result = await requestStage('central', options => buildOpenAICentralGroupRequest(input, rootGroup, rootBubble, options), parsed => {
+        async function requestCentralGroup(input, rootGroup, rootBubble, isEntryBranch) {
+            const result = await requestStage('central', options => buildOpenAICentralGroupRequest(input, rootGroup, rootBubble, { ...options, isEntryBranch }), parsed => {
                 if (!parsed || !Array.isArray(parsed.groups) || parsed.groups.length !== 1) throw new Error('centralカテゴリは1つだけ必要です');
                 const group = validateStageGroup(parsed.groups[0], 'central', rootGroup.id, rootBubble.id);
                 const entryBubbleId = parsed.entryBubbleId == null ? null : String(parsed.entryBubbleId);
+                if (isEntryBranch && !entryBubbleId) throw new Error('入力意見のcentralバブルが指定されていません');
+                if (!isEntryBranch && entryBubbleId) throw new Error('入力意見ではないcentralにentryBubbleIdがあります');
                 if (entryBubbleId && !group.bubbles.some(bubble => bubble.id === entryBubbleId)) throw new Error('entryBubbleIdがcentralバブルに存在しません');
-                return { group, entryBubbleId };
+                const canonicalized = canonicalizeStageGroupIds(group, `central_${rootBubble.id}`, rootGroup.id, rootBubble.id);
+                return {
+                    group: canonicalized.group,
+                    entryBubbleId: entryBubbleId ? canonicalized.modelToCanonicalBubbleId.get(entryBubbleId) : null
+                };
             });
-            apiLog('centralカテゴリを確定しました', { groupId: result.group.id, parentBubbleId: rootBubble.id, bubbleCount: result.group.bubbles.length, hasEntryBubble: Boolean(result.entryBubbleId) });
+            apiLog('centralカテゴリを確定しました', { groupId: result.group.id, parentBubbleId: rootBubble.id, bubbleCount: result.group.bubbles.length, isEntryBranch, hasEntryBubble: Boolean(result.entryBubbleId) });
             return result;
         }
 
         async function requestLeafGroup(input, centralGroup, centralBubble) {
             const result = await requestStage('leaf', options => buildOpenAILeafGroupRequest(input, centralGroup, centralBubble, options), parsed => {
                 if (!parsed || !Array.isArray(parsed.groups) || parsed.groups.length !== 1) throw new Error('leafカテゴリは1つだけ必要です');
-                return validateStageGroup(parsed.groups[0], 'leaf', centralGroup.id, centralBubble.id);
+                const group = validateStageGroup(parsed.groups[0], 'leaf', centralGroup.id, centralBubble.id);
+                return canonicalizeStageGroupIds(group, `leaf_${centralBubble.id}`, centralGroup.id, centralBubble.id).group;
             });
             apiLog('leafカテゴリを確定しました', { groupId: result.id, parentBubbleId: centralBubble.id, bubbleCount: result.bubbles.length });
             return result;
@@ -892,11 +937,15 @@
                 apiWarn('階層生成APIをスキップします（APIキー未設定）');
                 return null;
             }
+            const generationProgress = { root: false, centralCount: 0, leafCount: 0 };
             try {
                 // 依存関係を固定する: root確定 → rootの各バブルのcentral確定
                 // → 各centralバブルのleaf確定。siblingsだけを並列化する。
-                const root = await requestRootGroup(activeAnalysisInput);
-                const centralResults = await runWithConcurrency(root.bubbles, 3, rootBubble => requestCentralGroup(activeAnalysisInput, root, rootBubble));
+                const rootResult = await requestRootGroup(activeAnalysisInput);
+                generationProgress.root = true;
+                const root = rootResult.group;
+                const centralResults = await runWithConcurrency(root.bubbles, 3, rootBubble => requestCentralGroup(activeAnalysisInput, root, rootBubble, rootBubble.id === rootResult.entryRootBubbleId));
+                generationProgress.centralCount = centralResults.length;
                 const entryResults = centralResults.filter(result => result.entryBubbleId);
                 if (entryResults.length !== 1) throw new Error('入力意見を含むcentralカテゴリは1つだけ必要です');
                 const entryResult = entryResults[0];
@@ -905,6 +954,7 @@
 
                 const leafRequests = centralGroups.flatMap(centralGroup => centralGroup.bubbles.map(centralBubble => ({ centralGroup, centralBubble })));
                 const leafGroups = await runWithConcurrency(leafRequests, 3, ({ centralGroup, centralBubble }) => requestLeafGroup(activeAnalysisInput, centralGroup, centralBubble));
+                generationProgress.leafCount = leafGroups.length;
                 const leafByParentBubble = new Map(leafRequests.map((request, index) => [request.centralBubble.id, leafGroups[index]]));
                 centralGroups.forEach(centralGroup => centralGroup.bubbles.forEach(bubble => {
                     const leafGroup = leafByParentBubble.get(bubble.id);
@@ -925,7 +975,9 @@
                     stage: error.stage || 'hierarchy-merge',
                     code: error.code || 'API_INVALID_UNIVERSE',
                     centralGroupId: error.centralGroupId || null,
-                    message: redactApiLog(error.message)
+                    errorName: error.name || 'Error',
+                    message: redactApiLog(error.message || '不明なエラー'),
+                    generationProgress
                 });
                 return null;
             }

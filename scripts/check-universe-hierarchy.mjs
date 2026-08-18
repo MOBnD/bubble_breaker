@@ -54,11 +54,15 @@ const rootRequest = context.__bubbleBreakerTest.buildOpenAIRootRequest('テス�
 assert.equal(rootRequest.reasoning.effort, 'low', 'root generation should use low reasoning effort');
 assert.equal(rootRequest.tools[0].search_context_size, 'medium', 'root generation should keep medium web search context');
 assert.equal(rootRequest.text.format.name, 'bubble_universe_root', 'root schema should be used');
+assert.ok(rootRequest.text.format.schema.required.includes('entryRootBubbleId'), 'root schema should require the input branch');
 assert.equal(rootRequest.text.format.schema.properties.groups.maxItems, 1, 'root stage should return one group');
 const rootContext = { id: 'root', title: '最上位', bubbles: [bubble('r1'), bubble('r2')] };
-const centralRequest = context.__bubbleBreakerTest.buildOpenAICentralGroupRequest('テスト意見', rootContext, rootContext.bubbles[0]);
+const centralRequest = context.__bubbleBreakerTest.buildOpenAICentralGroupRequest('テスト意見', rootContext, rootContext.bubbles[0], { isEntryBranch: true });
 assert.equal(centralRequest.text.format.name, 'bubble_universe_central_group', 'central schema should be used');
 assert.match(centralRequest.input[1].content[0].text, /r1/);
+assert.match(centralRequest.input[1].content[0].text, /entryBubbleIdに設定してください/);
+const nonEntryCentralRequest = context.__bubbleBreakerTest.buildOpenAICentralGroupRequest('テスト意見', rootContext, rootContext.bubbles[1], { isEntryBranch: false });
+assert.match(nonEntryCentralRequest.input[1].content[0].text, /entryBubbleIdは必ずnull/);
 const leafRequest = context.__bubbleBreakerTest.buildOpenAILeafGroupRequest('テスト意見', { id: 'central_test', title: '中央カテゴリ' }, bubble('parent_a'));
 assert.equal(leafRequest.text.format.name, 'bubble_universe_leaf_group', 'leaf schema should be used');
 assert.match(leafRequest.input[1].content[0].text, /parent_a/);
@@ -101,6 +105,7 @@ const topologyGroups = structuredClone(groups).filter(group => group.level !== '
 topologyGroups.filter(group => group.level === 'central').forEach(group => group.bubbles.forEach(bubble => { bubble.childId = null; }));
 let hierarchyFetchCount = 0;
 const stageLog = [];
+const centralAttempts = new Map();
 const leafAttempts = new Map();
 const rootResponse = structuredClone(groups.filter(group => group.level === 'root'));
 rootResponse[0].bubbles.forEach(item => { item.childId = null; });
@@ -117,22 +122,39 @@ const hierarchyContext = {
         stageLog.push(stage);
         if (stage === 'bubble_universe_root') {
             return { ok: true, status: 200, headers: { get() { return 'topology-request'; } }, async json() {
-                return { output_text: JSON.stringify({ groups: rootResponse }) };
+                return { output_text: JSON.stringify({ entryRootBubbleId: 'r1', groups: rootResponse }) };
             } };
         }
         const prompt = request.input[1].content[0].text;
         if (stage === 'bubble_universe_central_group') {
-            const rootBubbleId = prompt.includes('（r1）') ? 'r1' : 'r2';
+            const rootBubbleId = prompt.includes('（root_b1）') ? 'r1' : 'r2';
             const group = structuredClone(centralResponseByRootBubble.get(rootBubbleId));
+            const attempt = (centralAttempts.get(rootBubbleId) || 0) + 1;
+            centralAttempts.set(rootBubbleId, attempt);
+            const modelCentralBubbleIds = ['model-central-b1', 'model-central-b2'];
+            group.id = 'model-central';
+            group.parentId = 'root';
+            group.parentBubbleId = rootBubbleId === 'r1' ? 'root_b1' : 'root_b2';
+            group.bubbles.forEach((item, index) => { item.id = modelCentralBubbleIds[index]; item.childId = null; });
+            const entryBubbleId = rootBubbleId === 'r1' && attempt > 1 ? modelCentralBubbleIds[0] : null;
             return { ok: true, status: 200, headers: { get() { return `central-${rootBubbleId}`; } }, async json() {
-                return { output_text: JSON.stringify({ entryBubbleId: group.id === 'central1' ? 'entry' : null, groups: [group] }) };
+                return { output_text: JSON.stringify({ entryBubbleId, groups: [group] }) };
             } };
         }
-        const centralBubbleId = ['entry', 'c1b', 'c2b1', 'c2b2'].find(id => prompt.includes(`（${id}）`));
+        const centralGroupId = prompt.match(/centralカテゴリ:[^（]*（([^）]+)）/)?.[1];
+        const centralBubbleId = prompt.match(/展開対象のcentralバブル:[^（]*（([^）]+)）/)?.[1];
+        const sourceCentralId = centralGroupId === 'central_root_b1' ? 'central1' : 'central2';
+        const sourceParentBubbleId = sourceCentralId === 'central1'
+            ? (centralBubbleId.endsWith('_b1') ? 'entry' : 'c1b')
+            : (centralBubbleId.endsWith('_b1') ? 'c2b1' : 'c2b2');
         const attempt = (leafAttempts.get(centralBubbleId) || 0) + 1;
         leafAttempts.set(centralBubbleId, attempt);
-        const group = structuredClone(leafResponseByCentralBubble.get(centralBubbleId));
-        if (centralBubbleId === 'entry' && attempt === 1) group.parentBubbleId = 'missing-parent';
+        const group = structuredClone(leafResponseByCentralBubble.get(sourceParentBubbleId));
+        group.id = 'model-leaf';
+        group.parentId = centralGroupId;
+        group.parentBubbleId = centralBubbleId;
+        group.bubbles.forEach((item, index) => { item.id = `model-leaf-b${index + 1}`; item.childId = null; });
+        if (sourceParentBubbleId === 'entry' && attempt === 1) group.parentBubbleId = 'missing-parent';
         return { ok: true, status: 200, headers: { get() { return `leaf-${centralBubbleId}`; } }, async json() {
             return { output_text: JSON.stringify({ groups: [group] }) };
         } };
@@ -141,12 +163,18 @@ const hierarchyContext = {
 vm.createContext(hierarchyContext);
 vm.runInContext(`${dataSource}\n${apiSource}\nglobalThis.__bubbleBreakerTest = { requestDynamicUniverse };`, hierarchyContext);
 const generatedUniverse = await hierarchyContext.__bubbleBreakerTest.requestDynamicUniverse('テスト意見');
-assert.equal(hierarchyFetchCount, 8, 'a missing leaf should trigger a retry only for the affected leaf request');
+assert.equal(hierarchyFetchCount, 9, 'central and leaf validation failures should retry only their affected requests');
 assert.equal(Object.keys(generatedUniverse.db).length, 7, 'staged hierarchy generation should produce all leaf groups');
 assert.deepEqual(stageLog.slice(0, 1), ['bubble_universe_root'], 'root must be generated first');
-assert.ok(stageLog.slice(1, 3).every(stage => stage === 'bubble_universe_central_group'), 'central groups must follow root');
-assert.ok(stageLog.slice(3).every(stage => stage === 'bubble_universe_leaf_group'), 'leaf groups must follow central groups');
-assert.equal(leafAttempts.get('entry'), 2, 'only the invalid leaf branch should be retried');
+const firstLeafStageIndex = stageLog.indexOf('bubble_universe_leaf_group');
+assert.ok(firstLeafStageIndex > 1, 'leaf generation should start after central generation');
+assert.ok(stageLog.slice(1, firstLeafStageIndex).every(stage => stage === 'bubble_universe_central_group'), 'central groups must follow root');
+assert.ok(stageLog.slice(firstLeafStageIndex).every(stage => stage === 'bubble_universe_leaf_group'), 'leaf groups must follow central groups');
+assert.equal(centralAttempts.get('r1'), 2, 'the designated entry branch should retry when entryBubbleId is missing');
+assert.equal(leafAttempts.get('central_root_b1_b1'), 2, 'only the invalid leaf branch should be retried');
+assert.equal(generatedUniverse.db.root.bubbles[0].childId, 'central_root_b1', 'root child links should use branch-scoped canonical IDs');
+assert.equal(generatedUniverse.db.central_root_b1.bubbles[0].childId, 'leaf_central_root_b1_b1', 'central child links should use branch-scoped canonical IDs');
+assert.equal(new Set(Object.keys(generatedUniverse.db)).size, Object.keys(generatedUniverse.db).length, 'canonical group IDs should be globally unique');
 const topology = normalize({ groups: topologyGroups, entryGroupId: 'central1', entryBubbleId: 'entry' }, { topologyOnly: true });
 assert.equal(Object.keys(topology.db).length, 3, 'upper topology should be accepted before leaf generation');
 

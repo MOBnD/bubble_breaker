@@ -61,6 +61,7 @@ root   親カテゴリ
 - leafの `parentId` はcentralのID
 - 子カテゴリの `parentBubbleId` は直上カテゴリに実在する親バブルID
 - 親バブルの `childId` は対応する子カテゴリID
+- APIの各段階でモデルが返すIDは段階内の検証にのみ使い、統合前にクライアントがroot・central・leafの枝に基づく一意な内部IDへ正規化する
 - 親カテゴリの各バブルには固有の中央カテゴリを対応付ける
 - 中央カテゴリの各バブルには固有の下位カテゴリを対応付ける
 - 入力意見の経路だけを特別扱いせず、全経路を同じ具体性・深度で生成する
@@ -73,8 +74,8 @@ API生成に失敗した場合は、テンプレートで不足カテゴリを�
 
 意見確定後、階層生成は次の段階で実行されます。
 
-1. OpenAI Responses APIの `web_search` とStructured Outputsでrootカテゴリだけを生成・確定する。
-2. 確定したrootの各バブルを親コンテキストとして、centralカテゴリを1つずつ生成する。siblingsだけを最大3件まで並列化する。
+1. OpenAI Responses APIの `web_search` とStructured Outputsでrootカテゴリだけを生成・確定する。この応答で入力意見が属するrootバブルのIDも1つ確定する。
+2. 確定したrootの各バブルを親コンテキストとして、centralカテゴリを1つずつ生成する。入力意見のroot枝だけはentryBubbleIdを必須にし、それ以外の枝ではentryBubbleIdを禁止する。siblingsだけを最大3件まで並列化する。
 3. 確定した全centralの各バブルを親コンテキストとして、leafカテゴリを1つずつ生成する。ここでもsiblingsだけを最大3件まで並列化する。
 4. クライアント側で各段階のlevel、parentId、parentBubbleId、childId、対応数、バブル数を検証してから全体を正規化する。
 5. 失敗した段階だけを再試行し、最終的に不完全ならテンプレート補完をせず固定DBへフォールバックする。
