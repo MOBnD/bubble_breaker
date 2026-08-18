@@ -1,0 +1,83 @@
+        html, body {
+            width: 100%;
+            height: 100%;
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background: #050510;
+        }
+        *, *::before, *::after { box-sizing: border-box; }
+
+        #canvas-container { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 1; overflow: hidden; }
+        
+        /* 3D空間に追従するHTMLラベル */
+        #labels-container { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 5; pointer-events: none; overflow: hidden; }
+        .bubble-label {
+            position: absolute;
+            transform: translate(-50%, -50%);
+            color: rgba(255, 255, 255, 0.9);
+            text-shadow: 0 0 5px rgba(0,0,0,0.8), 0 0 10px rgba(0,0,0,0.5);
+            font-weight: 800;
+            font-size: clamp(16px, 1.5vw, 24px);
+            text-align: center;
+            transition: opacity 0.3s, transform 0.1s;
+            cursor: pointer;
+            pointer-events: auto;
+        }
+        .bubble-label:hover { color: #fff; text-shadow: 0 0 10px rgba(255,255,255,0.8); }
+
+        /* UIレイヤー */
+        #ui-layer { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 10; pointer-events: none; overflow: hidden; }
+        
+        .glass-panel {
+            background: rgba(15, 20, 40, 0.6);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.5);
+            color: #f8fafc;
+        }
+
+        /* 右パネルは背景の星雲・星の上でも本文を判読できる明度を固定する。 */
+        #panel-group, #panel-single, #panel-bgm {
+            color: #f8fafc;
+            background: rgba(8, 13, 32, 0.82);
+            border-color: rgba(148, 163, 184, 0.32);
+        }
+        #panel-group h2, #panel-single h2,
+        #panel-group #group-list, #panel-group #group-list > div {
+            color: #f8fafc;
+        }
+        #panel-group .text-gray-400, #panel-group .text-gray-500,
+        #panel-single .text-gray-300, #panel-single .text-gray-400,
+        #panel-single .text-gray-500, #panel-bgm .text-gray-300 {
+            color: #cbd5e1 !important;
+        }
+        #group-list > div {
+            text-shadow: 0 1px 5px rgba(0, 0, 0, 0.9);
+        }
+        #group-list > div:hover { background: rgba(96, 165, 250, 0.16); }
+
+        /* 画面フェード用 */
+        .screen-container { transition: opacity 0.5s ease-in-out, transform 0.5s ease, visibility 0.5s; opacity: 0; visibility: hidden; pointer-events: none; position: absolute; inset: 0; width: 100%; height: 100%; }
+        .screen-active { opacity: 1; visibility: visible; pointer-events: none; transform: scale(1); }
+        .screen-hidden { transform: scale(1.05); }
+
+        /* 解析カードの出現アニメーション */
+        .card-anim {
+            transition: transform 0.6s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.4s ease;
+        }
+        .screen-hidden .card-tl { transform: translate(150%, 150%) scale(0); opacity: 0; }
+        .screen-hidden .card-tr { transform: translate(-150%, 150%) scale(0); opacity: 0; }
+        .screen-hidden .card-bl { transform: translate(150%, -150%) scale(0); opacity: 0; }
+        .screen-hidden .card-br { transform: translate(-150%, -150%) scale(0); opacity: 0; }
+
+        .screen-active .card-tl { transform: translate(0, 0) scale(1); opacity: 1; transition-delay: 0.1s; }
+        .screen-active .card-tr { transform: translate(0, 0) scale(1); opacity: 1; transition-delay: 0.2s; }
+        .screen-active .card-bl { transform: translate(0, 0) scale(1); opacity: 1; transition-delay: 0.3s; }
+        .screen-active .card-br { transform: translate(0, 0) scale(1); opacity: 1; transition-delay: 0.4s; }
+
+        ::-webkit-scrollbar { width: 4px; background: transparent; }
+        ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.2); border-radius: 4px; }
+        
+        .meter-gradient { background: linear-gradient(90deg, #3b82f6 0%, #a855f7 50%, #ef4444 100%); }
+    </style>

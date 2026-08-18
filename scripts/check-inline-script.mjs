@@ -3,9 +3,11 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const html = await readFile(path.join(root, 'bb_proto4.html'), 'utf8');
-const start = html.lastIndexOf('<script>');
-const end = html.lastIndexOf('</script>');
-if (start < 0 || end <= start) throw new Error('Inline application script was not found.');
-new Function(html.slice(start + '<script>'.length, end));
+const sourcePath = path.join(root, 'src', 'index.html');
+const source = await readFile(sourcePath, 'utf8');
+const localScriptPattern = /<script src="\.\/([^\"]+)"><\/script>/g;
+const scriptPaths = [...source.matchAll(localScriptPattern)].map(match => match[1]);
+if (scriptPaths.length === 0) throw new Error('Local application scripts were not found.');
+const scripts = await Promise.all(scriptPaths.map(relativePath => readFile(path.join(path.dirname(sourcePath), relativePath), 'utf8')));
+new Function(scripts.join('\n;\n'));
 console.log('Inline application script syntax: OK');
