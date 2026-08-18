@@ -13,6 +13,38 @@
             return { position: new THREE.Vector3(0, 0, -90), galaxy: null, blackHole: null };
         }
 
+        function getEventHorizonRadius(target) {
+            return target.blackHole?.userData?.eventHorizonRadius || 10;
+        }
+
+        function createLoadingRoute(target, direction, distance) {
+            const horizonRadius = getEventHorizonRadius(target);
+            const start = target.position.clone().addScaledVector(direction, distance);
+            const end = target.position.clone().addScaledVector(direction, horizonRadius);
+            const lateralAxis = new THREE.Vector3(1, 0, 0);
+            const verticalAxis = new THREE.Vector3(0, 1, 0);
+            const lateralDrift = (Math.random() - 0.5) * 760;
+            const verticalDrift = (Math.random() - 0.5) * 300;
+            const secondaryLateral = (Math.random() - 0.5) * 260;
+            const points = [start];
+            [0.22, 0.46, 0.7, 0.88].forEach((progress, index) => {
+                const point = start.clone().lerp(end, progress);
+                const wave = Math.sin(progress * Math.PI);
+                const lateralOffset = lateralDrift * wave + secondaryLateral * Math.sin(progress * Math.PI * 2.1 + index);
+                const verticalOffset = verticalDrift * wave * 0.72;
+                point.addScaledVector(lateralAxis, lateralOffset);
+                point.addScaledVector(verticalAxis, verticalOffset);
+                points.push(point);
+            });
+            points.push(end);
+            return new THREE.CatmullRomCurve3(points, false, 'centripetal', 0.25);
+        }
+
+        function initializeLoadingRoute(target) {
+            loadingAnimation.route = createLoadingRoute(target, loadingAnimation.approachDirection, loadingAnimation.approachDistance);
+            loadingAnimation.routeTargetIndex = loadingAnimation.targetIndex;
+        }
+
         function startLoadingAnimation() {
             // ひとつの銀河の中心ブラックホールだけを航路に固定する。
             // 入口・出口を大きく離し、周囲の意見（星）を横切る高速移動を見せる。
@@ -26,6 +58,8 @@
                 maxSpeed: 900,
                 approachDirection: new THREE.Vector3(0, 0, 1),
                 targetIndex: 0,
+                route: null,
+                routeTargetIndex: -1,
                 onReady: null
             };
             isDiving = true;
@@ -33,6 +67,7 @@
             controls.enabled = false;
             camera.position.copy(firstTarget.position).addScaledVector(loadingAnimation.approachDirection, loadingAnimation.approachDistance);
             targetControlTarget.copy(firstTarget.position);
+            initializeLoadingRoute(firstTarget);
             if (firstTarget.galaxy) firstTarget.galaxy.visible = true;
             camera.lookAt(targetControlTarget);
             galaxyClusters.forEach(cluster => { cluster.visible = true; });
@@ -45,24 +80,32 @@
             updateZoomSound(phase);
             const target = getLoadingBlackHoleTarget(loadingAnimation.targetIndex);
             const blackHole = target.position;
-            const eventHorizonRadius = target.blackHole?.userData?.eventHorizonRadius || 10;
-            const travelDistance = Math.max(1, loadingAnimation.approachDistance - eventHorizonRadius);
+            const eventHorizonRadius = getEventHorizonRadius(target);
+            if (!loadingAnimation.route || loadingAnimation.routeTargetIndex !== loadingAnimation.targetIndex) initializeLoadingRoute(target);
+            const routeLength = Math.max(1, loadingAnimation.route.getLength());
             // 速度は初速から単調増加し、最終速度は約900 units/secを上限にする。
             const durationSeconds = loadingAnimation.segmentDuration / 1000;
-            const initialSpeedRatio = Math.max(0.05, Math.min(0.5, 2 - loadingAnimation.maxSpeed * durationSeconds / travelDistance));
+            const initialSpeedRatio = Math.max(0.05, Math.min(0.5, 2 - loadingAnimation.maxSpeed * durationSeconds / routeLength));
             const distanceProgress = Math.min(1, initialSpeedRatio * phase + (1 - initialSpeedRatio) * phase * phase);
-            const remainingDistance = eventHorizonRadius + travelDistance * (1 - distanceProgress);
-            camera.position.copy(blackHole).addScaledVector(loadingAnimation.approachDirection, remainingDistance);
-            targetControlTarget.copy(blackHole);
+            if (phase >= 1) {
+                // 移動中に銀河が回転しても、遷移直前は必ず地平面表面へ合わせる。
+                camera.position.copy(blackHole).addScaledVector(loadingAnimation.approachDirection, eventHorizonRadius);
+                targetControlTarget.copy(blackHole);
+            } else {
+                camera.position.copy(loadingAnimation.route.getPointAt(distanceProgress));
+                const lookAhead = Math.min(0.08, 160 / routeLength);
+                targetControlTarget.copy(loadingAnimation.route.getPointAt(Math.min(1, distanceProgress + lookAhead)));
+            }
             camera.lookAt(targetControlTarget);
 
             // カメラが事象の地平面表面へ触れた瞬間に切り替える。内部座標は一度も生成しない。
-            if (remainingDistance <= eventHorizonRadius + 0.05 || phase >= 1) {
+            if (camera.position.distanceTo(blackHole) <= eventHorizonRadius + 0.05 || phase >= 1) {
                 loadingAnimation.targetIndex = (loadingAnimation.targetIndex + 1) % loadingBlackHoles.length;
                 loadingAnimation.segmentStartedAt = performance.now();
                 const nextTarget = getLoadingBlackHoleTarget(loadingAnimation.targetIndex);
                 camera.position.copy(nextTarget.position).addScaledVector(loadingAnimation.approachDirection, loadingAnimation.approachDistance);
                 targetControlTarget.copy(nextTarget.position);
+                initializeLoadingRoute(nextTarget);
                 if (nextTarget.galaxy) nextTarget.galaxy.visible = true;
                 if (pendingUniverse && typeof loadingAnimation.onReady === 'function') {
                     const onReady = loadingAnimation.onReady;

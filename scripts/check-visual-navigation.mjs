@@ -13,7 +13,10 @@ const [scene, animation, events] = await Promise.all([
 const shapeMatch = scene.match(/const GALAXY_SHAPE_NAMES\s*=\s*\[([^\]]+)\]/);
 assert.ok(shapeMatch, 'galaxy shape names should be declared');
 assert.ok((shapeMatch[1].match(/'/g) || []).length >= 10, 'at least five galaxy shapes should be defined');
-assert.match(scene, /const starsCount = 12000;/, 'isolated stars should remain a minority layer');
+assert.match(scene, /const starsCount = 18000;/, 'isolated stars should remain a minority layer while reaching galaxy depth');
+assert.match(scene, /function createBackgroundStarPosition\(/, 'isolated stars should use a spherical position generator');
+assert.match(scene, /starsGeometry\.setAttribute\('aShape'/, 'isolated stars should mix circular and starburst shapes');
+assert.match(scene, /starsGeometry\.setAttribute\('aSpike'/, 'starburst intensity should vary per star');
 assert.match(scene, /controls\.enableZoom = true;/, 'OrbitControls zoom should be enabled');
 assert.match(scene, /controls\.maxDistance = 24000;/, 'upper categories should have a usable zoom-out range');
 assert.match(scene, /isGalaxyCenterBlackHole = true/, 'black holes should be marked as galaxy centers');
@@ -32,9 +35,11 @@ assert.match(animation, /galaxyClusters\.forEach\(\(cluster, index\) =>/, 'galax
 assert.match(scene, /function createSphericalBackgroundPosition\(/, 'background objects should use a full-sphere placement helper');
 assert.match(scene, /const externalSystemCount = galaxyClusterCenters\.length \* GALAXIES_PER_CLUSTER;/, 'solar systems should match the galaxy count');
 assert.match(scene, /Array\.from\(\{ length: externalSystemCount \}/, 'solar systems should surround the bubble groups in every direction');
-assert.match(scene, /new THREE\.Vector3\(620, -720, 1180\)/, 'galaxy clusters should also exist behind the initial view');
-assert.match(scene, /const GALAXY_CLUSTER_SPREAD = 4;/, 'galaxy clusters should have collision-safe spacing');
+assert.match(scene, /const GALAXY_CLUSTER_COUNT = 12;/, 'galaxy clusters should be distributed in all directions');
+assert.match(scene, /const GALAXY_CLUSTER_RADIUS = 8000;/, 'galaxy clusters should occupy a broad distance shell');
 assert.match(scene, /galaxyIndex \* Math\.PI \* 2 \/ GALAXIES_PER_CLUSTER/, 'galaxies in a cluster should use distinct angular slots');
+assert.match(scene, /const GALAXY_COLOR_PROFILES = \[/, 'galaxies should have distinct color profiles');
+assert.match(scene, /preserveGalaxyColor/, 'galaxy color profiles should survive depth updates');
 assert.match(scene, /blackHole\.userData\.eventHorizonRadius = eventHorizonRadius;/, 'black holes should expose their event horizon radius');
 assert.doesNotMatch(scene, /const horizon = new THREE\.Mesh|wireframe: true/, 'the enclosing wireframe horizon sphere should be removed');
 assert.match(scene, /function updateAutomaticBubbleApproach\(\)/, 'automatic bubble proximity handling should exist');
@@ -44,7 +49,10 @@ assert.doesNotMatch(scene.match(/function addSolarSystem[\s\S]*?\n        functi
 assert.match(animation, /getLoadingBlackHoleTarget\(loadingAnimation\.targetIndex\)/, 'warp animation should target galaxy-center black holes');
 assert.match(animation, /segmentDuration: 10000/, 'black hole approach should take about ten seconds');
 assert.match(animation, /maxSpeed: 900/, 'black hole approach should have a speed ceiling');
-assert.match(animation, /remainingDistance <= eventHorizonRadius/, 'warp should transition at the event horizon surface');
+assert.match(animation, /camera\.position\.distanceTo\(blackHole\) <= eventHorizonRadius/, 'warp should transition at the event horizon surface');
+assert.match(animation, /new THREE\.CatmullRomCurve3/, 'warp should follow a smooth curve');
+assert.match(animation, /Math\.random\(\) - 0\.5/, 'warp control points should vary on every dive');
+assert.match(animation, /initializeLoadingRoute\(nextTarget\)/, 'each black hole segment should receive a route');
 assert.doesNotMatch(animation, /nearHole|Math\.pow\(1 - p/, 'warp should not enter the black hole or decelerate at the end');
 
 console.log('Visual navigation invariants: OK');

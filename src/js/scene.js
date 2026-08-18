@@ -51,36 +51,59 @@
             return new THREE.CanvasTexture(canvas);
         }
 
+        function backgroundRandom(seed) {
+            const value = Math.sin(seed * 12.9898 + 78.233) * 43758.5453;
+            return value - Math.floor(value);
+        }
+
+        function createBackgroundStarPosition(index, count) {
+            const t = (index + 0.5) / count;
+            const y = 1 - 2 * t;
+            const radial = Math.sqrt(Math.max(0, 1 - y * y));
+            const theta = index * Math.PI * (3 - Math.sqrt(5)) + backgroundRandom(index * 0.37 + 11);
+            const radius = 500 + Math.cbrt(backgroundRandom(index * 1.91 + 23)) * 13500;
+            return new THREE.Vector3(
+                Math.cos(theta) * radial * radius,
+                y * radius,
+                Math.sin(theta) * radial * radius
+            );
+        }
+
         // 星の数と位置・色を定義
         const starsGeometry = new THREE.BufferGeometry();
-        // 単独星は背景全体の約2割に抑え、銀河内の恒星系・惑星・星雲を主役にする。
-        const starsCount = 12000;
+        // 単独星は背景全体の約2割に抑えつつ、銀河位置まで星の層を連続させる。
+        const starsCount = 18000;
         const posArray = new Float32Array(starsCount * 3);
         const colorsArray = new Float32Array(starsCount * 3);
         const sizesArray = new Float32Array(starsCount);
+        const shapesArray = new Float32Array(starsCount);
+        const spikesArray = new Float32Array(starsCount);
         const STAR_SPECTRAL_PALETTE = [0x9ecbff, 0xd9e9ff, 0xffffff, 0xfff1b0, 0xffc27a, 0xff8d70];
 
-        for(let i=0; i<starsCount * 3; i+=3) {
+        for(let starIndex = 0; starIndex < starsCount; starIndex++) {
+            const i = starIndex * 3;
             // 星はカメラの全周を包む球殻に固定する。背後を向いても空白にならず、
             // 銀河・バブルと同じワールド空間を共有する。
-            const radius = 500 + Math.random() * 2500;
-            const theta = Math.random() * Math.PI * 2;
-            const phi = Math.acos(2 * Math.random() - 1);
-            posArray[i] = radius * Math.sin(phi) * Math.cos(theta);
-            posArray[i+1] = radius * Math.cos(phi);
-            posArray[i+2] = radius * Math.sin(phi) * Math.sin(theta);
+            const position = createBackgroundStarPosition(starIndex, starsCount);
+            posArray[i] = position.x;
+            posArray[i+1] = position.y;
+            posArray[i+2] = position.z;
 
             // 星のスペクトルを青白色から赤色まで広げ、恒星ごとに明度と大きさを変える。
-            const color = new THREE.Color(STAR_SPECTRAL_PALETTE[Math.floor(Math.random() * STAR_SPECTRAL_PALETTE.length)]);
-            color.multiplyScalar(0.58 + Math.random() * 0.52);
+            const color = new THREE.Color(STAR_SPECTRAL_PALETTE[Math.floor(backgroundRandom(starIndex * 2.1 + 31) * STAR_SPECTRAL_PALETTE.length)]);
+            color.multiplyScalar(0.58 + backgroundRandom(starIndex * 2.7 + 47) * 0.52);
             colorsArray[i] = color.r;
             colorsArray[i+1] = color.g;
             colorsArray[i+2] = color.b;
-            sizesArray[i / 3] = 7 + Math.pow(Math.random(), 2.2) * 26;
+            sizesArray[starIndex] = 7 + Math.pow(backgroundRandom(starIndex * 3.3 + 61), 2.2) * 26;
+            shapesArray[starIndex] = backgroundRandom(starIndex * 4.1 + 73) > 0.7 ? 1 : 0;
+            spikesArray[starIndex] = 0.7 + backgroundRandom(starIndex * 5.7 + 89) * 0.8;
         }
         starsGeometry.setAttribute('position', new THREE.BufferAttribute(posArray, 3));
         starsGeometry.setAttribute('color', new THREE.BufferAttribute(colorsArray, 3));
         starsGeometry.setAttribute('aSize', new THREE.BufferAttribute(sizesArray, 1));
+        starsGeometry.setAttribute('aShape', new THREE.BufferAttribute(shapesArray, 1));
+        starsGeometry.setAttribute('aSpike', new THREE.BufferAttribute(spikesArray, 1));
 
         // 星の質感（マテリアル）の設定
         const starsMaterial = new THREE.ShaderMaterial({
@@ -91,10 +114,16 @@
             vertexColors: true,
             vertexShader: `
                 attribute float aSize;
+                attribute float aShape;
+                attribute float aSpike;
                 varying vec3 vColor;
+                varying float vShape;
+                varying float vSpike;
                 uniform float pixelRatio;
                 void main() {
                     vColor = color;
+                    vShape = aShape;
+                    vSpike = aSpike;
                     vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
                     gl_PointSize = aSize * pixelRatio * (420.0 / max(1.0, -mvPosition.z));
                     gl_Position = projectionMatrix * mvPosition;
@@ -102,9 +131,18 @@
             `,
             fragmentShader: `
                 varying vec3 vColor;
+                varying float vShape;
+                varying float vSpike;
                 void main() {
                     vec2 centered = gl_PointCoord - vec2(0.5);
-                    float glow = 1.0 - smoothstep(0.05, 0.5, dot(centered, centered));
+                    float radius = length(centered);
+                    if (radius > 0.5) discard;
+                    float circleGlow = 1.0 - smoothstep(0.04, 0.5, radius);
+                    float rayWidth = 0.035 + vSpike * 0.025;
+                    float horizontalRay = exp(-abs(centered.y) / rayWidth) * (1.0 - smoothstep(0.08, 0.5, abs(centered.x)));
+                    float verticalRay = exp(-abs(centered.x) / rayWidth) * (1.0 - smoothstep(0.08, 0.5, abs(centered.y)));
+                    float starGlow = max(horizontalRay, verticalRay);
+                    float glow = mix(circleGlow, max(circleGlow * 0.34, starGlow), step(0.5, vShape));
                     gl_FragColor = vec4(vColor, glow * 0.72);
                 }
             `
@@ -117,17 +155,28 @@
         const loadingBlackHoles = [];
         const galaxyBlackHoleTargets = [];
         const GALAXY_SHAPE_NAMES = ['楕円銀河', '球状銀河', '渦巻銀河', '棒渦巻銀河', 'レンズ状銀河', '不規則銀河'];
-        const GALAXIES_PER_CLUSTER = 5;
-        const GALAXY_CLUSTER_SPREAD = 4;
-        const galaxyClusterCenters = [
-            // 初期カメラの正面だけに偏らないよう、前後・上下・左右へ配置する。
-            new THREE.Vector3(0, 0, -1260), new THREE.Vector3(1120, 490, -980),
-            new THREE.Vector3(-1190, -560, -840), new THREE.Vector3(910, -910, -1470),
-            new THREE.Vector3(-980, 945, -1085), new THREE.Vector3(1540, -110, -1750),
-            new THREE.Vector3(-1540, 280, -1330), new THREE.Vector3(210, 1330, -2030),
-            new THREE.Vector3(620, -720, 1180), new THREE.Vector3(-1380, 260, 920),
-            new THREE.Vector3(1480, 880, 760), new THREE.Vector3(-540, -1240, 1560)
+        const GALAXY_COLOR_PROFILES = [
+            { name: '青白', primaryHue: 0.61, secondaryHue: 0.55, saturation: 0.92, coreColor: 0xb9dcff, diskColor: 0x73b9ff, photonColor: 0xe6f5ff },
+            { name: '紫青', primaryHue: 0.74, secondaryHue: 0.66, saturation: 0.9, coreColor: 0xc4a8ff, diskColor: 0x8b63ff, photonColor: 0xf0d9ff },
+            { name: '赤橙', primaryHue: 0.035, secondaryHue: 0.09, saturation: 0.94, coreColor: 0xffbd82, diskColor: 0xff6d3f, photonColor: 0xffe0a0 },
+            { name: '金色', primaryHue: 0.12, secondaryHue: 0.18, saturation: 0.9, coreColor: 0xffdf8c, diskColor: 0xffad3e, photonColor: 0xfff2ae },
+            { name: '青緑', primaryHue: 0.49, secondaryHue: 0.42, saturation: 0.88, coreColor: 0x8fe8d7, diskColor: 0x20b9b3, photonColor: 0xc6fff1 },
+            { name: 'マゼンタ', primaryHue: 0.91, secondaryHue: 0.83, saturation: 0.93, coreColor: 0xff9ecb, diskColor: 0xff4fa1, photonColor: 0xffd5f2 }
         ];
+        const GALAXIES_PER_CLUSTER = 5;
+        const GALAXY_CLUSTER_COUNT = 12;
+        const GALAXY_CLUSTER_RADIUS = 8000;
+        const galaxyClusterCenters = Array.from({ length: GALAXY_CLUSTER_COUNT }, (_, index) => {
+            const t = (index + 0.5) / GALAXY_CLUSTER_COUNT;
+            const y = 1 - 2 * t;
+            const radial = Math.sqrt(Math.max(0, 1 - y * y));
+            const theta = index * Math.PI * (3 - Math.sqrt(5)) + 0.37;
+            return new THREE.Vector3(
+                Math.cos(theta) * radial * GALAXY_CLUSTER_RADIUS,
+                y * GALAXY_CLUSTER_RADIUS,
+                Math.sin(theta) * radial * GALAXY_CLUSTER_RADIUS
+            );
+        });
 
         function getGalaxyStarPosition(shape, index, count, radius, seed, galaxyIndex) {
             const u = (index + 0.5) / count;
@@ -187,8 +236,8 @@
 
         function createGalaxyCluster(center, seed) {
             const cluster = new THREE.Group();
-            // クラスター間の余白を確保し、外縁の銀河同士が接触しない距離へ広げる。
-            cluster.position.copy(center).multiplyScalar(GALAXY_CLUSTER_SPREAD);
+            // 球面上に十分な間隔で置いたクラスターをそのままワールド座標へ配置する。
+            cluster.position.copy(center);
             for (let galaxyIndex = 0; galaxyIndex < GALAXIES_PER_CLUSTER; galaxyIndex++) {
                 const galaxyAngle = galaxyIndex * Math.PI * 2 / GALAXIES_PER_CLUSTER + seed * 0.13;
                 const galaxyOffset = new THREE.Vector3(Math.cos(galaxyAngle) * (700 + galaxyIndex * 100), Math.sin(galaxyAngle * 1.7) * (180 + seed * 22), Math.sin(galaxyAngle) * (700 + galaxyIndex * 100));
@@ -197,11 +246,13 @@
                 const tilt = 0.18 + ((seed * 0.37 + galaxyIndex * 0.71) % 1) * 1.1;
                 const spin = ((seed * 1.91 + galaxyIndex * 2.37) % 1) * Math.PI * 2;
                 const systemCount = 1000;
+                const colorProfile = GALAXY_COLOR_PROFILES[(seed * 3 + galaxyIndex) % GALAXY_COLOR_PROFILES.length];
                 const galaxy = new THREE.Group();
                 galaxy.position.copy(galaxyOffset);
                 galaxy.rotation.set(tilt, spin, tilt * 0.63);
                 galaxy.userData.shape = GALAXY_SHAPE_NAMES[shape];
                 galaxy.userData.galaxyRadius = galaxyRadius;
+                galaxy.userData.colorProfile = colorProfile.name;
 
                 // 銀河の恒星は必ず形状に沿って配置する。惑星を伴う恒星系は銀河外へ分離する。
                 const starSystems = new THREE.InstancedMesh(
@@ -217,9 +268,9 @@
                     dummy.scale.setScalar(0.78 + (i % 7) * 0.07);
                     dummy.updateMatrix();
                     starSystems.setMatrixAt(i, dummy.matrix);
-                    const spectralHue = (0.58 + (i % 6) * 0.083 + seed * 0.017 + galaxyIndex * 0.031) % 1;
+                    const spectralHue = (colorProfile.primaryHue + ((i % 6) - 2.5) * 0.035 + seed * 0.009) % 1;
                     const spectralLightness = 0.58 + ((i * 7 + seed) % 7) * 0.055;
-                    starSystems.setColorAt(i, new THREE.Color().setHSL(spectralHue, 0.78, Math.min(0.94, spectralLightness)));
+                    starSystems.setColorAt(i, new THREE.Color().setHSL(spectralHue, colorProfile.saturation, Math.min(0.94, spectralLightness)));
                 }
                 starSystems.instanceMatrix.needsUpdate = true;
                 if (starSystems.instanceColor) starSystems.instanceColor.needsUpdate = true;
@@ -236,15 +287,18 @@
                 }
                 const dustGeometry = new THREE.BufferGeometry();
                 dustGeometry.setAttribute('position', new THREE.BufferAttribute(dustPositions, 3));
-                galaxy.add(new THREE.Points(dustGeometry, new THREE.PointsMaterial({
-                    size: 3.4, color: new THREE.Color().setHSL((0.04 + seed * 0.07 + galaxyIndex * 0.12) % 1, 0.78, 0.66),
+                const dust = new THREE.Points(dustGeometry, new THREE.PointsMaterial({
+                    size: 3.4, color: new THREE.Color().setHSL(colorProfile.secondaryHue, colorProfile.saturation, 0.62),
                     transparent: true, opacity: 0.38, depthWrite: false, blending: THREE.AdditiveBlending, map: createCircleTexture(), fog: false
-                })));
+                }));
+                dust.userData.preserveGalaxyColor = true;
+                galaxy.add(dust);
 
                 const coreGlow = new THREE.Sprite(new THREE.SpriteMaterial({
-                    map: createGlowTexture('rgba(255,210,150,1)'), color: 0xffb36a,
+                    map: createGlowTexture('rgba(255,245,220,1)'), color: colorProfile.coreColor,
                     transparent: true, opacity: 0.3, depthWrite: false, blending: THREE.AdditiveBlending, fog: false
                 }));
+                coreGlow.userData.preserveGalaxyColor = true;
                 coreGlow.scale.set(galaxyRadius * 0.42, galaxyRadius * 0.42, 1);
                 galaxy.add(coreGlow);
 
@@ -257,14 +311,16 @@
                 galaxy.add(blackHole);
                 const disk = new THREE.Mesh(
                     new THREE.RingGeometry(eventHorizonRadius * 1.05, eventHorizonRadius * 2.5, 128),
-                    new THREE.MeshBasicMaterial({ color: 0xff8e4a, transparent: true, opacity: 0.28, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })
+                    new THREE.MeshBasicMaterial({ color: colorProfile.diskColor, transparent: true, opacity: 0.32, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })
                 );
+                disk.userData.preserveGalaxyColor = true;
                 disk.rotation.x = Math.PI * 0.5;
                 galaxy.add(disk);
                 const photonRing = new THREE.Mesh(
                     new THREE.TorusGeometry(eventHorizonRadius * 1.16, Math.max(0.9, eventHorizonRadius * 0.045), 10, 96),
-                    new THREE.MeshBasicMaterial({ color: 0xffc36b, transparent: true, opacity: 0.76, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })
+                    new THREE.MeshBasicMaterial({ color: colorProfile.photonColor, transparent: true, opacity: 0.82, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })
                 );
+                photonRing.userData.preserveGalaxyColor = true;
                 galaxy.add(photonRing);
                 cluster.add(galaxy);
                 galaxyStructures.push({ galaxy, speed: 0.00012 + galaxyIndex * 0.000018, phase: cosmicRandom(seed + galaxyIndex * 4.7) * Math.PI * 2 });
@@ -490,10 +546,10 @@
 
         function createCosmicEnvironment() {
             createNGC3324Background();
-            galaxyClusterCenters.forEach((center, index) => addGalaxyGlow(center.clone().multiplyScalar(GALAXY_CLUSTER_SPREAD), 180 + index * 22, (0.58 + index * 0.047) % 1));
+            galaxyClusterCenters.forEach((center, index) => addGalaxyGlow(center, 180 + index * 22, (0.58 + index * 0.047) % 1));
             const externalSystemCount = galaxyClusterCenters.length * GALAXIES_PER_CLUSTER;
             Array.from({ length: externalSystemCount }, (_, index) => [
-                createSphericalBackgroundPosition(index, externalSystemCount, 1450, 5200, 601 + index * 19),
+                createSphericalBackgroundPosition(index, externalSystemCount, 2200, 11500, 601 + index * 19),
                 34 + (index % 5) * 4,
                 601 + index * 17
             ]).forEach(([center, scale, seed]) => addSolarSystem(center, scale, seed));
@@ -513,6 +569,9 @@
                     if (child.userData && child.userData.isGalaxyCenterBlackHole) {
                         child.material.color.set(0x010107);
                         if (child.material.opacity !== undefined) child.material.opacity = 1;
+                        return;
+                    }
+                    if (child.userData && child.userData.preserveGalaxyColor) {
                         return;
                     }
                     if (child.userData && child.userData.preserveInstanceColors) {
