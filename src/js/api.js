@@ -1068,6 +1068,7 @@
             request = (async () => {
                 const startedAt = performance.now();
                 bubble.analysisStatus = 'loading';
+                if (typeof window.refreshAnalysisView === 'function') window.refreshAnalysisView(bubbleId);
                 for (let attempt = 1; attempt <= OPENAI_ANALYSIS_MAX_ATTEMPTS; attempt++) {
                     let requestId = null;
                     try {
@@ -1131,11 +1132,13 @@
                         });
                         if (!retryable || attempt >= OPENAI_ANALYSIS_MAX_ATTEMPTS) break;
                         bubble.analysisStatus = 'loading';
+                        if (typeof window.refreshAnalysisView === 'function') window.refreshAnalysisView(bubbleId);
                         await waitForAnalysisRetry(OPENAI_ANALYSIS_RETRY_DELAY_MS * attempt);
                     }
                 }
                 {
                     bubble.analysisStatus = 'error';
+                    if (typeof window.refreshAnalysisView === 'function') window.refreshAnalysisView(bubbleId);
                     if (bubbleAnalysisRequests.get(bubbleId) === request) bubbleAnalysisRequests.delete(bubbleId);
                     return null;
                 }

@@ -24,12 +24,12 @@
             const lateralAxis = new THREE.Vector3(Math.abs(direction.y) < 0.92 ? 0 : 1, Math.abs(direction.y) < 0.92 ? 1 : 0, 0)
                 .cross(direction).normalize().applyAxisAngle(direction, Math.random() * Math.PI * 2).normalize();
             const verticalAxis = new THREE.Vector3().crossVectors(direction, lateralAxis).normalize();
-            const lateralDrift = (Math.random() - 0.5) * 1800;
-            const verticalDrift = (Math.random() - 0.5) * 900;
-            const secondaryLateral = (Math.random() - 0.5) * 920;
-            const tertiaryVertical = (Math.random() - 0.5) * 620;
+            const lateralDrift = (Math.random() - 0.5) * 5600;
+            const verticalDrift = (Math.random() - 0.5) * 3200;
+            const secondaryLateral = (Math.random() - 0.5) * 2800;
+            const tertiaryVertical = (Math.random() - 0.5) * 1900;
             const points = [start];
-            [0.12, 0.25, 0.39, 0.53, 0.67, 0.8, 0.91].forEach((progress, index) => {
+            [0.08, 0.2, 0.34, 0.49, 0.64, 0.79, 0.91, 0.97].forEach((progress, index) => {
                 const point = start.clone().lerp(end, progress);
                 const wave = Math.sin(progress * Math.PI);
                 const lateralOffset = lateralDrift * wave * Math.sin(progress * Math.PI * 1.4 + index * 0.7) + secondaryLateral * Math.sin(progress * Math.PI * 3.1 + index);
@@ -51,13 +51,14 @@
             // ひとつの銀河の中心ブラックホールだけを航路に固定する。
             // 入口・出口を大きく離し、周囲の意見（星）を横切る高速移動を見せる。
             const now = performance.now();
+            if (typeof relocateGalaxyUniverse === 'function') relocateGalaxyUniverse('loading-start');
             const firstTarget = getLoadingBlackHoleTarget(0);
             loadingAnimation = {
                 startedAt: now,
                 segmentStartedAt: now,
-                segmentDuration: 10000,
-                approachDistance: 5000,
-                maxSpeed: 900,
+                segmentDuration: 12000,
+                approachDistance: 16000,
+                maxSpeed: 1400,
                 approachDirection: new THREE.Vector3(0, 0, 1),
                 targetIndex: 0,
                 route: null,
@@ -185,6 +186,7 @@
                 const fade = Math.min(0.94, Math.max(0, entry.life * 0.28));
                 entry.head.material.opacity = fade;
                 entry.tail.material.opacity = fade * 0.64;
+                entry.tailGlow.material.opacity = fade * 0.24;
                 entry.tailParticles.material.opacity = fade * 0.38;
                 if (entry.life <= 0 || entry.streak.position.length() > 9200) resetShootingStar(entry, index);
             });
@@ -198,6 +200,10 @@
                 entry.comet.position.set(Math.cos(cometAngle) * entry.scale * 1.75, Math.sin(cometAngle * 1.4) * entry.scale * 0.24, Math.sin(cometAngle) * entry.scale * 1.75);
                 entry.comet.rotation.y = cometAngle + Math.PI;
             });
+            if (ngc3324Dome) {
+                ngc3324Dome.rotation.y += 0.000006;
+                ngc3324Dome.rotation.x += 0.000001;
+            }
             cosmicBackgroundGroup.rotation.y += 0.000012;
             cosmicBackgroundGroup.rotation.x += 0.0000025;
         }

@@ -15,7 +15,7 @@
         // Keeping the source value empty makes the prototype safe to open without a key.
         window.__OPENAI_API_KEY__ = "__OPENAI_API_KEY__";
         window.__OPENAI_MODEL__ = "gpt-5.6-luna";
-        window.__NGC3324_TEXTURE__ = "./assets/ngc-3324-2000.png";
+        window.__NGC3324_TEXTURE__ = "./assets/ngc-3324-nircam-clean-4000.png";
     </script>
 
 
@@ -34,7 +34,7 @@
             <button data-close-panel="panel-bgm" class="self-end text-gray-300 hover:text-white" type="button">×</button>
             <label class="flex items-center gap-2"><input id="bgm-toggle" type="checkbox" checked> BGM</label>
             <label class="flex items-center gap-2">音量 <input id="audio-volume" type="range" min="0" max="1" step="0.05" value="0.45"></label>
-            <select id="bgm-type" class="bg-black/60 rounded px-1 py-0.5"><option value="宇宙遊泳.mp3">宇宙遊泳.mp3</option><option value="星間宇宙.mp3">星間宇宙.mp3</option><option value="エッジワース・カイパーベルト.mp3">エッジワース・カイパーベルト.mp3</option><option value="Far_away_from_the_Earth.mp3">Far_away_from_the_Earth.mp3</option></select>
+            <select id="bgm-type" class="bg-black/60 rounded px-1 py-0.5"><option value="宇宙遊泳.mp3">宇宙遊泳.mp3</option><option value="星間宇宙.mp3">星間宇宙.mp3</option><option value="edgeworth-kuiper-belt.mp3">エッジワース・カイパーベルト</option><option value="Far_away_from_the_Earth.mp3">Far_away_from_the_Earth.mp3</option></select>
             <label class="flex items-center gap-2"><input id="bgm-auto-next" type="checkbox"> 曲終了で次曲</label>
             <select id="bgm-transition" class="bg-black/60 rounded px-1 py-0.5"><option value="persist">遷移しても継続</option><option value="change">カテゴリ移動で変更</option></select>
             <label class="flex items-center gap-2"><input id="explorer-mode" type="checkbox"> 探索者モード（階層ズームのみ）</label>
@@ -146,6 +146,9 @@
                 <div id="analysis-center-title" class="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 text-2xl font-bold text-white text-shadow-lg cursor-pointer hover:scale-110 transition-transform pointer-events-auto text-center w-full z-10">
                     --
                 </div>
+                <div id="analysis-status" class="hidden absolute top-1/2 left-1/2 mt-10 -translate-x-1/2 text-xs text-cyan-200 bg-black/70 border border-cyan-300/40 rounded-full px-4 py-2 pointer-events-none z-20 whitespace-nowrap">
+                    分析生成中…
+                </div>
                 
                 <div class="card-tl card-anim absolute top-0 left-0 lg:left-10 pointer-events-auto">
                     <div onclick="showDetail('overview')" class="analysis-card w-64 glass-panel p-4 rounded-xl cursor-pointer hover:scale-105 hover:border-blue-400 transition-all group relative overflow-hidden">
@@ -212,6 +215,7 @@
             <div class="w-full max-w-5xl h-[80vh] bg-gray-900 border border-gray-700 rounded-2xl shadow-2xl relative flex overflow-hidden">
                 <div class="w-2/3 p-10 overflow-y-auto">
                     <div class="inline-block px-3 py-1 bg-blue-900/50 text-blue-300 text-xs font-bold rounded-full mb-4 border border-blue-500/50" id="detail-tag">カテゴリ</div>
+                    <div id="detail-status" class="hidden inline-block px-3 py-1 ml-2 bg-cyan-900/50 text-cyan-200 text-xs font-bold rounded-full mb-4 border border-cyan-500/50">分析生成中…</div>
                     <h2 id="detail-title" class="text-4xl font-bold mb-6 text-white">解析詳細タイトル</h2>
                     
                     <div class="space-y-6 text-gray-300">

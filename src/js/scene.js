@@ -6,15 +6,15 @@
         
         const scene = new THREE.Scene();
         // 宇宙空間の奥が徐々に暗くなるフォグ（霧）効果を設定
-        scene.background = new THREE.Color(0x050510);
-        scene.fog = new THREE.FogExp2(0x050510, 0.00045);
+        scene.background = new THREE.Color(0x10182d);
+        scene.fog = new THREE.FogExp2(0x10182d, 0.0003);
 
         // カメラ（視点）の設定
-        const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 30000);
+        const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 140000);
         
         // レンダラー（描画エンジン）の設定
         const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
-        renderer.setClearColor(0x050510, 1);
+        renderer.setClearColor(0x10182d, 1);
         renderer.outputEncoding = THREE.sRGBEncoding;
         renderer.toneMapping = THREE.ACESFilmicToneMapping;
         renderer.toneMappingExposure = 1.25;
@@ -29,7 +29,7 @@
         // ホイールは階層移動だけでなく、全カテゴリ共通のカメラズームにも使う。
         controls.enableZoom = true;
         controls.minDistance = 0.5;
-        controls.maxDistance = 24000;
+        controls.maxDistance = 52000;
 
         // 照明の設定
         scene.add(new THREE.AmbientLight(0xffffff, 0.7)); // 全体を照らす環境光
@@ -95,7 +95,7 @@
             colorsArray[i] = color.r;
             colorsArray[i+1] = color.g;
             colorsArray[i+2] = color.b;
-            sizesArray[starIndex] = 7 + Math.pow(backgroundRandom(starIndex * 3.3 + 61), 2.2) * 26;
+            sizesArray[starIndex] = 8 + Math.pow(backgroundRandom(starIndex * 3.3 + 61), 1.8) * 40;
             shapesArray[starIndex] = backgroundRandom(starIndex * 4.1 + 73) > 0.7 ? 1 : 0;
             spikesArray[starIndex] = 0.7 + backgroundRandom(starIndex * 5.7 + 89) * 0.8;
         }
@@ -143,7 +143,7 @@
                     float verticalRay = exp(-abs(centered.x) / rayWidth) * (1.0 - smoothstep(0.08, 0.5, abs(centered.y)));
                     float starGlow = max(horizontalRay, verticalRay);
                     float glow = mix(circleGlow, max(circleGlow * 0.34, starGlow), step(0.5, vShape));
-                    gl_FragColor = vec4(vColor, glow * 0.72);
+                    gl_FragColor = vec4(vColor, glow * 0.86);
                 }
             `
         });
@@ -164,9 +164,11 @@
             { name: '青緑', primaryHue: 0.49, secondaryHue: 0.42, saturation: 0.88, coreColor: 0x8fe8d7, diskColor: 0x20b9b3, photonColor: 0xc6fff1 },
             { name: 'マゼンタ', primaryHue: 0.91, secondaryHue: 0.83, saturation: 0.93, coreColor: 0xff9ecb, diskColor: 0xff4fa1, photonColor: 0xffd5f2 }
         ];
-        const GALAXIES_PER_CLUSTER = 5;
-        const GALAXY_CLUSTER_COUNT = 12;
-        const GALAXY_CLUSTER_RADIUS = 8000;
+        // 1つの親Groupに複数銀河を詰め込まず、60個の銀河を個別スロットとして扱う。
+        // 既存の配列名はロード対象との互換性のため残すが、各スロットは1銀河だけを持つ。
+        const GALAXIES_PER_CLUSTER = 1;
+        const GALAXY_CLUSTER_COUNT = 60;
+        const GALAXY_CLUSTER_RADIUS = 9000;
         const galaxyClusterCenters = Array.from({ length: GALAXY_CLUSTER_COUNT }, (_, index) => {
             const t = (index + 0.5) / GALAXY_CLUSTER_COUNT;
             const y = 1 - 2 * t;
@@ -257,7 +259,7 @@
 
                 // 銀河の恒星は必ず形状に沿って配置する。惑星を伴う恒星系は銀河外へ分離する。
                 const starSystems = new THREE.InstancedMesh(
-                    new THREE.SphereGeometry(2.8 + galaxyIndex * 0.18, 8, 8),
+                    new THREE.SphereGeometry(3.2, 8, 8),
                     new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, opacity: 1, blending: THREE.AdditiveBlending, fog: false }),
                     systemCount
                 );
@@ -266,11 +268,12 @@
                 for (let i = 0; i < systemCount; i++) {
                     const position = keepGalaxyCenterClear(getGalaxyStarPosition(shape, i, systemCount, galaxyRadius, seed, galaxyIndex), galaxyRadius, seed + i * 0.43);
                     dummy.position.copy(position);
-                    dummy.scale.setScalar(0.78 + (i % 7) * 0.07);
+                    const sizeVariation = 0.45 + Math.pow(cosmicRandom(seed * 1.7 + i * 2.31), 0.62) * 2.75;
+                    dummy.scale.setScalar(sizeVariation);
                     dummy.updateMatrix();
                     starSystems.setMatrixAt(i, dummy.matrix);
                     const spectralHue = (colorProfile.primaryHue + ((i % 6) - 2.5) * 0.035 + seed * 0.009) % 1;
-                    const spectralLightness = 0.58 + ((i * 7 + seed) % 7) * 0.055;
+                    const spectralLightness = 0.48 + cosmicRandom(seed * 2.7 + i * 0.91) * 0.46;
                     starSystems.setColorAt(i, new THREE.Color().setHSL(spectralHue, colorProfile.saturation, Math.min(0.94, spectralLightness)));
                 }
                 starSystems.instanceMatrix.needsUpdate = true;
@@ -289,7 +292,7 @@
                 const dustGeometry = new THREE.BufferGeometry();
                 dustGeometry.setAttribute('position', new THREE.BufferAttribute(dustPositions, 3));
                 const dust = new THREE.Points(dustGeometry, new THREE.PointsMaterial({
-                    size: 3.4, color: new THREE.Color().setHSL(colorProfile.secondaryHue, colorProfile.saturation, 0.62),
+                    size: 4.8, color: new THREE.Color().setHSL(colorProfile.secondaryHue, colorProfile.saturation, 0.62),
                     transparent: true, opacity: 0.38, depthWrite: false, blending: THREE.AdditiveBlending, map: createCircleTexture(), fog: false
                 }));
                 dust.userData.preserveGalaxyColor = true;
@@ -333,40 +336,58 @@
             galaxyClusters.push(cluster);
         }
 
-        // カテゴリを移動した時は、同じ宇宙を見続けるのではなく、銀河群全体を
-        // 球面上の別の場所へ移す。Fibonacci配置を土台にするため、ランダムでも
-        // 銀河同士が一箇所へ固まったり衝突したりしない。
+        function randomUnitVector() {
+            const y = Math.random() * 2 - 1;
+            const angle = Math.random() * Math.PI * 2;
+            const radial = Math.sqrt(Math.max(0, 1 - y * y));
+            return new THREE.Vector3(Math.cos(angle) * radial, y, Math.sin(angle) * radial);
+        }
+
+        function createSeparatedGalaxyPositions(count) {
+            const positions = [];
+            const minimumDistance = 1850;
+            let attempts = 0;
+            while (positions.length < count && attempts < count * 120) {
+                attempts += 1;
+                const radius = 7600 + Math.random() * 4200;
+                const candidate = randomUnitVector().multiplyScalar(radius);
+                if (positions.every(position => position.distanceTo(candidate) >= minimumDistance)) positions.push(candidate);
+            }
+            // 極端な乱数列でも全銀河が生成されるよう、最後は均等球面で補完する。
+            for (let index = positions.length; index < count; index++) {
+                const t = (index + 0.5) / count;
+                const y = 1 - 2 * t;
+                const radial = Math.sqrt(Math.max(0, 1 - y * y));
+                const theta = index * Math.PI * (3 - Math.sqrt(5)) + Math.random() * Math.PI * 2;
+                positions.push(new THREE.Vector3(
+                    Math.cos(theta) * radial * 9000,
+                    y * 9000,
+                    Math.sin(theta) * radial * 9000
+                ));
+            }
+            return positions;
+        }
+
+        // カテゴリを移動した時は、同じ宇宙を見続けるのではなく、全銀河を
+        // 1つずつ別の球面位置へ移す。銀河同士の最低距離を検査するため、
+        // 複数銀河が塊になる以前の問題も同時に解消する。
         function relocateGalaxyUniverse(reason = 'transition') {
             const count = galaxyClusters.length;
             if (!count) return;
-            const phase = Math.random() * Math.PI * 2;
-            const tilt = (Math.random() - 0.5) * 0.7;
-            const radiusBase = 8200 + Math.random() * 1000;
+            const positions = createSeparatedGalaxyPositions(count);
             galaxyClusters.forEach((cluster, clusterIndex) => {
-                const t = (clusterIndex + 0.5) / count;
-                const y = 1 - 2 * t;
-                const radial = Math.sqrt(Math.max(0, 1 - y * y));
-                const theta = clusterIndex * Math.PI * (3 - Math.sqrt(5)) + phase;
-                const radius = radiusBase + (Math.random() - 0.5) * 520;
-                cluster.position.set(
-                    Math.cos(theta) * radial * radius,
-                    y * radius,
-                    Math.sin(theta) * radial * radius
-                );
+                cluster.position.copy(positions[clusterIndex]);
                 cluster.rotation.set(
-                    (Math.random() - 0.5) * 0.24 + tilt,
+                    (Math.random() - 0.5) * 0.24,
                     Math.random() * Math.PI * 2,
                     (Math.random() - 0.5) * 0.24
                 );
                 const galaxies = cluster.children.filter(child => child.userData && child.userData.galaxyRadius);
-                const localPhase = Math.random() * Math.PI * 2;
                 galaxies.forEach((galaxy, galaxyIndex) => {
-                    const angle = localPhase + galaxyIndex * Math.PI * 2 / Math.max(1, galaxies.length);
-                    const localRadius = 680 + Math.random() * 420;
                     galaxy.position.set(
-                        Math.cos(angle) * localRadius,
-                        (Math.random() - 0.5) * 420,
-                        Math.sin(angle) * localRadius
+                        (Math.random() - 0.5) * 180,
+                        (Math.random() - 0.5) * 180,
+                        (Math.random() - 0.5) * 180
                     );
                     galaxy.rotation.set(
                         (Math.random() - 0.5) * 1.6,
@@ -386,7 +407,7 @@
                 const cluster = galaxyClusters[entry.clusterIndex];
                 if (cluster) entry.sprite.position.copy(cluster.position);
             });
-            apiLog('銀河群を再配置しました', { reason, clusterCount: count, phase: Number(phase.toFixed(3)) });
+            apiLog('銀河を個別に再配置しました', { reason, galaxyCount: count, minimumDistance: 1850 });
         }
 
         // --- 遠景の宇宙構造（画像素材を使わない手続き生成） ---
@@ -394,6 +415,7 @@
         const cosmicBackgroundGroup = new THREE.Group();
         const cosmicSystems = [];
         const shootingStars = [];
+        let ngc3324Dome = null;
         scene.add(cosmicBackgroundGroup);
 
         function cosmicRandom(seed) {
@@ -430,31 +452,76 @@
             return new THREE.CanvasTexture(canvas);
         }
 
+        function softenNGC3324Seam(texture) {
+            const source = texture.image;
+            if (!source || !source.width || !source.height) return texture;
+            const canvas = document.createElement('canvas');
+            canvas.width = source.width;
+            canvas.height = source.height;
+            const context = canvas.getContext('2d', { willReadFrequently: true });
+            context.drawImage(source, 0, 0);
+            const image = context.getImageData(0, 0, canvas.width, canvas.height);
+            const pixels = image.data;
+            const width = canvas.width;
+            const feather = Math.max(24, Math.floor(width * 0.06));
+            for (let y = 0; y < canvas.height; y++) {
+                const left = (y * width) * 4;
+                const right = (y * width + width - 1) * 4;
+                const seam = [
+                    (pixels[left] + pixels[right]) * 0.5,
+                    (pixels[left + 1] + pixels[right + 1]) * 0.5,
+                    (pixels[left + 2] + pixels[right + 2]) * 0.5
+                ];
+                for (let x = 0; x < feather; x++) {
+                    const t = x / feather;
+                    const eased = t * t * (3 - 2 * t);
+                    const leftIndex = (y * width + x) * 4;
+                    const rightIndex = (y * width + width - feather + x) * 4;
+                    for (let channel = 0; channel < 3; channel++) {
+                        pixels[leftIndex + channel] = seam[channel] * (1 - eased) + pixels[leftIndex + channel] * eased;
+                        pixels[rightIndex + channel] = pixels[rightIndex + channel] * eased + seam[channel] * (1 - eased);
+                    }
+                }
+            }
+            context.putImageData(image, 0, 0);
+            texture.image = canvas;
+            texture.wrapS = THREE.RepeatWrapping;
+            texture.wrapT = THREE.ClampToEdgeWrapping;
+            texture.minFilter = THREE.LinearMipmapLinearFilter;
+            texture.magFilter = THREE.LinearFilter;
+            texture.anisotropy = renderer.capabilities.getMaxAnisotropy();
+            texture.needsUpdate = true;
+            return texture;
+        }
+
         function createNGC3324PhotoDome() {
             const dome = new THREE.Mesh(
-                new THREE.SphereGeometry(26000, 96, 64),
+                new THREE.SphereGeometry(70000, 128, 80),
                 new THREE.MeshBasicMaterial({
                     color: 0xffffff,
                     side: THREE.BackSide,
                     transparent: true,
-                    opacity: 0.64,
+                    opacity: 0.88,
                     depthWrite: false,
-                    fog: false
+                    depthTest: false,
+                    fog: false,
+                    toneMapped: false
                 })
             );
             dome.userData.gasNebulaName = 'NGC 3324';
             dome.userData.isFarthestBackground = true;
             dome.userData.isNGC3324Photo = true;
-            dome.renderOrder = -100;
+            dome.renderOrder = -1000;
+            ngc3324Dome = dome;
+            scene.add(dome);
             const textureUrl = window.__NGC3324_TEXTURE__ || '';
             if (textureUrl) {
                 new THREE.TextureLoader().load(textureUrl, texture => {
                     texture.encoding = THREE.sRGBEncoding;
-                    dome.material.map = texture;
+                    dome.material.map = softenNGC3324Seam(texture);
                     dome.material.needsUpdate = true;
                 }, undefined, error => console.warn('[BubbleBreaker][Cosmos] NGC 3324写真の読み込みに失敗しました', error));
             }
-            cosmicBackgroundGroup.add(dome);
         }
 
         function addGalaxyGlow(position, scale, hue) {
@@ -546,11 +613,14 @@
             entry.respawnCount += 1;
             const length = 110 + cosmicRandom(index * 2.4 + entry.respawnCount * 1.7) * 150;
             entry.head.scale.setScalar(18 + cosmicRandom(index + entry.respawnCount) * 12);
-            entry.tail.scale.set(1, 1, length);
+            entry.tail.scale.set(1, length, 1);
+            entry.tailGlow.scale.set(1, length * 1.04, 1);
             entry.tail.position.z = length * 0.5;
+            entry.tailGlow.position.z = length * 0.5;
             entry.tailParticles.scale.setScalar(Math.max(0.7, length / 150));
             entry.head.material.opacity = 0.94;
             entry.tail.material.opacity = 0.58;
+            entry.tailGlow.material.opacity = 0.2;
             entry.tailParticles.material.opacity = 0.32;
         }
 
@@ -568,17 +638,26 @@
                     new THREE.ConeGeometry(1.3, 1, 8, 1, true),
                     new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.58, depthWrite: false, blending: THREE.AdditiveBlending, fog: false })
                 );
+                const tailGlow = new THREE.Mesh(
+                    new THREE.ConeGeometry(2.8, 1, 8, 1, true),
+                    new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.2, depthWrite: false, blending: THREE.AdditiveBlending, fog: false })
+                );
                 // Groupの正面は-lookAt方向。尾は+Z側へ伸ばすので、必ず頭の後ろへ流れる。
                 tail.rotation.x = Math.PI * 0.5;
+                tailGlow.rotation.x = Math.PI * 0.5;
                 const tailParticles = new THREE.Points(
-                    new THREE.BufferGeometry().setFromPoints([
-                        new THREE.Vector3(0, 0, 0.2), new THREE.Vector3(0.8, 0.2, 0.58),
-                        new THREE.Vector3(-0.7, -0.15, 0.76), new THREE.Vector3(0.2, 0.3, 0.94)
-                    ]),
+                    new THREE.BufferGeometry().setFromPoints(Array.from({ length: 12 }, (_, particleIndex) => {
+                        const progress = particleIndex / 11;
+                        return new THREE.Vector3(
+                            (cosmicRandom(index * 7.1 + particleIndex * 2.3) - 0.5) * 1.8,
+                            (cosmicRandom(index * 9.7 + particleIndex * 1.7) - 0.5) * 1.4,
+                            progress
+                        );
+                    })),
                     new THREE.PointsMaterial({ map: createCircleTexture(), color, size: 8, transparent: true, opacity: 0.32, depthWrite: false, blending: THREE.AdditiveBlending, fog: false })
                 );
-                streak.add(head, tail, tailParticles);
-                const entry = { streak, head, tail, tailParticles, direction: new THREE.Vector3(), velocity: new THREE.Vector3(), life: 0, respawnCount: index };
+                streak.add(head, tail, tailGlow, tailParticles);
+                const entry = { streak, head, tail, tailGlow, tailParticles, direction: new THREE.Vector3(), velocity: new THREE.Vector3(), life: 0, respawnCount: index };
                 cosmicBackgroundGroup.add(streak);
                 shootingStars.push(entry);
                 resetShootingStar(entry, index);
@@ -589,11 +668,14 @@
             createNGC3324PhotoDome();
             galaxyClusterCenters.forEach((center, index) => addGalaxyGlow(center, 180 + index * 22, (0.58 + index * 0.047) % 1));
             const externalSystemCount = galaxyClusterCenters.length * GALAXIES_PER_CLUSTER;
-            Array.from({ length: externalSystemCount }, (_, index) => [
-                createSphericalBackgroundPosition(index, externalSystemCount, 2200, 11500, 601 + index * 19),
-                34 + (index % 5) * 4,
-                601 + index * 17
-            ]).forEach(([center, scale, seed]) => addSolarSystem(center, scale, seed));
+            Array.from({ length: externalSystemCount }, (_, index) => {
+                const nearby = index < Math.ceil(externalSystemCount * 0.22);
+                return [
+                    createSphericalBackgroundPosition(index, externalSystemCount, nearby ? 1200 : 3600, nearby ? 2800 : 12500, 601 + index * 19),
+                    26 + (index % 7) * 3,
+                    601 + index * 17
+                ];
+            }).forEach(([center, scale, seed]) => addSolarSystem(center, scale, seed));
             createShootingStars();
         }
 
@@ -1023,6 +1105,22 @@
 
         // 【個別バブル解析画面】 を読み込んで表示する関数
         // 四隅に解析カードが広がり、対象のバブルが中央に配置される画面。
+        function updateAnalysisGenerationStatus() {
+            const status = document.getElementById('analysis-status');
+            const detailStatus = document.getElementById('detail-status');
+            const stateName = state.bubbleData && state.bubbleData.analysisStatus;
+            const loading = stateName === 'loading';
+            const failed = stateName === 'error';
+            const message = loading ? '分析生成中…' : (failed ? '分析生成に失敗しました。再試行できます' : '');
+            [status, detailStatus].forEach(element => {
+                if (!element) return;
+                element.innerText = message;
+                element.classList.toggle('hidden', !message);
+                element.classList.toggle('text-red-200', failed);
+                element.classList.toggle('text-cyan-200', !failed);
+            });
+        }
+
         window.loadAnalysis = function() {
             if(state.screen !== 'SINGLE') return;
             
@@ -1043,6 +1141,7 @@
 
             // 中央のテキスト表示を更新
             document.getElementById('analysis-center-title').innerText = state.bubbleData.name;
+            updateAnalysisGenerationStatus();
 
             switchScreen('ANALYSIS');
             showToast(`解析モードへ移行しました`);
@@ -1060,6 +1159,7 @@
             const analysis = state.bubbleData && state.bubbleData.analysis
                 ? state.bubbleData.analysis[cardType] || DEFAULT_ANALYSIS[cardType]
                 : DEFAULT_ANALYSIS[cardType];
+            updateAnalysisGenerationStatus();
             // どのカードがクリックされたかに応じてタイトルを変更
             document.getElementById('detail-tag').innerText = state.groupData.title;
             document.getElementById('detail-title').innerText = titles[cardType] || '詳細解析';
@@ -1099,5 +1199,6 @@
 
         window.refreshAnalysisView = function(bubbleId) {
             if (!state.bubbleData || state.bubbleData.id !== bubbleId) return;
+            updateAnalysisGenerationStatus();
             if (state.screen === 'DETAIL' && state.analysisCardType) showDetail(state.analysisCardType);
         };

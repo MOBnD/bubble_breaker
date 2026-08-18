@@ -1,13 +1,17 @@
         let soundEnabled = localStorage.getItem('bubblebreaker.sound') !== 'off';
         let audioVolume = Number(localStorage.getItem('bubblebreaker.volume') || 0.45);
         let bgmEnabled = localStorage.getItem('bubblebreaker.bgm') !== 'off';
-        let bgmType = localStorage.getItem('bubblebreaker.bgmType') || '宇宙遊泳.mp3';
+        const EDGEWORTH_BGM = 'edgeworth-kuiper-belt.mp3';
+        const LEGACY_EDGEWORTH_BGM = 'エッジワース・カイパーベルト.mp3';
+        const storedBgmType = localStorage.getItem('bubblebreaker.bgmType');
+        let bgmType = storedBgmType === LEGACY_EDGEWORTH_BGM ? EDGEWORTH_BGM : (storedBgmType || EDGEWORTH_BGM);
+        if (storedBgmType === LEGACY_EDGEWORTH_BGM) localStorage.setItem('bubblebreaker.bgmType', EDGEWORTH_BGM);
         let bgmAutoNext = localStorage.getItem('bubblebreaker.bgmAutoNext') === 'on';
         let bgmTransition = localStorage.getItem('bubblebreaker.bgmTransition') || 'persist';
         let audioContext = null;
         let bgmAudio = null;
-        const bgmTracks = ['宇宙遊泳.mp3', '星間宇宙.mp3', 'エッジワース・カイパーベルト.mp3', 'Far_away_from_the_Earth.mp3'];
-        let bgmTrackIndex = 0;
+        const bgmTracks = ['宇宙遊泳.mp3', '星間宇宙.mp3', EDGEWORTH_BGM, 'Far_away_from_the_Earth.mp3'];
+        let bgmTrackIndex = Math.max(0, bgmTracks.indexOf(bgmType));
         let zoomSound = null;
         function ensureAudioContext() {
             audioContext = audioContext || new (window.AudioContext || window.webkitAudioContext)();
@@ -75,13 +79,19 @@
                 bgmAudio = bgmAudio || document.getElementById('bgm-audio');
                 const typeIndex = Math.max(0, bgmTracks.indexOf(bgmType));
                 if (bgmTrackIndex === 0 && typeIndex !== 0) bgmTrackIndex = typeIndex;
-                const selected = `BGM/${bgmTracks[bgmTrackIndex % bgmTracks.length]}`;
+                const selected = `BGM/${encodeURIComponent(bgmTracks[bgmTrackIndex % bgmTracks.length])}`;
                 const selectedUrl = new URL(selected, document.baseURI).href;
-                if (bgmAudio.src !== selectedUrl) bgmAudio.src = selectedUrl;
+                if (bgmAudio.src !== selectedUrl) {
+                    bgmAudio.src = selectedUrl;
+                    bgmAudio.load();
+                }
                 bgmAudio.volume = Math.max(0, Math.min(1, audioVolume * 0.55));
                 bgmAudio.loop = !bgmAutoNext;
-                bgmAudio.play().catch(() => { /* ブラウザの自動再生制限は次の操作で再試行 */ });
-            } catch (_) { bgmAudio = null; }
+                bgmAudio.play().catch(error => console.warn('[BubbleBreaker][Audio] BGM再生に失敗しました', { file: bgmTracks[bgmTrackIndex % bgmTracks.length], error }));
+            } catch (error) {
+                console.warn('[BubbleBreaker][Audio] BGM初期化に失敗しました', error);
+                bgmAudio = null;
+            }
         }
 
         // 画面左上に一時的なメッセージ（トースト通知）を表示する関数
@@ -92,4 +102,3 @@
             // 3秒後にフェードアウトさせる
             setTimeout(() => toast.classList.add('opacity-0'), 3000);
         }
-

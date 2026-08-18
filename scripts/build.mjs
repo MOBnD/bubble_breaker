@@ -1,4 +1,4 @@
-import { cp, mkdir, readFile, writeFile } from 'node:fs/promises';
+import { cp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -42,7 +42,7 @@ const apiKey = usableApiKey(process.env.OPENAI_API_KEY) || usableApiKey(env.OPEN
 const model = String(process.env.OPENAI_MODEL || env.OPENAI_MODEL || 'gpt-5.6-luna').trim() || 'gpt-5.6-luna';
 const source = await readFile(sourcePath, 'utf8');
 const styles = await readFile(path.join(sourceDir, 'styles.css'), 'utf8');
-const ngc3324Image = await readFile(path.join(sourceDir, 'assets', 'ngc-3324-2000.png'));
+const ngc3324Image = await readFile(path.join(sourceDir, 'assets', 'ngc-3324-nircam-clean-4000.png'));
 const ngc3324Texture = `data:image/png;base64,${ngc3324Image.toString('base64')}`;
 const localScriptPattern = /<script src="\.\/([^\"]+)"><\/script>/g;
 const scriptPaths = [...source.matchAll(localScriptPattern)].map(match => match[1]);
@@ -56,9 +56,10 @@ if (scriptIndex !== scripts.length) throw new Error('Not all local application s
 const output = inlinedSource
     .replace('window.__OPENAI_API_KEY__ = "__OPENAI_API_KEY__";', `window.__OPENAI_API_KEY__ = ${JSON.stringify(apiKey)};`)
     .replace('window.__OPENAI_MODEL__ = "gpt-5.6-luna";', `window.__OPENAI_MODEL__ = ${JSON.stringify(model)};`)
-    .replace('window.__NGC3324_TEXTURE__ = "./assets/ngc-3324-2000.png";', `window.__NGC3324_TEXTURE__ = ${JSON.stringify(ngc3324Texture)};`);
+    .replace('window.__NGC3324_TEXTURE__ = "./assets/ngc-3324-nircam-clean-4000.png";', `window.__NGC3324_TEXTURE__ = ${JSON.stringify(ngc3324Texture)};`);
 
 await mkdir(outputDir, { recursive: true });
 await writeFile(outputPath, output, 'utf8');
+await rm(path.join(outputDir, 'BGM'), { recursive: true, force: true });
 await cp(path.join(root, 'BGM'), path.join(outputDir, 'BGM'), { recursive: true });
 console.log(`Built ${path.relative(root, outputPath)}${apiKey ? ' with API key' : ' without API key (fixed-data fallback enabled)'}.`);

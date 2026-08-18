@@ -145,7 +145,14 @@
         bgmAutoNextControl.checked = bgmAutoNext;
         bgmTransitionControl.value = bgmTransition;
         explorerModeControl.checked = explorerMode;
-        document.getElementById('bgm-audio').addEventListener('ended', () => {
+        const bgmAudioElement = document.getElementById('bgm-audio');
+        bgmAudioElement.addEventListener('error', () => {
+            console.warn('[BubbleBreaker][Audio] BGMファイルを読み込めません', { src: bgmAudioElement.currentSrc || bgmAudioElement.src });
+        });
+        bgmAudioElement.addEventListener('canplay', () => {
+            console.info('[BubbleBreaker][Audio] BGMを再生可能になりました', { src: bgmAudioElement.currentSrc || bgmAudioElement.src });
+        });
+        bgmAudioElement.addEventListener('ended', () => {
             if (!bgmAutoNext) return;
             bgmTrackIndex = (bgmTrackIndex + 1) % bgmTracks.length;
             startBackgroundMusic();
