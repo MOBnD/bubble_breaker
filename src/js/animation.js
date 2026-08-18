@@ -21,17 +21,19 @@
             const horizonRadius = getEventHorizonRadius(target);
             const start = target.position.clone().addScaledVector(direction, distance);
             const end = target.position.clone().addScaledVector(direction, horizonRadius);
-            const lateralAxis = new THREE.Vector3(1, 0, 0);
-            const verticalAxis = new THREE.Vector3(0, 1, 0);
-            const lateralDrift = (Math.random() - 0.5) * 760;
-            const verticalDrift = (Math.random() - 0.5) * 300;
-            const secondaryLateral = (Math.random() - 0.5) * 260;
+            const lateralAxis = new THREE.Vector3(Math.abs(direction.y) < 0.92 ? 0 : 1, Math.abs(direction.y) < 0.92 ? 1 : 0, 0)
+                .cross(direction).normalize().applyAxisAngle(direction, Math.random() * Math.PI * 2).normalize();
+            const verticalAxis = new THREE.Vector3().crossVectors(direction, lateralAxis).normalize();
+            const lateralDrift = (Math.random() - 0.5) * 1800;
+            const verticalDrift = (Math.random() - 0.5) * 900;
+            const secondaryLateral = (Math.random() - 0.5) * 920;
+            const tertiaryVertical = (Math.random() - 0.5) * 620;
             const points = [start];
-            [0.22, 0.46, 0.7, 0.88].forEach((progress, index) => {
+            [0.12, 0.25, 0.39, 0.53, 0.67, 0.8, 0.91].forEach((progress, index) => {
                 const point = start.clone().lerp(end, progress);
                 const wave = Math.sin(progress * Math.PI);
-                const lateralOffset = lateralDrift * wave + secondaryLateral * Math.sin(progress * Math.PI * 2.1 + index);
-                const verticalOffset = verticalDrift * wave * 0.72;
+                const lateralOffset = lateralDrift * wave * Math.sin(progress * Math.PI * 1.4 + index * 0.7) + secondaryLateral * Math.sin(progress * Math.PI * 3.1 + index);
+                const verticalOffset = verticalDrift * wave * Math.cos(progress * Math.PI * 1.2) + tertiaryVertical * Math.sin(progress * Math.PI * 2.6 + index * 0.4);
                 point.addScaledVector(lateralAxis, lateralOffset);
                 point.addScaledVector(verticalAxis, verticalOffset);
                 points.push(point);
@@ -102,6 +104,7 @@
             if (camera.position.distanceTo(blackHole) <= eventHorizonRadius + 0.05 || phase >= 1) {
                 loadingAnimation.targetIndex = (loadingAnimation.targetIndex + 1) % loadingBlackHoles.length;
                 loadingAnimation.segmentStartedAt = performance.now();
+                if (typeof relocateGalaxyUniverse === 'function') relocateGalaxyUniverse('black-hole-universe-switch');
                 const nextTarget = getLoadingBlackHoleTarget(loadingAnimation.targetIndex);
                 camera.position.copy(nextTarget.position).addScaledVector(loadingAnimation.approachDirection, loadingAnimation.approachDistance);
                 targetControlTarget.copy(nextTarget.position);
@@ -179,7 +182,10 @@
             shootingStars.forEach((entry, index) => {
                 entry.streak.position.add(entry.velocity);
                 entry.life -= 0.016;
-                entry.streak.material.opacity = Math.min(0.78, Math.max(0, entry.life * 0.28));
+                const fade = Math.min(0.94, Math.max(0, entry.life * 0.28));
+                entry.head.material.opacity = fade;
+                entry.tail.material.opacity = fade * 0.64;
+                entry.tailParticles.material.opacity = fade * 0.38;
                 if (entry.life <= 0 || entry.streak.position.length() > 9200) resetShootingStar(entry, index);
             });
             cosmicSystems.forEach((entry, index) => {

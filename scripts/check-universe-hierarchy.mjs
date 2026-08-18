@@ -30,7 +30,7 @@ const context = {
     fetch
 };
 vm.createContext(context);
-vm.runInContext(`${dataSource}\n${apiSource}\nglobalThis.__bubbleBreakerTest = { normalizeGeneratedUniverse, normalizeFallbackUniverse, compactHierarchyBubbleName, buildOpenAIRootRequest, buildOpenAICentralGroupRequest, buildOpenAILeafGroupRequest, buildOpenAIBubbleAnalysisRequest, requestBubbleAnalysis, requestBubbleGroupAnalyses };`, context);
+vm.runInContext(`${dataSource}\n${apiSource}\nglobalThis.__bubbleBreakerTest = { normalizeGeneratedUniverse, normalizeFallbackUniverse, normalizeBubblePercentages, compactHierarchyBubbleName, buildOpenAIRootRequest, buildOpenAICentralGroupRequest, buildOpenAILeafGroupRequest, buildOpenAIBubbleAnalysisRequest, requestBubbleAnalysis, requestBubbleGroupAnalyses };`, context);
 
 const bubble = (id, childId = null) => ({
     id, name: id, size: 1, color: 0x4488ff, htmlColor: '#4488ff',
@@ -50,6 +50,11 @@ const groups = [
 ];
 
 const normalize = context.__bubbleBreakerTest.normalizeGeneratedUniverse;
+const variedPercentages = context.__bubbleBreakerTest.normalizeBubblePercentages([
+    bubble('same_a'), bubble('same_b'), bubble('same_c'), bubble('same_d')
+]);
+assert.equal(Number(variedPercentages.reduce((sum, item) => sum + item.size, 0).toFixed(2)), 100, 'occupancy percentages should total 100');
+assert.ok(new Set(variedPercentages.map(item => item.size)).size > 1, 'flat API sizes should become varied inferred percentages');
 assert.equal(context.__bubbleBreakerTest.compactHierarchyBubbleName('選択肢A・選択肢B・選択肢C', 'central'), '選択肢A・選択肢Bなど', 'hierarchy bubble names should not enumerate every lower option');
 assert.ok(context.__bubbleBreakerTest.compactHierarchyBubbleName('これは非常に長い上位カテゴリ名称です', 'root').length <= 24, 'hierarchy bubble names should have a safe display length');
 const rootRequest = context.__bubbleBreakerTest.buildOpenAIRootRequest('テスト意見');
@@ -101,6 +106,26 @@ const groupAnalysisBubbles = [bubble('group_analysis_a'), bubble('group_analysis
 await analysisContext.__bubbleBreakerTest.requestBubbleGroupAnalyses({ id: 'group_analysis', title: '分析対象群', bubbles: groupAnalysisBubbles }, 'テスト意見');
 assert.equal(analysisFetchCount, 4, 'entering a bubble group should start analysis for every bubble');
 assert.ok(groupAnalysisBubbles.every(item => item.analysisStatus === 'ready'), 'all group bubble analyses should complete');
+let analysisRetryFetchCount = 0;
+const analysisRetryContext = {
+    ...context,
+    window: { __OPENAI_API_KEY__: 'test-key', __OPENAI_MODEL__: 'test' },
+    fetch: async () => {
+        analysisRetryFetchCount += 1;
+        if (analysisRetryFetchCount === 1) {
+            return { ok: false, status: 503, headers: { get() { return 'analysis-retry-request'; } }, async text() { return '{"error":"temporary"}'; } };
+        }
+        return { ok: true, status: 200, headers: { get() { return 'analysis-retry-success'; } }, async json() {
+            return { output: [{ type: 'message', content: [{ type: 'output_text', text: JSON.stringify({ analysis: {}, sources: [] }) }] }] };
+        } };
+    }
+};
+vm.createContext(analysisRetryContext);
+vm.runInContext(`${dataSource}\n${apiSource}\nglobalThis.__bubbleBreakerTest = { requestBubbleAnalysis };`, analysisRetryContext);
+const retryBubble = bubble('retry_analysis_target');
+await analysisRetryContext.__bubbleBreakerTest.requestBubbleAnalysis(retryBubble, analysisGroup, 'テスト意見');
+assert.equal(analysisRetryFetchCount, 2, 'a failed analysis should be retried');
+assert.equal(retryBubble.analysisStatus, 'ready', 'a successful retry should restore ready status');
 const valid = normalize({ groups, entryGroupId: 'central1', entryBubbleId: 'entry' });
 assert.equal(Object.keys(valid.db).length, 7, 'valid three-level hierarchy should be accepted');
 const topologyGroups = structuredClone(groups).filter(group => group.level !== 'leaf');

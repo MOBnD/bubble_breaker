@@ -25,10 +25,16 @@ assert.doesNotMatch(scene, /createMilkyWayBand|milkyWay|isMilkyWay/, 'the Milky 
 assert.match(scene, /const systemCount = 1000;/, 'galaxy-shaping star systems should be dense');
 assert.match(scene, /function keepGalaxyCenterClear\(/, 'galaxy centers should remain clear around black holes');
 assert.match(scene, /const galaxyStructures = \[\];/, 'galaxy structures should be independently rotatable');
-assert.match(scene, /function createNGC3324Background\(\)/, 'NGC 3324 should be the single farthest nebula');
+assert.match(scene, /function createNGC3324PhotoDome\(\)/, 'NGC 3324 should be rendered as a surrounding photo dome');
+assert.match(scene, /side: THREE\.BackSide/, 'the NGC 3324 photo should surround the camera from inside');
+assert.match(scene, /__NGC3324_TEXTURE__/, 'the NGC 3324 photo should use the build-time texture asset');
 assert.match(scene, /gasNebulaName = 'NGC 3324'/, 'the farthest nebula should be identified as NGC 3324');
 assert.doesNotMatch(scene, /GAS_NEBULA_PRESETS|addGasNebula|nebulaClouds/, 'legacy multiple nebula generation should be removed');
 assert.match(scene, /const shootingStars = \[\];/, 'shooting stars should be part of the cosmic background');
+assert.match(scene, /const shootingStarColors = \[/, 'shooting stars should use varied colors');
+assert.match(scene, /const head = new THREE\.Sprite/, 'shooting stars should have a luminous head');
+assert.match(scene, /const tail = new THREE\.Mesh/, 'shooting stars should have a shaped tail');
+assert.match(scene, /for \(let index = 0; index < 24; index\+\+\)/, 'shooting stars should be numerous enough');
 assert.match(animation, /starMesh\.rotation\.y \+=/, 'the starfield should rotate with the background');
 assert.match(animation, /cosmicBackgroundGroup\.rotation\.y \+=/, 'the distant background should continuously rotate');
 assert.match(animation, /galaxyClusters\.forEach\(\(cluster, index\) =>/, 'galaxy clusters should rotate independently');
@@ -40,6 +46,8 @@ assert.match(scene, /const GALAXY_CLUSTER_RADIUS = 8000;/, 'galaxy clusters shou
 assert.match(scene, /galaxyIndex \* Math\.PI \* 2 \/ GALAXIES_PER_CLUSTER/, 'galaxies in a cluster should use distinct angular slots');
 assert.match(scene, /const GALAXY_COLOR_PROFILES = \[/, 'galaxies should have distinct color profiles');
 assert.match(scene, /preserveGalaxyColor/, 'galaxy color profiles should survive depth updates');
+assert.match(scene, /function relocateGalaxyUniverse\(/, 'galaxy positions should be regenerated between universes');
+assert.match(scene, /relocateGalaxyUniverse\(`category:/, 'category transitions should relocate galaxies');
 assert.match(scene, /blackHole\.userData\.eventHorizonRadius = eventHorizonRadius;/, 'black holes should expose their event horizon radius');
 assert.doesNotMatch(scene, /const horizon = new THREE\.Mesh|wireframe: true/, 'the enclosing wireframe horizon sphere should be removed');
 assert.match(scene, /function updateAutomaticBubbleApproach\(\)/, 'automatic bubble proximity handling should exist');
@@ -53,6 +61,7 @@ assert.match(animation, /camera\.position\.distanceTo\(blackHole\) <= eventHoriz
 assert.match(animation, /new THREE\.CatmullRomCurve3/, 'warp should follow a smooth curve');
 assert.match(animation, /Math\.random\(\) - 0\.5/, 'warp control points should vary on every dive');
 assert.match(animation, /initializeLoadingRoute\(nextTarget\)/, 'each black hole segment should receive a route');
+assert.match(animation, /relocateGalaxyUniverse\('black-hole-universe-switch'\)/, 'black-hole universe switches should relocate galaxies');
 assert.doesNotMatch(animation, /nearHole|Math\.pow\(1 - p/, 'warp should not enter the black hole or decelerate at the end');
 
 console.log('Visual navigation invariants: OK');

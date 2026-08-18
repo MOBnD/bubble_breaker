@@ -5,6 +5,8 @@
         const OPENAI_STRUCTURE_TIMEOUT_MS = 90000;
         const OPENAI_ANALYSIS_TIMEOUT_MS = 60000;
         const OPENAI_STRUCTURE_MAX_ATTEMPTS = 2;
+        const OPENAI_ANALYSIS_MAX_ATTEMPTS = 3;
+        const OPENAI_ANALYSIS_RETRY_DELAY_MS = 1200;
         const OPENAI_STRUCTURE_MAX_BUBBLES = 5;
         const OPENAI_LOG_PREFIX = '[BubbleBreaker][OpenAI]';
         let activeAnalysisInput = '';
@@ -222,6 +224,48 @@
                 publishedAt: source.publishedAt ? String(source.publishedAt) : null,
                 claims: Array.isArray(source.claims) ? source.claims.slice(0, 5).map(String) : []
             }));
+        }
+
+        function stableTextHash(value) {
+            let hash = 2166136261;
+            for (const character of String(value || '')) {
+                hash ^= character.charCodeAt(0);
+                hash = Math.imul(hash, 16777619);
+            }
+            return hash >>> 0;
+        }
+
+        // APIが全バブルへ同じsizeを返しても、画面上で「全部同じ大きさ」に
+        // ならないよう、カテゴリ自身の文字列から再現可能な重みを作る。
+        // ランダム値ではないため、再描画や再試行で占有率が変わらない。
+        function inferBubbleWeight(bubble, index) {
+            const text = `${bubble && bubble.id || ''}|${bubble && bubble.name || ''}|${bubble && bubble.desc || ''}|${index}`;
+            const hash = stableTextHash(text);
+            const spread = 0.72 + ((hash % 1001) / 1000) * 1.78;
+            const lengthHint = Math.min(0.32, String(bubble && bubble.name || '').length * 0.018);
+            return spread + lengthHint;
+        }
+
+        function normalizeBubblePercentages(bubbles) {
+            const declared = bubbles.map(bubble => Math.max(0, Number(bubble && bubble.size) || 0));
+            const max = Math.max(...declared, 0);
+            const min = Math.min(...declared, 0);
+            const unique = new Set(declared.map(value => value.toFixed(4))).size;
+            const nearlyFlat = declared.length > 1 && (unique <= 1 || max - min < Math.max(0.5, max * 0.12));
+            const weights = declared.map((value, index) => {
+                if (nearlyFlat || value <= 0) return inferBubbleWeight(bubbles[index], index);
+                return value;
+            });
+            const total = weights.reduce((sum, value) => sum + value, 0);
+            if (!Number.isFinite(total) || total <= 0) throw new Error('バブルのsize合計が不正です');
+            let assigned = 0;
+            return bubbles.map((bubble, index) => {
+                const percentage = index === bubbles.length - 1
+                    ? Number((100 - assigned).toFixed(2))
+                    : Math.floor((weights[index] / total) * 10000) / 100;
+                assigned += percentage;
+                return { ...bubble, size: Math.max(0, Number(percentage.toFixed(2))) };
+            });
         }
 
         function separateBubblePositions(bubbles) {
@@ -503,20 +547,14 @@
             const db = {};
             const declaredParentIds = new Map();
             groups.forEach(group => {
-                const total = group.bubbles.reduce((sum, bubble) => sum + Math.max(0, Number(bubble.size) || 0), 0);
-                if (total <= 0) throw new Error('バブルのsize合計が不正です');
-                let assigned = 0;
-                const bubbles = group.bubbles.map((bubble, index) => {
+                const weightedBubbles = normalizeBubblePercentages(group.bubbles);
+                const bubbles = weightedBubbles.map((bubble, index) => {
                     if (!bubble || !bubble.id || bubbleIds.has(bubble.id)) throw new Error('バブルIDが不正です');
                     bubbleIds.add(String(bubble.id));
                     const numericColor = normalizeColor(bubble.color, colorFromText(String(bubble.name || bubble.id)));
-                    const normalizedSize = index === group.bubbles.length - 1
-                        ? Math.max(0, Number((100 - assigned).toFixed(2)))
-                        : Number(((Math.max(0, Number(bubble.size) || 0) / total) * 100).toFixed(2));
-                    assigned += normalizedSize;
                     const pos = Array.isArray(bubble.pos) && bubble.pos.length === 3 ? bubble.pos.map(value => Math.max(-90, Math.min(90, Number(value) || 0))) : [0, 0, 0];
                     return {
-                        id: String(bubble.id), name: String(bubble.name || '名称未設定'), size: normalizedSize,
+                        id: String(bubble.id), name: String(bubble.name || '名称未設定'), size: bubble.size,
                         color: numericColor, htmlColor: normalizeHtmlColor(bubble.htmlColor, numericColor), pos,
                         childId: bubble.childId ? String(bubble.childId) : null, desc: String(bubble.desc || '公開情報から生成された説明です。'),
                         isEstimated: bubble.isEstimated !== false, confidence: Math.max(0, Math.min(1, Number(bubble.confidence) || 0)),
@@ -694,13 +732,16 @@
             };
         }
 
-        function buildOpenAIBubbleAnalysisRequest(bubble, group, input) {
-            const prompt = `ユーザーの意見: ${input}\n所属カテゴリ: ${group.title}\n対象バブル: ${bubble.name}\n対象バブルの説明: ${bubble.desc || 'なし'}\n\nWeb Searchを使い、対象バブルだけの分析を生成してください。overview、history、demographic、evaluationの各summary・insight・metricsを具体的な公開情報に基づいて作成し、参照した公開ソースをsourcesに入れてください。分析項目名をバブル名にせず、根拠が足りない値はisEstimated=trueにしてください。JSON Schema以外の文章は出力しないでください。`;
+        function buildOpenAIBubbleAnalysisRequest(bubble, group, input, options = {}) {
+            const repairInstruction = options.repair
+                ? '\n前回の応答を検証できなかったため、今回は必ず指定スキーマのJSONオブジェクトだけを返してください。4セクションすべてを埋め、metricsのvalueは数値、sourcesのurlは完全なhttp(s) URLにしてください。'
+                : '';
+            const prompt = `ユーザーの意見: ${input}\n所属カテゴリ: ${group.title}\n対象バブル: ${bubble.name}\n対象バブルの説明: ${bubble.desc || 'なし'}\n\nWeb Searchを使い、対象バブルだけの分析を生成してください。overview、history、demographic、evaluationの各summary・insight・metricsを具体的な公開情報に基づいて作成し、参照した公開ソースをsourcesに入れてください。分析項目名をバブル名にせず、根拠が足りない値はisEstimated=trueにしてください。JSON Schema以外の文章は出力しないでください。${repairInstruction}`;
             return {
                 model: OPENAI_MODEL,
                 store: false,
                 reasoning: { effort: 'low' },
-                max_output_tokens: 5000,
+                max_output_tokens: options.repair ? 6500 : 5000,
                 tool_choice: 'required',
                 tools: [{ type: 'web_search', search_context_size: 'medium', user_location: { type: 'approximate', country: 'JP', timezone: 'Asia/Tokyo' } }],
                 input: [
@@ -734,9 +775,22 @@
 
         function extractResponseText(response) {
             if (typeof response.output_text === 'string') return response.output_text;
-            const message = Array.isArray(response.output) ? response.output.find(item => item.type === 'message') : null;
-            const textItem = message && Array.isArray(message.content) ? message.content.find(item => item.type === 'output_text') : null;
-            return textItem && textItem.text ? textItem.text : '';
+            const output = Array.isArray(response.output) ? response.output : [];
+            return output.flatMap(item => Array.isArray(item && item.content) ? item.content : [])
+                .filter(item => item && (item.type === 'output_text' || typeof item.text === 'string'))
+                .map(item => String(item.text || ''))
+                .join('');
+        }
+
+        function isRetryableAnalysisError(error) {
+            if (!error) return true;
+            if (error.status === 401 || error.status === 403) return false;
+            if (error.code === 'API_ABORTED_BY_USER') return false;
+            return true;
+        }
+
+        function waitForAnalysisRetry(delayMs) {
+            return new Promise(resolve => setTimeout(resolve, delayMs));
         }
 
         async function requestOpenAIJson(requestBody, timeoutMs, stage) {
@@ -1010,44 +1064,79 @@
             const bubbleId = String(bubble.id || '');
             if (!bubbleId) return null;
             if (bubbleAnalysisRequests.has(bubbleId)) return bubbleAnalysisRequests.get(bubbleId);
-            const request = (async () => {
+            let request;
+            request = (async () => {
                 const startedAt = performance.now();
                 bubble.analysisStatus = 'loading';
-                try {
-                    const response = await fetchWithTimeout('https://api.openai.com/v1/responses', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${OPENAI_API_KEY}` },
-                        body: JSON.stringify(buildOpenAIBubbleAnalysisRequest(bubble, group, String(input || '')))
-                    }, OPENAI_ANALYSIS_TIMEOUT_MS);
-                    const requestId = response.headers.get('x-request-id');
-                    if (!response.ok) {
-                        const errorBody = redactApiLog(truncateApiLog(await response.text()));
-                        const error = new Error(`OpenAI API ${response.status}`);
-                        error.status = response.status;
-                        error.requestId = requestId;
-                        error.body = errorBody;
-                        throw error;
+                for (let attempt = 1; attempt <= OPENAI_ANALYSIS_MAX_ATTEMPTS; attempt++) {
+                    let requestId = null;
+                    try {
+                        const response = await fetchWithTimeout('https://api.openai.com/v1/responses', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${OPENAI_API_KEY}` },
+                            body: JSON.stringify(buildOpenAIBubbleAnalysisRequest(bubble, group, String(input || ''), { repair: attempt > 1 }))
+                        }, OPENAI_ANALYSIS_TIMEOUT_MS);
+                        requestId = response.headers.get('x-request-id');
+                        if (!response.ok) {
+                            const errorBody = redactApiLog(truncateApiLog(await response.text()));
+                            const error = new Error(`OpenAI API ${response.status}`);
+                            error.status = response.status;
+                            error.requestId = requestId;
+                            error.body = errorBody;
+                            throw error;
+                        }
+                        const payload = await response.json();
+                        const incompleteReason = payload && payload.incomplete_details && payload.incomplete_details.reason;
+                        if (payload && (payload.status === 'incomplete' || incompleteReason)) {
+                            const error = new Error(`OpenAI APIの分析出力が未完了です${incompleteReason ? `（${incompleteReason}）` : ''}`);
+                            error.code = 'API_INCOMPLETE_OUTPUT';
+                            error.reason = incompleteReason || null;
+                            error.requestId = requestId;
+                            throw error;
+                        }
+                        const text = extractResponseText(payload);
+                        if (!text) {
+                            const error = new Error('OpenAI APIの分析出力が空です');
+                            error.code = 'API_EMPTY_OUTPUT';
+                            throw error;
+                        }
+                        let parsed;
+                        try {
+                            parsed = JSON.parse(text);
+                        } catch (parseError) {
+                            const error = new Error(`バブル分析JSON解析に失敗しました: ${parseError.message}`);
+                            error.code = 'API_JSON_PARSE_ERROR';
+                            error.cause = parseError;
+                            throw error;
+                        }
+                        if (!parsed || !parsed.analysis || typeof parsed.analysis !== 'object') {
+                            const error = new Error('バブル分析のanalysisオブジェクトがありません');
+                            error.code = 'API_INVALID_ANALYSIS';
+                            throw error;
+                        }
+                        bubble.analysis = normalizeAnalysis(parsed.analysis);
+                        bubble.sources = normalizeSources(parsed.sources);
+                        bubble.analysisStatus = 'ready';
+                        apiLog('バブル分析の遅延生成に成功', { bubbleId, groupId: group.id, attempt, requestId, elapsedMs: Math.round(performance.now() - startedAt) });
+                        if (typeof window.refreshAnalysisView === 'function') window.refreshAnalysisView(bubbleId);
+                        return { analysis: bubble.analysis, sources: bubble.sources };
+                    } catch (error) {
+                        const retryable = isRetryableAnalysisError(error);
+                        apiWarn('バブル分析の生成に失敗しました。再試行を判定します', {
+                            bubbleId, groupId: group.id, attempt, maxAttempts: OPENAI_ANALYSIS_MAX_ATTEMPTS,
+                            retryable, requestId: error.requestId || requestId || null,
+                            code: error.code || null, status: error.status || null,
+                            timeoutMs: error.timeoutMs || null, body: error.body || null,
+                            message: redactApiLog(error.message || '不明なエラー')
+                        });
+                        if (!retryable || attempt >= OPENAI_ANALYSIS_MAX_ATTEMPTS) break;
+                        bubble.analysisStatus = 'loading';
+                        await waitForAnalysisRetry(OPENAI_ANALYSIS_RETRY_DELAY_MS * attempt);
                     }
-                    const payload = await response.json();
-                    const text = extractResponseText(payload);
-                    if (!text) throw new Error('OpenAI APIの分析出力が空です');
-                    const parsed = JSON.parse(text);
-                    bubble.analysis = normalizeAnalysis(parsed.analysis);
-                    bubble.sources = normalizeSources(parsed.sources);
-                    bubble.analysisStatus = 'ready';
-                    apiLog('バブル分析の遅延生成に成功', { bubbleId, groupId: group.id, requestId, elapsedMs: Math.round(performance.now() - startedAt) });
-                    if (typeof window.refreshAnalysisView === 'function') window.refreshAnalysisView(bubbleId);
-                    return { analysis: bubble.analysis, sources: bubble.sources };
-                } catch (error) {
+                }
+                {
                     bubble.analysisStatus = 'error';
-                    apiWarn('バブル分析の遅延生成に失敗しました。既定分析を表示します', {
-                        bubbleId,
-                        groupId: group.id,
-                        code: error.code || null,
-                        status: error.status || null,
-                        timeoutMs: error.timeoutMs || null,
-                        message: redactApiLog(error.message)
-                    });
+                    if (bubbleAnalysisRequests.get(bubbleId) === request) bubbleAnalysisRequests.delete(bubbleId);
                     return null;
                 }
             })();
