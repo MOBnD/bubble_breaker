@@ -92,14 +92,22 @@ assert.match(indexHtml, /class="[^"]*exploration-panel/, 'category screens shoul
 assert.match(indexHtml, /data-bubble-visual-mode="network"/, 'network bubble visual mode should be selectable');
 assert.match(indexHtml, /data-bubble-visual-mode="classic"/, 'classic bubble visual mode should be selectable');
 assert.match(indexHtml, /data-bubble-visual-mode="cosmic"/, 'cosmic bubble visual mode should be selectable');
+assert.match(indexHtml, /data-bubble-visual-mode="deepSea"/, 'deep sea bubble visual mode should be selectable');
+assert.match(indexHtml, /data-bubble-visual-mode="data"/, 'data space bubble visual mode should be selectable');
 assert.match(indexHtml, /data-bubble-visual-mode="network"[^>]*>装飾あり/, 'network mode should be labelled as decorated');
 assert.match(indexHtml, /data-bubble-visual-mode="classic"[^>]*>装飾なし/, 'classic mode should be labelled as undecorated');
 assert.match(indexHtml, /data-bubble-visual-mode="cosmic"[^>]*>宇宙テーマ/, 'cosmic mode should be labelled as space themed');
+assert.match(indexHtml, /data-bubble-visual-mode="deepSea"[^>]*>深海/, 'deep sea mode should be labelled');
+assert.match(indexHtml, /data-bubble-visual-mode="data"[^>]*>データ空間/, 'data space mode should be labelled');
 assert.match(indexHtml, /id="btn-sound-toggle"/, 'sound toggle should remain available');
 const cosmicControlStart = indexHtml.indexOf('id="panel-bgm"');
 const cosmicControlEnd = indexHtml.indexOf('<audio id="bgm-audio"');
 assert.ok(cosmicControlStart >= 0 && cosmicControlEnd > cosmicControlStart, 'Cosmic Control bounds should be present');
 assert.ok(indexHtml.slice(cosmicControlStart, cosmicControlEnd).includes('id="btn-sound-toggle"'), 'sound toggle should be inside Cosmic Control');
+assert.match(indexHtml, /data-collapse-panel="panel-bgm"/, 'Cosmic Control should have a collapse control');
+assert.match(indexHtml, /aria-controls="panel-bgm-content"/, 'collapse control should identify its content');
+assert.match(indexHtml, /id="panel-bgm-content"/, 'Cosmic Control should have a collapsible content region');
+assert.doesNotMatch(indexHtml.slice(cosmicControlStart, cosmicControlEnd), /data-close-panel="panel-bgm"/, 'Cosmic Control should not close as a panel');
 assert.match(indexHtml, /id="bubble-color-theme"/, 'bubble color themes should be independently selectable');
 for (const theme of ['legacy', 'neon', 'warm', 'space', 'deepSea', 'data']) {
     assert.match(indexHtml, new RegExp(`value="${theme}"`), `bubble color theme ${theme} should be available`);
@@ -109,10 +117,18 @@ for (const theme of ['space', 'deepSea', 'data']) {
     assert.match(indexHtml, new RegExp(`id="background-theme"[\\s\\S]*value="${theme}"`), `background theme ${theme} should be available`);
 }
 assert.match(events, /bubblebreaker\.bubbleVisualMode/, 'bubble visual mode should persist in localStorage');
+assert.match(events, /bubbleVisualModeOptions = \['network', 'classic', 'cosmic', 'deepSea', 'data'\]/, 'all bubble visual modes should be accepted at startup');
+assert.match(events, /data-collapse-panel/, 'panel collapse events should be wired');
+assert.match(events, /panel-bgm\.collapsed/, 'Cosmic Control collapse state should persist');
 assert.match(events, /bubblebreaker\.bubbleColorTheme/, 'bubble color theme should persist in localStorage');
 assert.match(events, /bubblebreaker\.backgroundTheme/, 'background theme should persist in localStorage');
 assert.match(scene, /function createNetworkBubbleVisual\(/, 'network bubble decorations should be generated');
 assert.match(scene, /function createCosmicBubbleVisual\(/, 'cosmic bubble decorations should be generated');
+assert.match(scene, /function createDeepSeaBubbleVisual\(/, 'deep sea bubble decorations should be generated');
+assert.match(scene, /function createDataBubbleVisual\(/, 'data space bubble decorations should be generated');
+assert.match(scene, /BUBBLE_VISUAL_MODE_NAMES = \['network', 'classic', 'cosmic', 'deepSea', 'data'\]/, 'five bubble visual modes should be supported');
+assert.match(scene, /deepSeaAnimation/, 'deep sea bubble decorations should expose animation metadata');
+assert.match(scene, /dataAnimation/, 'data space bubble decorations should expose animation metadata');
 assert.match(scene, /function createDeepSeaBackgroundTheme\(/, 'deep sea background structures should be generated');
 assert.match(scene, /function createDataBackgroundTheme\(/, 'data space background structures should be generated');
 assert.match(scene, /function createThemeDomeTexture\(theme\)/, 'non-space themes should have their own dome textures');
@@ -129,6 +145,8 @@ assert.match(animation, /networkAnimation\.observerRing/, 'the focus bubble shou
 assert.match(scene, /const scanRing = new THREE\.Mesh/, 'network bubbles should include an analysis scan ring');
 assert.match(animation, /analysisStatus === 'loading'/, 'analysis generation should activate the scan ring');
 assert.match(animation, /cosmicAnimation/, 'cosmic bubble decorations should animate');
+assert.match(animation, /deepSeaAnimation/, 'deep sea bubble decorations should animate');
+assert.match(animation, /dataAnimation/, 'data space bubble decorations should animate');
 assert.match(animation, /backgroundThemeGroups/, 'non-space background structures should animate');
 assert.match(indexHtml, /id="warp-haze-toggle"/, 'warp haze should have a UI toggle');
 assert.match(events, /bubblebreaker\.warpHaze/, 'warp haze preference should persist in localStorage');

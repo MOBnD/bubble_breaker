@@ -889,7 +889,10 @@
         let groupEntryCameraDistance = 25;
         let singleViewDirection = new THREE.Vector3(0, 0, 1);
         let explorerSelectedBubbleId = null;
-        let bubbleVisualMode = localStorage.getItem('bubblebreaker.bubbleVisualMode') === 'classic' ? 'classic' : 'network';
+        const BUBBLE_VISUAL_MODE_NAMES = ['network', 'classic', 'cosmic', 'deepSea', 'data'];
+        let bubbleVisualMode = BUBBLE_VISUAL_MODE_NAMES.includes(localStorage.getItem('bubblebreaker.bubbleVisualMode'))
+            ? localStorage.getItem('bubblebreaker.bubbleVisualMode')
+            : 'network';
         const BUBBLE_COLOR_THEME_NAMES = ['legacy', 'neon', 'warm', 'space', 'deepSea', 'data'];
         let bubbleColorTheme = BUBBLE_COLOR_THEME_NAMES.includes(localStorage.getItem('bubblebreaker.bubbleColorTheme'))
             ? localStorage.getItem('bubblebreaker.bubbleColorTheme')
@@ -1030,10 +1033,15 @@
             const color = getBubbleThemeColor(mesh.userData.sourceColor, bubbleData);
             mesh.material.color.copy(color);
             if (mesh.material.emissive) mesh.material.emissive.copy(color);
-            const visuals = [mesh.userData.networkVisual, mesh.userData.cosmicVisual].filter(Boolean);
+            const visuals = [
+                mesh.userData.networkVisual,
+                mesh.userData.cosmicVisual,
+                mesh.userData.deepSeaVisual,
+                mesh.userData.dataVisual
+            ].filter(Boolean);
             visuals.forEach(visual => visual.traverse(child => {
                 if (!child.material || !child.material.color) return;
-                const animation = visual.userData.networkAnimation || visual.userData.cosmicAnimation;
+                const animation = visual.userData.networkAnimation || visual.userData.cosmicAnimation || visual.userData.deepSeaAnimation || visual.userData.dataAnimation;
                 if (animation && (child === animation.observerRing || child === animation.scanRing)) return;
                 child.material.color.copy(color);
             }));
@@ -1238,6 +1246,109 @@
             return visual;
         }
 
+        function createDeepSeaBubbleVisual(displayColor, bubbleData, level = 'central', isFocus = false) {
+            const seed = hashBubbleValue(`${bubbleData && bubbleData.id}:deep-sea`);
+            const visual = new THREE.Group();
+            const accent = displayColor.clone().offsetHSL(0.04, 0.08, 0.04);
+            const glowMaterial = new THREE.MeshBasicMaterial({ color: accent, transparent: true, opacity: isFocus ? 0.3 : 0.16, side: THREE.BackSide, depthWrite: false, blending: THREE.AdditiveBlending });
+            visual.add(new THREE.Mesh(new THREE.SphereGeometry(1.12, 24, 16), glowMaterial));
+            const current = new THREE.Mesh(
+                new THREE.TorusGeometry(1.16, isFocus ? 0.035 : 0.024, 7, 56),
+                new THREE.MeshBasicMaterial({ color: 0x7dffe6, transparent: true, opacity: isFocus ? 0.82 : 0.5, depthWrite: false, blending: THREE.AdditiveBlending })
+            );
+            current.rotation.x = Math.PI * 0.5;
+            visual.add(current);
+
+            const bubbleCount = level === 'central' ? 16 : 10;
+            const bubbleGeometry = new THREE.SphereGeometry(isFocus ? 0.055 : 0.04, 8, 6);
+            const bubbleMaterial = new THREE.MeshBasicMaterial({ color: 0x9dfff1, transparent: true, opacity: 0.72, depthWrite: false, blending: THREE.AdditiveBlending });
+            const bubbles = [];
+            for (let index = 0; index < bubbleCount; index++) {
+                const bubble = new THREE.Mesh(bubbleGeometry, bubbleMaterial);
+                visual.add(bubble);
+                bubbles.push({ mesh: bubble, phase: (seed + index * 37) % 100 / 100 * Math.PI * 2, radius: 0.62 + (index % 5) * 0.12, height: 0.78 + (index % 4) * 0.15, speed: 0.18 + (index % 3) * 0.07 });
+            }
+
+            const tendrils = [];
+            const tendrilMaterial = new THREE.LineBasicMaterial({ color: accent, transparent: true, opacity: isFocus ? 0.72 : 0.42, depthWrite: false, blending: THREE.AdditiveBlending });
+            for (let index = 0; index < 6; index++) {
+                const points = [];
+                const angle = (seed % 360) * Math.PI / 180 + index * Math.PI / 3;
+                for (let pointIndex = 0; pointIndex < 6; pointIndex++) {
+                    const progress = pointIndex / 5;
+                    const radius = 0.34 + progress * 0.86;
+                    points.push(new THREE.Vector3(
+                        Math.cos(angle + progress * 0.9) * radius,
+                        -0.25 - progress * 0.8,
+                        Math.sin(angle + progress * 0.9) * radius
+                    ));
+                }
+                const tendril = new THREE.Line(new THREE.BufferGeometry().setFromPoints(points), tendrilMaterial);
+                visual.add(tendril);
+                tendrils.push(tendril);
+            }
+            const scanRing = new THREE.Mesh(
+                new THREE.TorusGeometry(0.92, 0.018, 6, 48),
+                new THREE.MeshBasicMaterial({ color: 0xb5fff4, transparent: true, opacity: 0.9, depthWrite: false, blending: THREE.AdditiveBlending })
+            );
+            scanRing.visible = false;
+            visual.add(scanRing);
+            visual.userData.deepSeaAnimation = { phase: (seed % 1000) / 1000 * Math.PI * 2, current, bubbles, tendrils, scanRing };
+            visual.userData.bubbleVisualMode = 'deepSea';
+            return visual;
+        }
+
+        function createDataBubbleVisual(displayColor, bubbleData, level = 'central', isFocus = false) {
+            const seed = hashBubbleValue(`${bubbleData && bubbleData.id}:data-space`);
+            const visual = new THREE.Group();
+            const accent = displayColor.clone().offsetHSL(0.08, 0.1, 0.08);
+            const shell = new THREE.Mesh(
+                new THREE.SphereGeometry(1.1, 16, 12),
+                new THREE.MeshBasicMaterial({ color: accent, transparent: true, opacity: isFocus ? 0.16 : 0.08, wireframe: true, depthWrite: false, blending: THREE.AdditiveBlending })
+            );
+            visual.add(shell);
+            const nodeCount = level === 'central' ? 9 : 6;
+            const nodeGeometry = new THREE.SphereGeometry(isFocus ? 0.075 : 0.055, 8, 6);
+            const nodeMaterial = new THREE.MeshBasicMaterial({ color: 0x9afcff, transparent: true, opacity: 0.88, depthWrite: false, blending: THREE.AdditiveBlending });
+            const nodes = [];
+            const positions = [];
+            for (let index = 0; index < nodeCount; index++) {
+                const angle = (seed + index * 137) % 360 * Math.PI / 180;
+                const latitude = (((seed + index * 29) % 100) / 100 - 0.5) * 1.5;
+                const radius = Math.sqrt(Math.max(0.18, 1 - latitude * latitude)) * 1.02;
+                const position = new THREE.Vector3(Math.cos(angle) * radius, latitude, Math.sin(angle) * radius);
+                const node = new THREE.Mesh(nodeGeometry, nodeMaterial);
+                node.position.copy(position);
+                visual.add(node);
+                nodes.push(node);
+                positions.push(position);
+            }
+            const linkMaterial = new THREE.LineBasicMaterial({ color: accent, transparent: true, opacity: isFocus ? 0.7 : 0.4, depthWrite: false, blending: THREE.AdditiveBlending });
+            const links = [];
+            positions.forEach((position, index) => {
+                const next = positions[(index + 1) % positions.length];
+                const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints([position, next]), linkMaterial);
+                visual.add(line);
+                links.push(line);
+            });
+            const packetGeometry = new THREE.SphereGeometry(isFocus ? 0.045 : 0.032, 7, 5);
+            const packetMaterial = new THREE.MeshBasicMaterial({ color: 0xffe38a, transparent: true, opacity: 0.9, depthWrite: false, blending: THREE.AdditiveBlending });
+            const packets = Array.from({ length: Math.min(4, nodeCount) }, (_, index) => {
+                const packet = new THREE.Mesh(packetGeometry, packetMaterial);
+                visual.add(packet);
+                return { mesh: packet, edge: index, progress: (seed % 100) / 100 + index * 0.19 };
+            });
+            const scanRing = new THREE.Mesh(
+                new THREE.TorusGeometry(0.9, 0.018, 6, 48),
+                new THREE.MeshBasicMaterial({ color: 0x9afcff, transparent: true, opacity: 0.9, depthWrite: false, blending: THREE.AdditiveBlending })
+            );
+            scanRing.visible = false;
+            visual.add(scanRing);
+            visual.userData.dataAnimation = { phase: (seed % 1000) / 1000 * Math.PI * 2, nodes, links, positions, packets, scanRing };
+            visual.userData.bubbleVisualMode = 'data';
+            return visual;
+        }
+
         function ensureNetworkBubbleVisual(mesh, bubbleData, level, isFocus = false) {
             if (!mesh || !bubbleData) return null;
             if (!mesh.userData.networkVisual) {
@@ -1260,25 +1371,67 @@
             return mesh.userData.cosmicVisual;
         }
 
+        function ensureDeepSeaBubbleVisual(mesh, bubbleData, level, isFocus = false) {
+            if (!mesh || !bubbleData) return null;
+            if (!mesh.userData.deepSeaVisual) {
+                const displayColor = mesh.material && mesh.material.color ? mesh.material.color.clone() : new THREE.Color(0x66ccff);
+                mesh.userData.deepSeaVisual = createDeepSeaBubbleVisual(displayColor, bubbleData, level, isFocus);
+                mesh.add(mesh.userData.deepSeaVisual);
+            }
+            mesh.userData.deepSeaVisual.visible = bubbleVisualMode === 'deepSea';
+            return mesh.userData.deepSeaVisual;
+        }
+
+        function ensureDataBubbleVisual(mesh, bubbleData, level, isFocus = false) {
+            if (!mesh || !bubbleData) return null;
+            if (!mesh.userData.dataVisual) {
+                const displayColor = mesh.material && mesh.material.color ? mesh.material.color.clone() : new THREE.Color(0x66ccff);
+                mesh.userData.dataVisual = createDataBubbleVisual(displayColor, bubbleData, level, isFocus);
+                mesh.add(mesh.userData.dataVisual);
+            }
+            mesh.userData.dataVisual.visible = bubbleVisualMode === 'data';
+            return mesh.userData.dataVisual;
+        }
+
         function ensureBubbleVisual(mesh, bubbleData, level, isFocus = false) {
             if (!mesh || !bubbleData) return null;
             if (bubbleVisualMode === 'network') {
                 const visual = ensureNetworkBubbleVisual(mesh, bubbleData, level, isFocus);
                 if (mesh.userData.cosmicVisual) mesh.userData.cosmicVisual.visible = false;
+                if (mesh.userData.deepSeaVisual) mesh.userData.deepSeaVisual.visible = false;
+                if (mesh.userData.dataVisual) mesh.userData.dataVisual.visible = false;
                 return visual;
             }
             if (bubbleVisualMode === 'cosmic') {
                 const visual = ensureCosmicBubbleVisual(mesh, bubbleData, level, isFocus);
                 if (mesh.userData.networkVisual) mesh.userData.networkVisual.visible = false;
+                if (mesh.userData.deepSeaVisual) mesh.userData.deepSeaVisual.visible = false;
+                if (mesh.userData.dataVisual) mesh.userData.dataVisual.visible = false;
+                return visual;
+            }
+            if (bubbleVisualMode === 'deepSea') {
+                const visual = ensureDeepSeaBubbleVisual(mesh, bubbleData, level, isFocus);
+                if (mesh.userData.networkVisual) mesh.userData.networkVisual.visible = false;
+                if (mesh.userData.cosmicVisual) mesh.userData.cosmicVisual.visible = false;
+                if (mesh.userData.dataVisual) mesh.userData.dataVisual.visible = false;
+                return visual;
+            }
+            if (bubbleVisualMode === 'data') {
+                const visual = ensureDataBubbleVisual(mesh, bubbleData, level, isFocus);
+                if (mesh.userData.networkVisual) mesh.userData.networkVisual.visible = false;
+                if (mesh.userData.cosmicVisual) mesh.userData.cosmicVisual.visible = false;
+                if (mesh.userData.deepSeaVisual) mesh.userData.deepSeaVisual.visible = false;
                 return visual;
             }
             if (mesh.userData.networkVisual) mesh.userData.networkVisual.visible = false;
             if (mesh.userData.cosmicVisual) mesh.userData.cosmicVisual.visible = false;
+            if (mesh.userData.deepSeaVisual) mesh.userData.deepSeaVisual.visible = false;
+            if (mesh.userData.dataVisual) mesh.userData.dataVisual.visible = false;
             return null;
         }
 
         window.setBubbleVisualMode = function(mode = 'network') {
-            bubbleVisualMode = mode === 'classic' ? 'classic' : 'network';
+            bubbleVisualMode = BUBBLE_VISUAL_MODE_NAMES.includes(mode) ? mode : 'network';
             const bubbles = [...currentBubbles];
             if (transitionState) bubbles.push(...(transitionState.outgoing || []));
             bubbles.forEach(bubble => {
@@ -1318,6 +1471,8 @@
             mesh.userData.sourceColor = sourceColor.getHex();
             mesh.userData.networkVisual = null;
             mesh.userData.cosmicVisual = null;
+            mesh.userData.deepSeaVisual = null;
+            mesh.userData.dataVisual = null;
             if (bubbleData && bubbleVisualMode !== 'classic') ensureBubbleVisual(mesh, bubbleData, level, isFocus);
             return mesh;
         }
@@ -1353,7 +1508,7 @@
         function disposeBubble(bubble) {
             if (!bubble) return;
             scene.remove(bubble.mesh);
-            ['networkVisual', 'cosmicVisual'].forEach(key => {
+            ['networkVisual', 'cosmicVisual', 'deepSeaVisual', 'dataVisual'].forEach(key => {
                 if (!bubble.mesh.userData || !bubble.mesh.userData[key]) return;
                 disposeObjectTree(bubble.mesh.userData[key]);
                 bubble.mesh.remove(bubble.mesh.userData[key]);

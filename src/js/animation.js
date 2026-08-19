@@ -366,6 +366,81 @@
                         });
                     });
                 }
+
+                const deepSeaVisual = b.mesh.userData && b.mesh.userData.deepSeaVisual;
+                const deepSeaAnimation = deepSeaVisual && deepSeaVisual.userData.deepSeaAnimation;
+                if (deepSeaVisual && deepSeaAnimation) {
+                    deepSeaVisual.rotation.y -= 0.0011 + b.mesh.scale.x * 0.00005;
+                    deepSeaAnimation.current.rotation.z += 0.0018;
+                    deepSeaAnimation.bubbles.forEach(bubble => {
+                        const lift = (time * bubble.speed + bubble.phase) % 2.2;
+                        const angle = bubble.phase + time * bubble.speed * 0.22;
+                        bubble.mesh.position.set(
+                            Math.cos(angle) * bubble.radius,
+                            -0.76 + lift * bubble.height,
+                            Math.sin(angle) * bubble.radius
+                        );
+                        const pulse = 0.72 + Math.sin(time * 2.2 + bubble.phase) * 0.18;
+                        bubble.mesh.scale.setScalar(pulse);
+                    });
+                    deepSeaAnimation.tendrils.forEach((tendril, index) => {
+                        tendril.rotation.z = Math.sin(time * 0.34 + deepSeaAnimation.phase + index) * 0.08;
+                    });
+                    if (deepSeaAnimation.scanRing) {
+                        const isAnalysisLoading = state.bubbleData && state.bubbleData.id === b.data.id && b.data.analysisStatus === 'loading';
+                        deepSeaAnimation.scanRing.visible = Boolean(isAnalysisLoading);
+                        if (isAnalysisLoading) {
+                            deepSeaAnimation.scanRing.rotation.z += 0.05;
+                            deepSeaAnimation.scanRing.scale.setScalar(0.92 + Math.sin(time * 4.4 + deepSeaAnimation.phase) * 0.08);
+                        }
+                    }
+                    const fade = Math.max(0, Math.min(1, b.mesh.material.opacity / 0.95));
+                    deepSeaVisual.traverse(child => {
+                        if (!child.material) return;
+                        const materials = Array.isArray(child.material) ? child.material : [child.material];
+                        materials.forEach(material => {
+                            if (!Number.isFinite(material.userData.deepSeaBaseOpacity)) material.userData.deepSeaBaseOpacity = material.opacity;
+                            material.opacity = material.userData.deepSeaBaseOpacity * fade;
+                        });
+                    });
+                }
+
+                const dataVisual = b.mesh.userData && b.mesh.userData.dataVisual;
+                const dataAnimation = dataVisual && dataVisual.userData.dataAnimation;
+                if (dataVisual && dataAnimation) {
+                    dataVisual.rotation.y += 0.0015 + b.mesh.scale.x * 0.00007;
+                    dataAnimation.nodes.forEach((node, index) => {
+                        const pulse = 0.88 + Math.sin(time * 2.6 + dataAnimation.phase + index * 0.55) * 0.14;
+                        node.scale.setScalar(pulse);
+                    });
+                    dataAnimation.links.forEach((link, index) => {
+                        link.material.opacity = 0.3 + (Math.sin(time * 1.5 + dataAnimation.phase + index * 0.3) + 1) * 0.12;
+                    });
+                    dataAnimation.packets.forEach(packet => {
+                        packet.progress = (packet.progress + 0.012) % 1;
+                        const start = dataAnimation.positions[packet.edge];
+                        const end = dataAnimation.positions[(packet.edge + 1) % dataAnimation.positions.length];
+                        packet.mesh.position.lerpVectors(start, end, packet.progress);
+                    });
+                    if (dataAnimation.scanRing) {
+                        const isAnalysisLoading = state.bubbleData && state.bubbleData.id === b.data.id && b.data.analysisStatus === 'loading';
+                        dataAnimation.scanRing.visible = Boolean(isAnalysisLoading);
+                        if (isAnalysisLoading) {
+                            dataAnimation.scanRing.rotation.x += 0.035;
+                            dataAnimation.scanRing.rotation.z += 0.025;
+                            dataAnimation.scanRing.scale.setScalar(0.93 + Math.sin(time * 4.6 + dataAnimation.phase) * 0.07);
+                        }
+                    }
+                    const fade = Math.max(0, Math.min(1, b.mesh.material.opacity / 0.95));
+                    dataVisual.traverse(child => {
+                        if (!child.material) return;
+                        const materials = Array.isArray(child.material) ? child.material : [child.material];
+                        materials.forEach(material => {
+                            if (!Number.isFinite(material.userData.dataBaseOpacity)) material.userData.dataBaseOpacity = material.opacity;
+                            material.opacity = material.userData.dataBaseOpacity * fade;
+                        });
+                    });
+                }
                 
                 // --- 解析画面時の他バブル透過処理 ---
                 const isTarget = (state.bubbleId === b.data.id);

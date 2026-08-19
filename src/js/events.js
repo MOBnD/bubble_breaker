@@ -121,6 +121,27 @@
         });
         document.getElementById('btn-sound-toggle').innerText = soundEnabled ? '🔊 効果音ON' : '🔇 効果音OFF';
         const reopenPanelsButton = document.getElementById('btn-reopen-panels');
+        const collapsiblePanelButtons = [...document.querySelectorAll('[data-collapse-panel]')];
+        function setPanelCollapsed(panelId, collapsed, persist = true) {
+            const panel = document.getElementById(panelId);
+            const button = document.querySelector(`[data-collapse-panel="${panelId}"]`);
+            if (!panel || !button) return false;
+            panel.classList.toggle('panel-is-collapsed', collapsed);
+            button.setAttribute('aria-expanded', String(!collapsed));
+            button.textContent = collapsed ? '+' : '−';
+            button.title = collapsed ? '設定を展開' : '設定を畳む';
+            if (persist) localStorage.setItem(`bubblebreaker.${panelId}.collapsed`, collapsed ? 'on' : 'off');
+            return collapsed;
+        }
+        collapsiblePanelButtons.forEach(button => {
+            button.addEventListener('click', () => {
+                const panel = document.getElementById(button.dataset.collapsePanel);
+                if (!panel) return;
+                setPanelCollapsed(button.dataset.collapsePanel, !panel.classList.contains('panel-is-collapsed'));
+            });
+        });
+        const storedBgmPanelCollapsed = localStorage.getItem('bubblebreaker.panel-bgm.collapsed') === 'on';
+        setPanelCollapsed('panel-bgm', storedBgmPanelCollapsed, false);
         document.querySelectorAll('[data-close-panel]').forEach(button => {
             button.addEventListener('click', () => {
                 const panel = document.getElementById(button.dataset.closePanel);
@@ -178,9 +199,10 @@
         }
 
         let explorationPanelSize = applyExplorationPanelSize(storedPanelSize || 'medium');
+        const bubbleVisualModeOptions = ['network', 'classic', 'cosmic', 'deepSea', 'data'];
         const storedBubbleVisualMode = localStorage.getItem('bubblebreaker.bubbleVisualMode');
         let selectedBubbleVisualMode = typeof setBubbleVisualMode === 'function'
-            ? setBubbleVisualMode(['classic', 'cosmic'].includes(storedBubbleVisualMode) ? storedBubbleVisualMode : 'network')
+            ? setBubbleVisualMode(bubbleVisualModeOptions.includes(storedBubbleVisualMode) ? storedBubbleVisualMode : 'network')
             : 'network';
         bubbleVisualModeButtons.forEach(button => {
             const isSelected = button.dataset.bubbleVisualMode === selectedBubbleVisualMode;
@@ -249,7 +271,15 @@
                     option.setAttribute('aria-pressed', String(isSelected));
                     option.classList.toggle('is-selected', isSelected);
                 });
-                const visualLabel = selectedBubbleVisualMode === 'network' ? '装飾あり' : selectedBubbleVisualMode === 'cosmic' ? '宇宙テーマ' : '装飾なし';
+                const visualLabel = selectedBubbleVisualMode === 'network'
+                    ? '装飾あり'
+                    : selectedBubbleVisualMode === 'classic'
+                        ? '装飾なし'
+                        : selectedBubbleVisualMode === 'cosmic'
+                            ? '宇宙テーマ'
+                            : selectedBubbleVisualMode === 'deepSea'
+                                ? '深海テーマ'
+                                : 'データ空間テーマ';
                 showToast(`${visualLabel}を表示しました`);
             });
         });

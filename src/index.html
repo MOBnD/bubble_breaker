@@ -30,50 +30,59 @@
     <div id="ui-layer" class="cosmic-ui">
         <button id="btn-reopen-panels" class="hud-control hidden absolute bottom-6 right-6 z-[79] glass-panel px-3 py-2 rounded-lg text-xs text-white pointer-events-auto cursor-pointer">▣ パネルを開く</button>
         <div id="panel-bgm" class="command-console absolute top-16 right-6 z-[80] glass-panel rounded-lg p-2 text-[10px] text-white pointer-events-auto flex flex-col gap-1">
-            <button data-close-panel="panel-bgm" class="self-end text-gray-300 hover:text-white" type="button">×</button>
-            <div class="console-heading"><span class="console-kicker">COSMIC CONTROL</span><span class="console-signal">● LIVE</span></div>
-            <button id="btn-sound-toggle" class="sound-control" type="button">🔊 効果音ON</button>
-            <label class="flex items-center gap-2"><input id="bgm-toggle" type="checkbox" checked> BGM</label>
-            <label class="flex items-center gap-2"><input id="ngc3324-toggle" type="checkbox" checked> NGC 3324背景</label>
-            <label class="flex items-center gap-2"><input id="warp-haze-toggle" type="checkbox" checked> ワープ中の靄</label>
-            <div class="bubble-visual-control">
-                <span class="bubble-visual-label">BUBBLE FORM / VISUAL MODE</span>
-                <div class="bubble-visual-options" role="group" aria-label="バブル表示デザイン">
-                    <button type="button" data-bubble-visual-mode="network" aria-pressed="true">装飾あり</button>
-                    <button type="button" data-bubble-visual-mode="classic" aria-pressed="false">装飾なし</button>
-                    <button type="button" data-bubble-visual-mode="cosmic" aria-pressed="false">宇宙テーマ</button>
-                </div>
+            <div class="console-heading">
+                <span class="console-kicker">COSMIC CONTROL</span>
+                <span class="console-heading-actions">
+                    <span class="console-signal">● LIVE</span>
+                    <button id="btn-collapse-panel-bgm" class="panel-collapse-button" data-collapse-panel="panel-bgm" aria-controls="panel-bgm-content" aria-expanded="true" type="button" title="設定を畳む">−</button>
+                </span>
             </div>
-            <label class="theme-select-row">球色テーマ
-                <select id="bubble-color-theme" class="bg-black/60 rounded px-1 py-0.5">
-                    <option value="legacy">既存配色</option>
-                    <option value="neon">ネオン</option>
-                    <option value="warm">暖色</option>
-                    <option value="space">宇宙</option>
-                    <option value="deepSea">深海</option>
-                    <option value="data">データ空間</option>
-                </select>
-            </label>
-            <label class="theme-select-row">背景テーマ
-                <select id="background-theme" class="bg-black/60 rounded px-1 py-0.5">
-                    <option value="space">宇宙</option>
-                    <option value="deepSea">深海</option>
-                    <option value="data">データ空間</option>
-                </select>
-            </label>
-            <div class="panel-size-control">
-                <span class="panel-size-label">EXPLORATION PANEL / SIZE</span>
-                <div class="panel-size-options" role="group" aria-label="探索パネルの大きさ">
-                    <button type="button" data-panel-size="small" aria-pressed="false">小</button>
-                    <button type="button" data-panel-size="medium" aria-pressed="true">中</button>
-                    <button type="button" data-panel-size="large" aria-pressed="false">大</button>
+            <div id="panel-bgm-content" class="panel-collapsible-content">
+                <button id="btn-sound-toggle" class="sound-control" type="button">🔊 効果音ON</button>
+                <label class="flex items-center gap-2"><input id="bgm-toggle" type="checkbox" checked> BGM</label>
+                <label class="flex items-center gap-2"><input id="ngc3324-toggle" type="checkbox" checked> NGC 3324背景</label>
+                <label class="flex items-center gap-2"><input id="warp-haze-toggle" type="checkbox" checked> ワープ中の靄</label>
+                <div class="bubble-visual-control">
+                    <span class="bubble-visual-label">BUBBLE FORM / VISUAL MODE</span>
+                    <div class="bubble-visual-options" role="group" aria-label="バブル表示デザイン">
+                        <button type="button" data-bubble-visual-mode="network" aria-pressed="true">装飾あり</button>
+                        <button type="button" data-bubble-visual-mode="classic" aria-pressed="false">装飾なし</button>
+                        <button type="button" data-bubble-visual-mode="cosmic" aria-pressed="false">宇宙テーマ</button>
+                        <button type="button" data-bubble-visual-mode="deepSea" aria-pressed="false">深海</button>
+                        <button type="button" data-bubble-visual-mode="data" aria-pressed="false">データ空間</button>
+                    </div>
                 </div>
+                <label class="theme-select-row">球色テーマ
+                    <select id="bubble-color-theme" class="bg-black/60 rounded px-1 py-0.5">
+                        <option value="legacy">既存配色</option>
+                        <option value="neon">ネオン</option>
+                        <option value="warm">暖色</option>
+                        <option value="space">宇宙</option>
+                        <option value="deepSea">深海</option>
+                        <option value="data">データ空間</option>
+                    </select>
+                </label>
+                <label class="theme-select-row">背景テーマ
+                    <select id="background-theme" class="bg-black/60 rounded px-1 py-0.5">
+                        <option value="space">宇宙</option>
+                        <option value="deepSea">深海</option>
+                        <option value="data">データ空間</option>
+                    </select>
+                </label>
+                <div class="panel-size-control">
+                    <span class="panel-size-label">EXPLORATION PANEL / SIZE</span>
+                    <div class="panel-size-options" role="group" aria-label="探索パネルの大きさ">
+                        <button type="button" data-panel-size="small" aria-pressed="false">小</button>
+                        <button type="button" data-panel-size="medium" aria-pressed="true">中</button>
+                        <button type="button" data-panel-size="large" aria-pressed="false">大</button>
+                    </div>
+                </div>
+                <label class="flex items-center gap-2">音量 <input id="audio-volume" type="range" min="0" max="1" step="0.05" value="0.45"></label>
+                <select id="bgm-type" class="bg-black/60 rounded px-1 py-0.5"><option value="宇宙遊泳.mp3">宇宙遊泳.mp3</option><option value="星間宇宙.mp3">星間宇宙.mp3</option><option value="edgeworth-kuiper-belt.mp3">エッジワース・カイパーベルト</option><option value="Far_away_from_the_Earth.mp3">Far_away_from_the_Earth.mp3</option></select>
+                <label class="flex items-center gap-2"><input id="bgm-auto-next" type="checkbox"> 曲終了で次曲</label>
+                <select id="bgm-transition" class="bg-black/60 rounded px-1 py-0.5"><option value="persist">遷移しても継続</option><option value="change">カテゴリ移動で変更</option></select>
+                <label class="flex items-center gap-2"><input id="explorer-mode" type="checkbox"> 探索者モード（階層ズームのみ）</label>
             </div>
-            <label class="flex items-center gap-2">音量 <input id="audio-volume" type="range" min="0" max="1" step="0.05" value="0.45"></label>
-            <select id="bgm-type" class="bg-black/60 rounded px-1 py-0.5"><option value="宇宙遊泳.mp3">宇宙遊泳.mp3</option><option value="星間宇宙.mp3">星間宇宙.mp3</option><option value="edgeworth-kuiper-belt.mp3">エッジワース・カイパーベルト</option><option value="Far_away_from_the_Earth.mp3">Far_away_from_the_Earth.mp3</option></select>
-            <label class="flex items-center gap-2"><input id="bgm-auto-next" type="checkbox"> 曲終了で次曲</label>
-            <select id="bgm-transition" class="bg-black/60 rounded px-1 py-0.5"><option value="persist">遷移しても継続</option><option value="change">カテゴリ移動で変更</option></select>
-            <label class="flex items-center gap-2"><input id="explorer-mode" type="checkbox"> 探索者モード（階層ズームのみ）</label>
         </div>
         <audio id="bgm-audio" loop preload="none"></audio>
         
