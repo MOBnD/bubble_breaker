@@ -3,44 +3,7 @@
         // ==========================================
         const clock = new THREE.Clock(); // 経過時間を計るためのクラス
         let lastAnimationTimestamp = performance.now();
-        const warpStarStreakGroup = new THREE.Group();
-        const warpStarStreaks = [];
-        const warpStarStreakMaterial = new THREE.LineBasicMaterial({ color: 0xd8f4ff, transparent: true, opacity: 0.82, depthWrite: false, blending: THREE.AdditiveBlending });
-        for (let index = 0; index < 260; index++) {
-            const length = 80 + Math.random() * 260;
-            const geometry = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 0, -length)]);
-            const streak = new THREE.Line(geometry, warpStarStreakMaterial);
-            const entry = { mesh: streak, x: (Math.random() - 0.5) * 2400, y: (Math.random() - 0.5) * 1500, z: Math.random() * 2600 - 500, speed: 0.7 + Math.random() * 1.3, length };
-            streak.position.set(entry.x, entry.y, entry.z);
-            warpStarStreakGroup.add(streak);
-            warpStarStreaks.push(entry);
-        }
-        warpStarStreakGroup.visible = false;
-        scene.add(warpStarStreakGroup);
         let universeRevealState = null;
-
-        function updateWarpStarStreaks(deltaSeconds, active, worldSpeed = 0) {
-            if (!active) {
-                warpStarStreakGroup.visible = false;
-                return;
-            }
-            warpStarStreakGroup.visible = true;
-            warpStarStreakGroup.position.copy(camera.position);
-            const forward = controls.target.clone().sub(camera.position).normalize();
-            warpStarStreakGroup.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, -1), forward);
-            const normalizedSpeed = Math.min(1, Math.max(0.12, worldSpeed / 900));
-            warpStarStreakMaterial.opacity = 0.22 + normalizedSpeed * 0.7;
-            warpStarStreaks.forEach(entry => {
-                entry.z -= (14 + normalizedSpeed * 180) * entry.speed * deltaSeconds;
-                if (entry.z < -700) {
-                    entry.z = 2600 + Math.random() * 500;
-                    entry.x = (Math.random() - 0.5) * 2400;
-                    entry.y = (Math.random() - 0.5) * 1500;
-                }
-                entry.mesh.position.set(entry.x, entry.y, entry.z);
-                entry.mesh.scale.z = 0.65 + normalizedSpeed * 2.8;
-            });
-        }
 
         function getLoadingBlackHoleTarget(index) {
             if (galaxyBlackHoleTargets[index]) {
@@ -67,27 +30,32 @@
         function getWarpCandidateStops(destinationIndex) {
             const candidates = [];
             const obstacles = getWarpObstacleTargets();
-            const randomDirection = () => {
-                const direction = new THREE.Vector3(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5);
-                return direction.normalize();
-            };
             galaxyBlackHoleTargets.forEach((target, index) => {
                 if (index === destinationIndex) return;
                 const radius = target.galaxy?.userData?.galaxyRadius || 300;
-                for (let copy = 0; copy < 2; copy++) {
-                    const offset = randomDirection().multiplyScalar(radius * (2.45 + Math.random() * 1.25));
-                    const position = target.position.clone().add(offset);
-                    candidates.push({ type: 'galaxy-edge', sourceIndex: index, position });
-                }
+                candidates.push({
+                    type: 'galaxy',
+                    sourceIndex: index,
+                    anchor: target.position.clone(),
+                    flybyRadius: Math.max(760, radius * 1.45)
+                });
             });
             cosmicSystems.forEach((entry, index) => {
-                const position = entry.system.getWorldPosition(new THREE.Vector3());
-                candidates.push({ type: 'stellar-system', sourceIndex: index, position });
+                candidates.push({
+                    type: 'stellar-system',
+                    sourceIndex: index,
+                    anchor: entry.system.getWorldPosition(new THREE.Vector3()),
+                    flybyRadius: Math.max(120, entry.scale * 3.6)
+                });
             });
             const safeRadius = Math.max(680, obstacles.reduce((maximum, obstacle) => Math.max(maximum, obstacle.radius * 8), 0));
-            const safeCandidates = candidates.filter(candidate => obstacles.every(obstacle => candidate.position.distanceTo(obstacle.position) > safeRadius));
+            const safeCandidates = candidates.filter(candidate => obstacles.every(obstacle => {
+                if (candidate.type === 'galaxy' && obstacle.index === candidate.sourceIndex) return true;
+                return candidate.anchor.distanceTo(obstacle.position) > Math.max(80, safeRadius - candidate.flybyRadius);
+            }));
             return {
-                galaxyCandidates: safeCandidates.filter(candidate => candidate.type === 'galaxy-edge'),
+                candidates: safeCandidates,
+                galaxyCandidates: safeCandidates.filter(candidate => candidate.type === 'galaxy'),
                 stellarCandidates: safeCandidates.filter(candidate => candidate.type === 'stellar-system'),
                 safeRadius
             };
@@ -105,6 +73,50 @@
             return true;
         }
 
+        function selectWarpCandidates(candidatePools, desiredCount, start) {
+            const selected = [];
+            const used = new Set();
+            const stellarMinimum = Math.min(3, desiredCount, candidatePools.stellarCandidates.length);
+            let cursor = start.clone();
+            while (selected.length < desiredCount && used.size < candidatePools.candidates.length) {
+                const stellarSelected = selected.filter(candidate => candidate.type === 'stellar-system').length;
+                const mustSelectStellar = stellarSelected < stellarMinimum;
+                const pool = mustSelectStellar ? candidatePools.stellarCandidates : candidatePools.candidates;
+                let best = null;
+                let bestScore = -Infinity;
+                pool.forEach(candidate => {
+                    const candidateIndex = candidatePools.candidates.indexOf(candidate);
+                    if (candidateIndex < 0 || used.has(candidateIndex)) return;
+                    const nearestDistance = selected.length
+                        ? Math.min(...selected.map(stop => stop.anchor.distanceTo(candidate.anchor)))
+                        : candidate.anchor.distanceTo(cursor);
+                    const distanceFromStart = candidate.anchor.distanceTo(start);
+                    const score = nearestDistance * 0.78 + distanceFromStart * 0.2 + Math.random() * 2600;
+                    if (score > bestScore) {
+                        best = { candidate, index: candidateIndex };
+                        bestScore = score;
+                    }
+                });
+                if (!best) break;
+                used.add(best.index);
+                selected.push(best.candidate);
+                cursor = best.candidate.anchor;
+            }
+            return selected;
+        }
+
+        function getSwingBySide(anchor, incomingRadial, outgoingRadial) {
+            const planeNormal = new THREE.Vector3().crossVectors(incomingRadial, outgoingRadial);
+            if (planeNormal.lengthSq() < 0.0001) {
+                planeNormal.copy(new THREE.Vector3(0, 1, 0).cross(incomingRadial));
+                if (planeNormal.lengthSq() < 0.0001) planeNormal.set(1, 0, 0).cross(incomingRadial);
+            }
+            planeNormal.normalize();
+            const radialBisector = incomingRadial.clone().add(outgoingRadial);
+            if (radialBisector.lengthSq() < 0.0001) radialBisector.copy(planeNormal);
+            return radialBisector.normalize().addScaledVector(planeNormal, 0.82).normalize();
+        }
+
         function createLoadingRoute(target, direction, distance, destinationIndex) {
             const horizonRadius = getEventHorizonRadius(target);
             const start = target.position.clone().addScaledVector(direction, distance);
@@ -112,43 +124,36 @@
             const preEntry = target.position.clone().addScaledVector(direction, preEntryDistance);
             const end = target.position.clone().addScaledVector(direction, horizonRadius);
             const candidatePools = getWarpCandidateStops(destinationIndex);
-            const desiredCount = 10 + Math.floor(Math.random() * 11);
-            const selected = [];
-            let cursor = start.clone();
-            const used = new Set();
-            const candidates = candidatePools.galaxyCandidates;
-            while (selected.length < desiredCount && used.size < candidates.length) {
-                let best = null;
-                let bestScore = -Infinity;
-                candidates.forEach((candidate, index) => {
-                    if (used.has(index)) return;
-                    const nearestSelected = selected.length
-                        ? Math.min(...selected.map(stop => stop.position.distanceTo(candidate.position)))
-                        : candidate.position.distanceTo(cursor);
-                    const destinationDistance = candidate.position.distanceTo(target.position);
-                    const score = nearestSelected * 0.72 + destinationDistance * 0.18 + Math.random() * 1800;
-                    if (score > bestScore) {
-                        best = { candidate, index };
-                        bestScore = score;
-                    }
-                });
-                if (!best) break;
-                used.add(best.index);
-                selected.push(best.candidate);
-                cursor = best.candidate.position;
-            }
-            const points = [start, ...selected.map(stop => stop.position.clone()), preEntry, end];
+            const desiredCount = Math.round(Math.min(WARP_STOP_COUNT_MAX, Math.max(WARP_STOP_COUNT_MIN, loadingAnimation?.stopCount || warpStopCount)));
+            const selected = selectWarpCandidates(candidatePools, desiredCount, start);
+            const points = [start];
+            const stopPointIndices = [];
+            selected.forEach((candidate, index) => {
+                const previousAnchor = index === 0 ? start : selected[index - 1].anchor;
+                const nextAnchor = index === selected.length - 1 ? preEntry : selected[index + 1].anchor;
+                const incomingRadial = previousAnchor.clone().sub(candidate.anchor).normalize();
+                const outgoingRadial = nextAnchor.clone().sub(candidate.anchor).normalize();
+                const swingBySide = getSwingBySide(candidate.anchor, incomingRadial, outgoingRadial);
+                const clearance = candidate.flybyRadius;
+                const inbound = candidate.anchor.clone().addScaledVector(incomingRadial, clearance);
+                const nearPoint = candidate.anchor.clone().addScaledVector(swingBySide, clearance);
+                const outbound = candidate.anchor.clone().addScaledVector(outgoingRadial, clearance);
+                points.push(inbound, nearPoint, outbound);
+                stopPointIndices.push(points.length - 2);
+                candidate.flybyPosition = nearPoint;
+            });
+            points.push(preEntry, end);
             const route = new THREE.CatmullRomCurve3(points, false, 'centripetal', 0.22);
             const lengths = [0];
             for (let index = 1; index < points.length; index++) lengths[index] = lengths[index - 1] + points[index].distanceTo(points[index - 1]);
             const totalLength = Math.max(1, lengths[lengths.length - 1]);
-            const stopProgresses = selected.map((_, index) => lengths[index + 1] / totalLength);
+            const stopProgresses = stopPointIndices.map(pointIndex => lengths[pointIndex] / totalLength);
             const preEntryProgress = lengths[lengths.length - 2] / totalLength;
             return {
                 route,
                 stops: selected,
-                galaxyStops: selected,
-                stellarStops: candidatePools.stellarCandidates,
+                galaxyStops: selected.filter(stop => stop.type === 'galaxy'),
+                stellarStops: selected.filter(stop => stop.type === 'stellar-system'),
                 safeRadius: candidatePools.safeRadius,
                 stopProgresses,
                 preEntryProgress,
@@ -185,9 +190,10 @@
             loadingAnimation = {
                 startedAt: now,
                 segmentStartedAt: now,
-                segmentDuration: 60000,
+                segmentDuration: 60000 / warpSpeedFactor,
                 approachDistance: 16000,
-                maxSpeed: 900,
+                maxSpeed: 900 * warpSpeedFactor,
+                stopCount: warpStopCount,
                 approachDirection: new THREE.Vector3(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).normalize(),
                 targetIndex: 0,
                 route: null,
@@ -225,10 +231,18 @@
             const target = getLoadingBlackHoleTarget(loadingAnimation.targetIndex);
             const blackHole = target.position;
             const eventHorizonRadius = getEventHorizonRadius(target);
+            loadingAnimation.segmentDuration = 60000 / Math.max(WARP_SPEED_MIN, Math.min(WARP_SPEED_MAX, warpSpeedFactor));
+            loadingAnimation.maxSpeed = 900 * Math.max(WARP_SPEED_MIN, Math.min(WARP_SPEED_MAX, warpSpeedFactor));
             if (!loadingAnimation.route || loadingAnimation.routeTargetIndex !== loadingAnimation.targetIndex) initializeLoadingRoute(target);
             const routeLength = Math.max(1, loadingAnimation.route.getLength());
             const preEntryProgress = Math.min(0.995, loadingAnimation.preEntryProgress || 0.96);
+            const finalStopProgress = loadingAnimation.routeStopProgresses.length
+                ? loadingAnimation.routeStopProgresses[loadingAnimation.routeStopProgresses.length - 1]
+                : 0;
+            const finalApproachStart = finalStopProgress > 0 ? Math.max(0, finalStopProgress - 0.06) : preEntryProgress;
             if (!loadingAnimation.preEntryStartedAt && loadingAnimation.routeProgress < preEntryProgress) {
+                camera.fov = configuredFieldOfView;
+                camera.updateProjectionMatrix();
                 const distanceToStop = Math.min(...(loadingAnimation.routeStopProgresses || []).map(progress => Math.abs(loadingAnimation.routeProgress - progress)), 1);
                 const nearestStopFactor = distanceToStop < 0.035 ? 0.28 + Math.min(0.72, distanceToStop / 0.035 * 0.72) : 1;
                 const routeDurationSeconds = loadingAnimation.segmentDuration / 1000;
@@ -238,18 +252,24 @@
                 loadingAnimation.routeProgress = Math.min(preEntryProgress, loadingAnimation.routeProgress + loadingAnimation.routeSpeed * deltaSeconds);
                 const lookAhead = Math.min(0.035, 220 / routeLength);
                 camera.position.copy(loadingAnimation.route.getPointAt(loadingAnimation.routeProgress));
-                targetControlTarget.copy(loadingAnimation.route.getPointAt(Math.min(preEntryProgress, loadingAnimation.routeProgress + lookAhead)));
+                const lookProgress = Math.min(preEntryProgress, loadingAnimation.routeProgress + lookAhead);
+                if (loadingAnimation.routeProgress >= finalApproachStart) targetControlTarget.copy(blackHole);
+                else targetControlTarget.copy(loadingAnimation.route.getPointAt(lookProgress));
                 updateZoomSound(Math.min(1, loadingAnimation.routeProgress * 1.2));
             } else if (!loadingAnimation.preEntryStartedAt) {
                 loadingAnimation.preEntryStartedAt = now;
                 loadingAnimation.routeProgress = preEntryProgress;
                 camera.position.copy(loadingAnimation.route.getPointAt(preEntryProgress));
                 targetControlTarget.copy(blackHole);
+                camera.fov = configuredFieldOfView;
+                camera.updateProjectionMatrix();
                 updateZoomSound(0.58);
             } else if (!loadingAnimation.entryStartedAt) {
                 const holdProgress = Math.min(1, (now - loadingAnimation.preEntryStartedAt) / 1000);
                 camera.position.copy(loadingAnimation.route.getPointAt(preEntryProgress));
                 targetControlTarget.copy(blackHole);
+                camera.fov = configuredFieldOfView;
+                camera.updateProjectionMatrix();
                 updateZoomSound(0.42);
                 if (holdProgress >= 1) loadingAnimation.entryStartedAt = now;
             } else {
@@ -258,6 +278,9 @@
                 const preEntryPosition = loadingAnimation.route.getPointAt(preEntryProgress);
                 camera.position.copy(preEntryPosition).lerp(blackHole.clone().addScaledVector(loadingAnimation.approachDirection, eventHorizonRadius), exponentialProgress);
                 targetControlTarget.copy(blackHole);
+                const fovProgress = Math.pow(entryProgress, 3);
+                camera.fov = configuredFieldOfView + (Math.max(8, configuredFieldOfView * 0.16) - configuredFieldOfView) * fovProgress;
+                camera.updateProjectionMatrix();
                 updateZoomSound(0.72 + exponentialProgress * 0.28);
                 if (entryProgress < 1) {
                     camera.lookAt(targetControlTarget);
@@ -510,8 +533,8 @@
                 
                 // カメラをZ軸の奥方向マイナスへ猛烈な速度で進める
                 camera.position.z -= diveVelocity; 
-                // 視野角(FOV)も極端に広げて歪ませることで、スピード感を強調
-                camera.fov = 60 + Math.pow(progress, 8) * 120; 
+                // 旧式の単純ダイブ経路でも、ユーザー設定のFOVを尊重する。
+                camera.fov = configuredFieldOfView;
                 camera.updateProjectionMatrix(); // カメラ設定を変更した時はこれを呼ぶ必要がある
                 
                 // 星は回転させず、カメラの移動だけで同一3D空間を横切る速度感を出す。
@@ -549,11 +572,6 @@
                     if (state.screen === 'SINGLE') controls.enabled = true;
                 }
             }
-            const warpWorldSpeed = loadingAnimation && loadingAnimation.route
-                ? loadingAnimation.routeSpeed * loadingAnimation.route.getLength()
-                : 0;
-            updateWarpStarStreaks(deltaSeconds, Boolean(loadingAnimation), warpWorldSpeed);
-            
             // ダイブ中以外は、背景の星屑宇宙をゆっくり回転させて雄大さを出す
             // 星・銀河・バブルは同一ワールドの固定オブジェクトとして扱う。
 
@@ -840,6 +858,10 @@
 
             // 最後に、全ての計算結果をもとに画面を描画（レンダリング）する
             renderer.render(scene, camera);
+            const motionBlurSpeed = loadingAnimation && loadingAnimation.route
+                ? Math.min(1, Math.max(0, loadingAnimation.routeSpeed * loadingAnimation.route.getLength() / 900))
+                : 0;
+            updateMotionBlurFrame(Boolean(loadingAnimation), motionBlurSpeed);
         }
 
         // --- 画面サイズが変更された時の対応処理 ---
@@ -849,6 +871,7 @@
             camera.aspect = width / height; // カメラの縦横比を修正
             camera.updateProjectionMatrix(); // カメラ設定を更新
             renderer.setSize(width, height); // レンダラーのサイズを更新
+            resizeMotionBlurLayer(width, height);
         });
 
         // アニメーションループを開始！

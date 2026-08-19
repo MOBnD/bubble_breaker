@@ -22,6 +22,50 @@
         renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)); // 高解像度ディスプレイ対応
         container.appendChild(renderer.domElement);
 
+        // 航行中だけ使う軽量フレーム残像レイヤー。WebGLの描画結果を薄く重ね、
+        // 追加のポストプロセス依存なしで速度感を表現する。
+        const motionBlurCanvas = document.createElement('canvas');
+        motionBlurCanvas.id = 'motion-blur-layer';
+        motionBlurCanvas.setAttribute('aria-hidden', 'true');
+        const motionBlurContext = motionBlurCanvas.getContext('2d');
+        container.appendChild(motionBlurCanvas);
+        let motionBlurEnabled = localStorage.getItem('bubblebreaker.motionBlur') !== 'off';
+        function resizeMotionBlurLayer(width, height) {
+            const pixelRatio = Math.min(window.devicePixelRatio || 1, 2);
+            motionBlurCanvas.style.width = `${width}px`;
+            motionBlurCanvas.style.height = `${height}px`;
+            motionBlurCanvas.width = Math.max(1, Math.floor(width * pixelRatio));
+            motionBlurCanvas.height = Math.max(1, Math.floor(height * pixelRatio));
+            if (motionBlurContext) motionBlurContext.clearRect(0, 0, motionBlurCanvas.width, motionBlurCanvas.height);
+        }
+        function clearMotionBlurLayer() {
+            if (motionBlurContext) motionBlurContext.clearRect(0, 0, motionBlurCanvas.width, motionBlurCanvas.height);
+        }
+        function updateMotionBlurFrame(active, normalizedSpeed = 0) {
+            if (!motionBlurContext || !motionBlurEnabled || !active) {
+                clearMotionBlurLayer();
+                return;
+            }
+            const speed = Math.max(0, Math.min(1, normalizedSpeed));
+            const fadeAlpha = 0.1 + speed * 0.14;
+            const imageAlpha = 0.08 + speed * 0.18;
+            motionBlurContext.globalCompositeOperation = 'destination-out';
+            motionBlurContext.globalAlpha = fadeAlpha;
+            motionBlurContext.fillStyle = '#000';
+            motionBlurContext.fillRect(0, 0, motionBlurCanvas.width, motionBlurCanvas.height);
+            motionBlurContext.globalCompositeOperation = 'source-over';
+            motionBlurContext.globalAlpha = imageAlpha;
+            motionBlurContext.drawImage(renderer.domElement, 0, 0, motionBlurCanvas.width, motionBlurCanvas.height);
+            motionBlurContext.globalAlpha = 1;
+        }
+        window.setMotionBlurEnabled = function(enabled, persist = true) {
+            motionBlurEnabled = Boolean(enabled);
+            if (!motionBlurEnabled) clearMotionBlurLayer();
+            if (persist) localStorage.setItem('bubblebreaker.motionBlur', motionBlurEnabled ? 'on' : 'off');
+            return motionBlurEnabled;
+        };
+        resizeMotionBlurLayer(window.innerWidth, window.innerHeight);
+
         // OrbitControls：マウスのドラッグで視点移動するための標準プラグイン
         const controls = new THREE.OrbitControls(camera, renderer.domElement);
         controls.enableDamping = true; // 視点移動に滑らかな慣性をつける
@@ -889,6 +933,44 @@
         let groupEntryCameraDistance = 25;
         let singleViewDirection = new THREE.Vector3(0, 0, 1);
         let explorerSelectedBubbleId = null;
+        const FIELD_OF_VIEW_MIN = 35;
+        const FIELD_OF_VIEW_MAX = 100;
+        const DEFAULT_FIELD_OF_VIEW = 60;
+        const WARP_SPEED_MIN = 0.25;
+        const WARP_SPEED_MAX = 4;
+        const DEFAULT_WARP_SPEED = 1;
+        const WARP_STOP_COUNT_MIN = 10;
+        const WARP_STOP_COUNT_MAX = 20;
+        const DEFAULT_WARP_STOP_COUNT = 15;
+        function clampSetting(value, minimum, maximum, fallback) {
+            if (value === null || value === undefined || value === '') return fallback;
+            const numeric = Number(value);
+            return Number.isFinite(numeric) ? Math.min(maximum, Math.max(minimum, numeric)) : fallback;
+        }
+        let configuredFieldOfView = clampSetting(localStorage.getItem('bubblebreaker.fov'), FIELD_OF_VIEW_MIN, FIELD_OF_VIEW_MAX, DEFAULT_FIELD_OF_VIEW);
+        let warpSpeedFactor = clampSetting(localStorage.getItem('bubblebreaker.warpSpeed'), WARP_SPEED_MIN, WARP_SPEED_MAX, DEFAULT_WARP_SPEED);
+        let warpStopCount = Math.round(clampSetting(localStorage.getItem('bubblebreaker.warpStops'), WARP_STOP_COUNT_MIN, WARP_STOP_COUNT_MAX, DEFAULT_WARP_STOP_COUNT));
+        camera.fov = configuredFieldOfView;
+        camera.updateProjectionMatrix();
+        window.setFieldOfView = function(value, persist = true) {
+            configuredFieldOfView = clampSetting(value, FIELD_OF_VIEW_MIN, FIELD_OF_VIEW_MAX, DEFAULT_FIELD_OF_VIEW);
+            if (!loadingAnimation) {
+                camera.fov = configuredFieldOfView;
+                camera.updateProjectionMatrix();
+            }
+            if (persist) localStorage.setItem('bubblebreaker.fov', String(configuredFieldOfView));
+            return configuredFieldOfView;
+        };
+        window.setWarpSpeedFactor = function(value, persist = true) {
+            warpSpeedFactor = clampSetting(value, WARP_SPEED_MIN, WARP_SPEED_MAX, DEFAULT_WARP_SPEED);
+            if (persist) localStorage.setItem('bubblebreaker.warpSpeed', String(warpSpeedFactor));
+            return warpSpeedFactor;
+        };
+        window.setWarpStopCount = function(value, persist = true) {
+            warpStopCount = Math.round(clampSetting(value, WARP_STOP_COUNT_MIN, WARP_STOP_COUNT_MAX, DEFAULT_WARP_STOP_COUNT));
+            if (persist) localStorage.setItem('bubblebreaker.warpStops', String(warpStopCount));
+            return warpStopCount;
+        };
         window.markBubbleAnalysisComplete = function(bubbleId) {
             const bubble = activeDB && Object.values(activeDB).flatMap(group => group.bubbles || []).find(item => String(item.id) === String(bubbleId));
             if (bubble) bubble.analysisCompletionAt = performance.now();

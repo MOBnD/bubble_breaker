@@ -41,6 +41,21 @@
                 <label class="flex items-center gap-2"><input id="bgm-toggle" type="checkbox" checked> BGM</label>
                 <label class="flex items-center gap-2"><input id="ngc3324-toggle" type="checkbox" checked> NGC 3324背景</label>
                 <label class="flex items-center gap-2"><input id="warp-haze-toggle" type="checkbox" checked> ワープ中の靄</label>
+                <div class="navigation-settings" aria-label="航行設定">
+                    <label class="navigation-range-row" for="fov-range">
+                        <span>視野角 FOV <output id="fov-value" for="fov-range">60°</output></span>
+                        <input id="fov-range" type="range" min="35" max="100" step="1" value="60">
+                    </label>
+                    <label class="navigation-range-row" for="warp-speed-range">
+                        <span>航行速度 <output id="warp-speed-value" for="warp-speed-range">1.00×</output></span>
+                        <input id="warp-speed-range" type="range" min="0.25" max="4" step="0.25" value="1">
+                    </label>
+                    <label class="navigation-range-row" for="warp-stops-range">
+                        <span>経由天体数 <output id="warp-stops-value" for="warp-stops-range">15個</output></span>
+                        <input id="warp-stops-range" type="range" min="10" max="20" step="1" value="15">
+                    </label>
+                    <label class="flex items-center gap-2"><input id="motion-blur-toggle" type="checkbox" checked> 航行モーションブラー</label>
+                </div>
                 <div class="bubble-visual-control">
                     <span class="bubble-visual-label">BUBBLE FORM / VISUAL MODE</span>
                     <div class="bubble-visual-options" role="group" aria-label="バブル表示デザイン">

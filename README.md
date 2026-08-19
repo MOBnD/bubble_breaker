@@ -10,7 +10,7 @@ Web Searchを使って入力意見からバブル宇宙を生成するThree.js�
 | `src/styles.css` | アプリ全体のスタイル定義。 |
 | `src/js/` | 固定データ、OpenAI API、音声、Three.js、画面遷移、イベント、アニメーションを機能別に分割したJavaScript。 |
 | `package.json` | ビルドと構文チェック用のnpmスクリプト定義。外部npm依存はありません。 |
-| `scripts/build.mjs` | `.env`または環境変数からAPIキー・モデルを読み込み、`dist/bb_proto4.html`へ設定を注入するビルドスクリプト。 |
+| `scripts/build.mjs` | `.env`または環境変数からモデル名だけを読み込み、APIキーを含めずに`dist/bb_proto4.html`へ結合するビルドスクリプト。 |
 | `scripts/check-inline-script.mjs` | `src/js/`のアプリケーションJavaScriptをビルド順に結合して構文チェックするスクリプト。 |
 | `.env.example` | 必要な環境変数のサンプル。実際のキーは`.env`に設定します。 |
 | `.gitignore` | `.env`、`dist/`、`node_modules/`をGit管理から除外します。 |
