@@ -106,5 +106,9 @@ assert.match(events, /bubblebreaker\.warpHaze/, 'warp haze preference should per
 assert.match(events, /warp-haze-active/, 'warp haze should be applied through a dedicated loading class');
 assert.match(indexHtml, /id="screen-input" class="input-screen screen-container/, 'the input screen should not carry permanent backdrop blur');
 assert.match(styles, /#screen-input\.warp-haze-active/, 'warp haze styling should be limited to the active loading state');
+assert.match(styles, /\.exploration-panel\.panel-size-small[\s\S]*?height: 42vh/, 'small exploration panels should have a distinct height');
+assert.match(styles, /\.exploration-panel\.panel-size-medium[\s\S]*?height: 58vh/, 'medium exploration panels should have a distinct height');
+assert.match(styles, /\.exploration-panel\.panel-size-large[\s\S]*?33vw/, 'large exploration panels should occupy about one third of the viewport width');
+assert.match(styles, /\.exploration-panel\.panel-size-large[\s\S]*?height: 76vh/, 'large exploration panels should be vertically expanded');
 
 console.log('Visual navigation invariants: OK');

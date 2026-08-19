@@ -259,11 +259,28 @@
             box-shadow: 0 0 14px rgba(72, 229, 255, 0.14);
         }
         .exploration-panel {
-            transition: width 220ms ease, max-height 220ms ease, padding 220ms ease;
+            min-height: 0;
+            overflow-y: auto;
+            transition: width 220ms ease, height 220ms ease, min-height 220ms ease, max-height 220ms ease, padding 220ms ease;
         }
-        .exploration-panel.panel-size-small { width: min(320px, calc(100vw - 28px)) !important; max-height: 66vh; }
-        .exploration-panel.panel-size-medium { width: min(400px, calc(100vw - 28px)) !important; max-height: 78vh; }
-        .exploration-panel.panel-size-large { width: min(520px, calc(100vw - 28px)) !important; max-height: 88vh; }
+        .exploration-panel.panel-size-small {
+            width: clamp(280px, 22vw, 340px) !important;
+            height: 42vh;
+            min-height: 320px;
+            max-height: 66vh;
+        }
+        .exploration-panel.panel-size-medium {
+            width: clamp(360px, 28vw, 440px) !important;
+            height: 58vh;
+            min-height: 440px;
+            max-height: 80vh;
+        }
+        .exploration-panel.panel-size-large {
+            width: clamp(440px, 33vw, 620px) !important;
+            height: 76vh;
+            min-height: 560px;
+            max-height: 92vh;
+        }
         .exploration-panel.panel-size-large { padding: 24px !important; }
         .exploration-panel.panel-size-small { gap: 15px !important; }
 
@@ -308,7 +325,12 @@
         }
         .portal-panel #btn-dive:hover { filter: saturate(1.2) brightness(1.12); transform: translateY(-1px); }
 
-        .exploration-screen { padding-right: clamp(16px, 4vw, 64px) !important; }
+        .exploration-screen {
+            align-items: center;
+            padding-top: clamp(84px, 10vh, 112px) !important;
+            padding-right: clamp(16px, 4vw, 64px) !important;
+            padding-bottom: clamp(16px, 4vh, 42px) !important;
+        }
         .exploration-panel {
             border-color: rgba(72, 229, 255, 0.34);
             background: linear-gradient(160deg, rgba(9, 24, 52, 0.9), rgba(5, 12, 29, 0.92));
@@ -342,5 +364,8 @@
             .portal-panel { width: calc(100% - 28px) !important; padding: 26px !important; }
             .exploration-screen { padding: 14px !important; padding-top: 92px !important; }
             .exploration-panel { width: min(100%, 420px) !important; }
+            .exploration-panel.panel-size-small { height: 42vh; min-height: 280px; max-height: 60vh; }
+            .exploration-panel.panel-size-medium { height: 56vh; min-height: 360px; max-height: 72vh; }
+            .exploration-panel.panel-size-large { height: 70vh; min-height: 460px; max-height: 84vh; }
         }
     </style>
