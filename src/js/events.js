@@ -101,7 +101,10 @@
                 showToast('検索に失敗したため固定データを使用します');
                 return normalizeFallbackUniverse(input);
             });
-            universePromise.then(universe => { pendingUniverse = universe; });
+            universePromise.then(universe => {
+                pendingUniverse = universe;
+                if (typeof window.markLoadingUniverseReady === 'function') window.markLoadingUniverseReady();
+            });
 
             panel.style.transform = 'scale(0.5)';
             panel.style.opacity = '0';
@@ -188,6 +191,8 @@
         const warpStopsRange = document.getElementById('warp-stops-range');
         const warpStopsValue = document.getElementById('warp-stops-value');
         const motionBlurToggle = document.getElementById('motion-blur-toggle');
+        const motionBlurStrengthRange = document.getElementById('motion-blur-strength-range');
+        const motionBlurStrengthValue = document.getElementById('motion-blur-strength-value');
         const bubbleVisualModeButtons = [...document.querySelectorAll('[data-bubble-visual-mode]')];
         const bubbleColorThemeControl = document.getElementById('bubble-color-theme');
         const backgroundThemeControl = document.getElementById('background-theme');
@@ -278,18 +283,24 @@
             if (fovValue) { fovValue.value = `${Number(fovRange.value).toFixed(0)}°`; fovValue.textContent = fovValue.value; }
             if (warpSpeedValue) { warpSpeedValue.value = `${Number(warpSpeedRange.value).toFixed(2)}×`; warpSpeedValue.textContent = warpSpeedValue.value; }
             if (warpStopsValue) { warpStopsValue.value = `${Number(warpStopsRange.value).toFixed(0)}個`; warpStopsValue.textContent = warpStopsValue.value; }
+            if (motionBlurStrengthValue) { motionBlurStrengthValue.value = `${Number(motionBlurStrengthRange.value).toFixed(0)}`; motionBlurStrengthValue.textContent = motionBlurStrengthValue.value; }
         }
         const storedFov = localStorage.getItem('bubblebreaker.fov');
         const storedWarpSpeed = localStorage.getItem('bubblebreaker.warpSpeed');
         const storedWarpStops = localStorage.getItem('bubblebreaker.warpStops');
         const initialFov = storedFov == null ? 60 : Number(storedFov);
         const initialWarpSpeed = storedWarpSpeed == null ? 1 : Number(storedWarpSpeed);
-        const initialWarpStops = storedWarpStops == null ? 15 : Number(storedWarpStops);
+        const initialWarpStops = storedWarpStops == null ? 5 : Number(storedWarpStops);
         fovRange.value = String(typeof window.setFieldOfView === 'function' ? window.setFieldOfView(initialFov, false) : (Number.isFinite(initialFov) ? initialFov : 60));
         warpSpeedRange.value = String(typeof window.setWarpSpeedFactor === 'function' ? window.setWarpSpeedFactor(initialWarpSpeed, false) : (Number.isFinite(initialWarpSpeed) ? initialWarpSpeed : 1));
-        warpStopsRange.value = String(typeof window.setWarpStopCount === 'function' ? window.setWarpStopCount(initialWarpStops, false) : (Number.isFinite(initialWarpStops) ? initialWarpStops : 15));
+        warpStopsRange.value = String(typeof window.setWarpStopCount === 'function' ? window.setWarpStopCount(initialWarpStops, false) : (Number.isFinite(initialWarpStops) ? initialWarpStops : 5));
         motionBlurToggle.checked = localStorage.getItem('bubblebreaker.motionBlur') !== 'off';
         if (typeof window.setMotionBlurEnabled === 'function') window.setMotionBlurEnabled(motionBlurToggle.checked, false);
+        const storedMotionBlurStrength = localStorage.getItem('bubblebreaker.motionBlurStrength');
+        const initialMotionBlurStrength = storedMotionBlurStrength == null ? 50 : Number(storedMotionBlurStrength);
+        motionBlurStrengthRange.value = String(typeof window.setMotionBlurStrength === 'function'
+            ? window.setMotionBlurStrength(initialMotionBlurStrength, false)
+            : (Number.isFinite(initialMotionBlurStrength) ? initialMotionBlurStrength : 50));
         updateNavigationRangeLabels();
         fovRange.addEventListener('input', () => {
             if (typeof window.setFieldOfView === 'function') window.setFieldOfView(fovRange.value);
@@ -301,6 +312,10 @@
         });
         warpStopsRange.addEventListener('input', () => {
             if (typeof window.setWarpStopCount === 'function') window.setWarpStopCount(warpStopsRange.value);
+            updateNavigationRangeLabels();
+        });
+        motionBlurStrengthRange.addEventListener('input', () => {
+            if (typeof window.setMotionBlurStrength === 'function') window.setMotionBlurStrength(motionBlurStrengthRange.value);
             updateNavigationRangeLabels();
         });
         motionBlurToggle.addEventListener('change', () => {

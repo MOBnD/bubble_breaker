@@ -48,13 +48,17 @@
                     </label>
                     <label class="navigation-range-row" for="warp-speed-range">
                         <span>航行速度 <output id="warp-speed-value" for="warp-speed-range">1.00×</output></span>
-                        <input id="warp-speed-range" type="range" min="0.25" max="4" step="0.25" value="1">
+                        <input id="warp-speed-range" type="range" min="0.25" max="3" step="0.25" value="1">
                     </label>
                     <label class="navigation-range-row" for="warp-stops-range">
-                        <span>経由天体数 <output id="warp-stops-value" for="warp-stops-range">15個</output></span>
-                        <input id="warp-stops-range" type="range" min="10" max="20" step="1" value="15">
+                        <span>経由天体数 <output id="warp-stops-value" for="warp-stops-range">5個</output></span>
+                        <input id="warp-stops-range" type="range" min="0" max="30" step="1" value="5">
                     </label>
                     <label class="flex items-center gap-2"><input id="motion-blur-toggle" type="checkbox" checked> 航行モーションブラー</label>
+                    <label class="navigation-range-row" for="motion-blur-strength-range">
+                        <span>ブラー強度 <output id="motion-blur-strength-value" for="motion-blur-strength-range">50</output></span>
+                        <input id="motion-blur-strength-range" type="range" min="0" max="100" step="1" value="50">
+                    </label>
                 </div>
                 <div class="bubble-visual-control">
                     <span class="bubble-visual-label">BUBBLE FORM / VISUAL MODE</span>

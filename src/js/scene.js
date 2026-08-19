@@ -30,6 +30,7 @@
         const motionBlurContext = motionBlurCanvas.getContext('2d');
         container.appendChild(motionBlurCanvas);
         let motionBlurEnabled = localStorage.getItem('bubblebreaker.motionBlur') !== 'off';
+        let motionBlurStrength = clampSceneSetting(localStorage.getItem('bubblebreaker.motionBlurStrength'), 0, 100, 50);
         function resizeMotionBlurLayer(width, height) {
             const pixelRatio = Math.min(window.devicePixelRatio || 1, 2);
             motionBlurCanvas.style.width = `${width}px`;
@@ -47,8 +48,13 @@
                 return;
             }
             const speed = Math.max(0, Math.min(1, normalizedSpeed));
+            const intensity = Math.max(0, Math.min(1, motionBlurStrength / 100));
+            if (intensity <= 0) {
+                clearMotionBlurLayer();
+                return;
+            }
             const fadeAlpha = 0.1 + speed * 0.14;
-            const imageAlpha = 0.08 + speed * 0.18;
+            const imageAlpha = (0.08 + speed * 0.18) * intensity;
             motionBlurContext.globalCompositeOperation = 'destination-out';
             motionBlurContext.globalAlpha = fadeAlpha;
             motionBlurContext.fillStyle = '#000';
@@ -63,6 +69,12 @@
             if (!motionBlurEnabled) clearMotionBlurLayer();
             if (persist) localStorage.setItem('bubblebreaker.motionBlur', motionBlurEnabled ? 'on' : 'off');
             return motionBlurEnabled;
+        };
+        window.setMotionBlurStrength = function(value, persist = true) {
+            motionBlurStrength = clampSceneSetting(value, 0, 100, 50);
+            if (motionBlurStrength <= 0) clearMotionBlurLayer();
+            if (persist) localStorage.setItem('bubblebreaker.motionBlurStrength', String(motionBlurStrength));
+            return motionBlurStrength;
         };
         resizeMotionBlurLayer(window.innerWidth, window.innerHeight);
 
@@ -937,23 +949,23 @@
         const FIELD_OF_VIEW_MAX = 100;
         const DEFAULT_FIELD_OF_VIEW = 60;
         const WARP_SPEED_MIN = 0.25;
-        const WARP_SPEED_MAX = 4;
+        const WARP_SPEED_MAX = 3;
         const DEFAULT_WARP_SPEED = 1;
-        const WARP_STOP_COUNT_MIN = 10;
-        const WARP_STOP_COUNT_MAX = 20;
-        const DEFAULT_WARP_STOP_COUNT = 15;
-        function clampSetting(value, minimum, maximum, fallback) {
+        const WARP_STOP_COUNT_MIN = 0;
+        const WARP_STOP_COUNT_MAX = 30;
+        const DEFAULT_WARP_STOP_COUNT = 5;
+        function clampSceneSetting(value, minimum, maximum, fallback) {
             if (value === null || value === undefined || value === '') return fallback;
             const numeric = Number(value);
             return Number.isFinite(numeric) ? Math.min(maximum, Math.max(minimum, numeric)) : fallback;
         }
-        let configuredFieldOfView = clampSetting(localStorage.getItem('bubblebreaker.fov'), FIELD_OF_VIEW_MIN, FIELD_OF_VIEW_MAX, DEFAULT_FIELD_OF_VIEW);
-        let warpSpeedFactor = clampSetting(localStorage.getItem('bubblebreaker.warpSpeed'), WARP_SPEED_MIN, WARP_SPEED_MAX, DEFAULT_WARP_SPEED);
-        let warpStopCount = Math.round(clampSetting(localStorage.getItem('bubblebreaker.warpStops'), WARP_STOP_COUNT_MIN, WARP_STOP_COUNT_MAX, DEFAULT_WARP_STOP_COUNT));
+        let configuredFieldOfView = clampSceneSetting(localStorage.getItem('bubblebreaker.fov'), FIELD_OF_VIEW_MIN, FIELD_OF_VIEW_MAX, DEFAULT_FIELD_OF_VIEW);
+        let warpSpeedFactor = clampSceneSetting(localStorage.getItem('bubblebreaker.warpSpeed'), WARP_SPEED_MIN, WARP_SPEED_MAX, DEFAULT_WARP_SPEED);
+        let warpStopCount = Math.round(clampSceneSetting(localStorage.getItem('bubblebreaker.warpStops'), WARP_STOP_COUNT_MIN, WARP_STOP_COUNT_MAX, DEFAULT_WARP_STOP_COUNT));
         camera.fov = configuredFieldOfView;
         camera.updateProjectionMatrix();
         window.setFieldOfView = function(value, persist = true) {
-            configuredFieldOfView = clampSetting(value, FIELD_OF_VIEW_MIN, FIELD_OF_VIEW_MAX, DEFAULT_FIELD_OF_VIEW);
+            configuredFieldOfView = clampSceneSetting(value, FIELD_OF_VIEW_MIN, FIELD_OF_VIEW_MAX, DEFAULT_FIELD_OF_VIEW);
             if (!loadingAnimation) {
                 camera.fov = configuredFieldOfView;
                 camera.updateProjectionMatrix();
@@ -962,12 +974,12 @@
             return configuredFieldOfView;
         };
         window.setWarpSpeedFactor = function(value, persist = true) {
-            warpSpeedFactor = clampSetting(value, WARP_SPEED_MIN, WARP_SPEED_MAX, DEFAULT_WARP_SPEED);
+            warpSpeedFactor = clampSceneSetting(value, WARP_SPEED_MIN, WARP_SPEED_MAX, DEFAULT_WARP_SPEED);
             if (persist) localStorage.setItem('bubblebreaker.warpSpeed', String(warpSpeedFactor));
             return warpSpeedFactor;
         };
         window.setWarpStopCount = function(value, persist = true) {
-            warpStopCount = Math.round(clampSetting(value, WARP_STOP_COUNT_MIN, WARP_STOP_COUNT_MAX, DEFAULT_WARP_STOP_COUNT));
+            warpStopCount = Math.round(clampSceneSetting(value, WARP_STOP_COUNT_MIN, WARP_STOP_COUNT_MAX, DEFAULT_WARP_STOP_COUNT));
             if (persist) localStorage.setItem('bubblebreaker.warpStops', String(warpStopCount));
             return warpStopCount;
         };

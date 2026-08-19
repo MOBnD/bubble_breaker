@@ -105,16 +105,56 @@
             return selected;
         }
 
-        function getSwingBySide(anchor, incomingRadial, outgoingRadial) {
-            const planeNormal = new THREE.Vector3().crossVectors(incomingRadial, outgoingRadial);
-            if (planeNormal.lengthSq() < 0.0001) {
-                planeNormal.copy(new THREE.Vector3(0, 1, 0).cross(incomingRadial));
-                if (planeNormal.lengthSq() < 0.0001) planeNormal.set(1, 0, 0).cross(incomingRadial);
+        function getSwingByAxis(incomingRadial, outgoingRadial) {
+            const axis = new THREE.Vector3().crossVectors(incomingRadial, outgoingRadial);
+            if (axis.lengthSq() < 0.0001) {
+                axis.copy(new THREE.Vector3(0, 1, 0).cross(incomingRadial));
+                if (axis.lengthSq() < 0.0001) axis.set(1, 0, 0).cross(incomingRadial);
             }
-            planeNormal.normalize();
-            const radialBisector = incomingRadial.clone().add(outgoingRadial);
-            if (radialBisector.lengthSq() < 0.0001) radialBisector.copy(planeNormal);
-            return radialBisector.normalize().addScaledVector(planeNormal, 0.82).normalize();
+            return axis.normalize();
+        }
+
+        function rotateRadial(radial, axis, angle) {
+            return radial.clone().applyQuaternion(new THREE.Quaternion().setFromAxisAngle(axis, angle)).normalize();
+        }
+
+        function createSwingByArc(candidate, previousPoint, nextPoint, radiusScale = 1) {
+            const anchor = candidate.anchor;
+            const incomingRadial = previousPoint.clone().sub(anchor).normalize();
+            const outgoingRadial = nextPoint.clone().sub(anchor).normalize();
+            const axis = getSwingByAxis(incomingRadial, outgoingRadial);
+            const dot = Math.max(-1, Math.min(1, incomingRadial.dot(outgoingRadial)));
+            const directAngle = Math.acos(dot);
+            // 直線を少し膨らませる場合も、中心から一定距離の円弧として構成する。
+            // これにより「経由地の反対側へ曲がる」点列だけの挙動を廃止する。
+            const sweepAngle = directAngle < Math.PI * 0.35 ? Math.PI * 0.72 : directAngle;
+            const radius = candidate.flybyRadius * radiusScale;
+            const arcPoints = [];
+            const sampleCount = 10;
+            for (let sampleIndex = 0; sampleIndex <= sampleCount; sampleIndex++) {
+                const progress = sampleIndex / sampleCount;
+                const radial = rotateRadial(incomingRadial, axis, sweepAngle * progress);
+                arcPoints.push(anchor.clone().addScaledVector(radial, radius));
+            }
+            const exitPoint = anchor.clone().addScaledVector(outgoingRadial, radius);
+            if (arcPoints[arcPoints.length - 1].distanceTo(exitPoint) > radius * 0.12) arcPoints.push(exitPoint);
+            const midpoint = arcPoints[Math.floor(arcPoints.length / 2)].clone();
+            return {
+                points: arcPoints,
+                anchor: anchor.clone(),
+                flybyPosition: midpoint,
+                flybyRadius: radius,
+                swingByAngle: sweepAngle,
+                axis: axis.clone()
+            };
+        }
+
+        function getRouteMinimumDistance(route, anchor, samples = 48) {
+            let minimum = Infinity;
+            for (let sampleIndex = 0; sampleIndex <= samples; sampleIndex++) {
+                minimum = Math.min(minimum, route.getPoint(sampleIndex / samples).distanceTo(anchor));
+            }
+            return minimum;
         }
 
         function createLoadingRoute(target, direction, distance, destinationIndex) {
@@ -124,31 +164,49 @@
             const preEntry = target.position.clone().addScaledVector(direction, preEntryDistance);
             const end = target.position.clone().addScaledVector(direction, horizonRadius);
             const candidatePools = getWarpCandidateStops(destinationIndex);
-            const desiredCount = Math.round(Math.min(WARP_STOP_COUNT_MAX, Math.max(WARP_STOP_COUNT_MIN, loadingAnimation?.stopCount || warpStopCount)));
+            const desiredCount = Math.round(Math.min(WARP_STOP_COUNT_MAX, Math.max(WARP_STOP_COUNT_MIN, loadingAnimation?.stopCount ?? warpStopCount)));
             const selected = selectWarpCandidates(candidatePools, desiredCount, start);
-            const points = [start];
-            const stopPointIndices = [];
+            let route = null;
+            let swingByDiagnostics = [];
+            let stopProgresses = [];
+            let preEntryProgress = 0.96;
+            for (const radiusScale of [1, 1.18, 1.4, 1.7]) {
+                const points = [start];
+                const stopPointIndices = [];
+                const diagnostics = [];
+                selected.forEach((candidate, index) => {
+                    const previousPoint = index === 0 ? start : selected[index - 1].anchor;
+                    const nextPoint = index === selected.length - 1 ? preEntry : selected[index + 1].anchor;
+                    const arc = createSwingByArc(candidate, previousPoint, nextPoint, radiusScale);
+                    points.push(...arc.points);
+                    stopPointIndices.push(points.length - Math.ceil(arc.points.length / 2));
+                    diagnostics.push(arc);
+                });
+                points.push(preEntry, end);
+                const candidateRoute = new THREE.CatmullRomCurve3(points, false, 'centripetal', 0.08);
+                const lengths = [0];
+                for (let index = 1; index < points.length; index++) lengths[index] = lengths[index - 1] + points[index].distanceTo(points[index - 1]);
+                const totalLength = Math.max(1, lengths[lengths.length - 1]);
+                const candidateStopProgresses = stopPointIndices.map(pointIndex => lengths[pointIndex] / totalLength);
+                const candidatePreEntryProgress = lengths[lengths.length - 2] / totalLength;
+                const arcClear = diagnostics.every(arc => getRouteMinimumDistance(candidateRoute, arc.anchor) >= arc.flybyRadius * 0.78);
+                const candidateSafe = routeAvoidsBlackHoles(candidateRoute, destinationIndex, candidatePools.safeRadius);
+                if ((arcClear && candidateSafe) || radiusScale === 1.7) {
+                    route = candidateRoute;
+                    swingByDiagnostics = diagnostics;
+                    stopProgresses = candidateStopProgresses;
+                    preEntryProgress = candidatePreEntryProgress;
+                    break;
+                }
+            }
             selected.forEach((candidate, index) => {
-                const previousAnchor = index === 0 ? start : selected[index - 1].anchor;
-                const nextAnchor = index === selected.length - 1 ? preEntry : selected[index + 1].anchor;
-                const incomingRadial = previousAnchor.clone().sub(candidate.anchor).normalize();
-                const outgoingRadial = nextAnchor.clone().sub(candidate.anchor).normalize();
-                const swingBySide = getSwingBySide(candidate.anchor, incomingRadial, outgoingRadial);
-                const clearance = candidate.flybyRadius;
-                const inbound = candidate.anchor.clone().addScaledVector(incomingRadial, clearance);
-                const nearPoint = candidate.anchor.clone().addScaledVector(swingBySide, clearance);
-                const outbound = candidate.anchor.clone().addScaledVector(outgoingRadial, clearance);
-                points.push(inbound, nearPoint, outbound);
-                stopPointIndices.push(points.length - 2);
-                candidate.flybyPosition = nearPoint;
+                const diagnostic = swingByDiagnostics[index];
+                if (!diagnostic) return;
+                candidate.flybyPosition = diagnostic.flybyPosition;
+                candidate.flybyRadius = diagnostic.flybyRadius;
+                candidate.swingByAngle = diagnostic.swingByAngle;
+                candidate.minAnchorDistance = getRouteMinimumDistance(route, diagnostic.anchor);
             });
-            points.push(preEntry, end);
-            const route = new THREE.CatmullRomCurve3(points, false, 'centripetal', 0.22);
-            const lengths = [0];
-            for (let index = 1; index < points.length; index++) lengths[index] = lengths[index - 1] + points[index].distanceTo(points[index - 1]);
-            const totalLength = Math.max(1, lengths[lengths.length - 1]);
-            const stopProgresses = stopPointIndices.map(pointIndex => lengths[pointIndex] / totalLength);
-            const preEntryProgress = lengths[lengths.length - 2] / totalLength;
             return {
                 route,
                 stops: selected,
@@ -156,10 +214,79 @@
                 stellarStops: selected.filter(stop => stop.type === 'stellar-system'),
                 safeRadius: candidatePools.safeRadius,
                 stopProgresses,
+                stopAnchors: selected.map(stop => stop.anchor.clone()),
                 preEntryProgress,
+                swingByDiagnostics,
                 safe: routeAvoidsBlackHoles(route, destinationIndex, candidatePools.safeRadius)
             };
         }
+
+        function createUTurnRoute(currentPosition, currentTangent, target, direction) {
+            const eventHorizonRadius = getEventHorizonRadius(target);
+            const preEntry = target.position.clone().addScaledVector(direction, eventHorizonRadius + 420);
+            const toDestination = preEntry.clone().sub(currentPosition);
+            const tangent = currentTangent.clone().normalize();
+            const side = new THREE.Vector3().crossVectors(tangent, toDestination.normalize());
+            if (side.lengthSq() < 0.0001) side.copy(new THREE.Vector3(0, 1, 0).cross(tangent));
+            if (side.lengthSq() < 0.0001) side.set(1, 0, 0).cross(tangent);
+            side.normalize();
+            const turnRadius = Math.min(6000, Math.max(1800, currentPosition.distanceTo(preEntry) * 0.18));
+            const turnCenter = currentPosition.clone().addScaledVector(side, turnRadius);
+            const points = [];
+            const arcSampleCount = 14;
+            for (let sampleIndex = 0; sampleIndex <= arcSampleCount; sampleIndex++) {
+                const angle = Math.PI * sampleIndex / arcSampleCount;
+                const radial = side.clone().multiplyScalar(-Math.cos(angle)).addScaledVector(tangent, Math.sin(angle));
+                points.push(turnCenter.clone().addScaledVector(radial, turnRadius));
+            }
+            points.push(preEntry, target.position.clone().addScaledVector(direction, eventHorizonRadius));
+            const route = new THREE.CatmullRomCurve3(points, false, 'centripetal', 0.08);
+            const lengths = [0];
+            for (let index = 1; index < points.length; index++) lengths[index] = lengths[index - 1] + points[index].distanceTo(points[index - 1]);
+            const totalLength = Math.max(1, lengths[lengths.length - 1]);
+            return {
+                route,
+                preEntryProgress: lengths[lengths.length - 2] / totalLength,
+                turnRadius,
+                arcPoints: points.slice(0, arcSampleCount + 1)
+            };
+        }
+
+        function beginReturnToDestination() {
+            if (!loadingAnimation || loadingAnimation.returnRoute) return;
+            const target = getLoadingBlackHoleTarget(loadingAnimation.targetIndex);
+            const currentPosition = camera.position.clone();
+            const currentTangent = loadingAnimation.route
+                ? loadingAnimation.route.getTangentAt(Math.min(0.999, Math.max(0, loadingAnimation.routeProgress))).normalize()
+                : controls.target.clone().sub(camera.position).normalize();
+            const generated = createUTurnRoute(currentPosition, currentTangent, target, loadingAnimation.approachDirection);
+            loadingAnimation.returnRoute = generated.route;
+            loadingAnimation.returnRouteProgress = 0;
+            loadingAnimation.returnRouteStartedAt = performance.now();
+            loadingAnimation.returnTurnRadius = generated.turnRadius;
+            loadingAnimation.returnArcPoints = generated.arcPoints;
+            loadingAnimation.route = generated.route;
+            loadingAnimation.routeProgress = 0;
+            loadingAnimation.routeStopProgresses = [];
+            loadingAnimation.routeStopAnchors = [];
+            loadingAnimation.preEntryProgress = generated.preEntryProgress;
+            loadingAnimation.preEntryStartedAt = null;
+            loadingAnimation.entryStartedAt = null;
+            loadingAnimation.routeStops = [];
+            loadingAnimation.galaxyStops = [];
+            loadingAnimation.stellarStops = [];
+            loadingAnimation.routeSpeed = 0;
+            loadingAnimation.lastRouteTimestamp = performance.now();
+            loadingAnimation.returningToDestination = true;
+        }
+
+        window.markLoadingUniverseReady = function() {
+            if (!loadingAnimation) return false;
+            loadingAnimation.apiReady = true;
+            loadingAnimation.universeReadyAt = performance.now();
+            beginReturnToDestination();
+            return true;
+        };
 
         function initializeLoadingRoute(target) {
             let generated = null;
@@ -174,7 +301,9 @@
             loadingAnimation.stellarStops = generated.stellarStops;
             loadingAnimation.routeSafeRadius = generated.safeRadius;
             loadingAnimation.routeStopProgresses = generated.stopProgresses;
+            loadingAnimation.routeStopAnchors = generated.stopAnchors;
             loadingAnimation.preEntryProgress = generated.preEntryProgress;
+            loadingAnimation.swingByDiagnostics = generated.swingByDiagnostics;
             loadingAnimation.routeProgress = 0;
             loadingAnimation.routeSpeed = 0;
             loadingAnimation.lastRouteTimestamp = performance.now();
@@ -202,10 +331,20 @@
                 stellarStops: [],
                 routeSafeRadius: 680,
                 routeStopProgresses: [],
+                routeStopAnchors: [],
+                swingByDiagnostics: [],
                 preEntryProgress: 0.96,
                 routeProgress: 0,
                 routeSpeed: 0,
                 lastRouteTimestamp: now,
+                apiReady: false,
+                universeReadyAt: null,
+                returnRoute: null,
+                returnRouteProgress: 0,
+                returnRouteStartedAt: null,
+                returnTurnRadius: 0,
+                returnArcPoints: [],
+                returningToDestination: false,
                 preEntryStartedAt: null,
                 entryStartedAt: null,
                 routeTargetIndex: -1,
@@ -231,6 +370,11 @@
             const target = getLoadingBlackHoleTarget(loadingAnimation.targetIndex);
             const blackHole = target.position;
             const eventHorizonRadius = getEventHorizonRadius(target);
+            if (!loadingAnimation.apiReady && pendingUniverse) {
+                loadingAnimation.apiReady = true;
+                loadingAnimation.universeReadyAt = now;
+            }
+            if (loadingAnimation.apiReady && !loadingAnimation.returnRoute) beginReturnToDestination();
             loadingAnimation.segmentDuration = 60000 / Math.max(WARP_SPEED_MIN, Math.min(WARP_SPEED_MAX, warpSpeedFactor));
             loadingAnimation.maxSpeed = 900 * Math.max(WARP_SPEED_MIN, Math.min(WARP_SPEED_MAX, warpSpeedFactor));
             if (!loadingAnimation.route || loadingAnimation.routeTargetIndex !== loadingAnimation.targetIndex) initializeLoadingRoute(target);
@@ -254,7 +398,20 @@
                 camera.position.copy(loadingAnimation.route.getPointAt(loadingAnimation.routeProgress));
                 const lookProgress = Math.min(preEntryProgress, loadingAnimation.routeProgress + lookAhead);
                 if (loadingAnimation.routeProgress >= finalApproachStart) targetControlTarget.copy(blackHole);
-                else targetControlTarget.copy(loadingAnimation.route.getPointAt(lookProgress));
+                else {
+                    let nearestStopIndex = -1;
+                    let nearestStopDistance = Infinity;
+                    (loadingAnimation.routeStopProgresses || []).forEach((stopProgress, index) => {
+                        const distance = Math.abs(loadingAnimation.routeProgress - stopProgress);
+                        if (distance < nearestStopDistance) {
+                            nearestStopDistance = distance;
+                            nearestStopIndex = index;
+                        }
+                    });
+                    if (nearestStopIndex >= 0 && nearestStopDistance < 0.055 && loadingAnimation.routeStopAnchors[nearestStopIndex]) {
+                        targetControlTarget.copy(loadingAnimation.routeStopAnchors[nearestStopIndex]);
+                    } else targetControlTarget.copy(loadingAnimation.route.getPointAt(lookProgress));
+                }
                 updateZoomSound(Math.min(1, loadingAnimation.routeProgress * 1.2));
             } else if (!loadingAnimation.preEntryStartedAt) {
                 loadingAnimation.preEntryStartedAt = now;
@@ -271,7 +428,7 @@
                 camera.fov = configuredFieldOfView;
                 camera.updateProjectionMatrix();
                 updateZoomSound(0.42);
-                if (holdProgress >= 1) loadingAnimation.entryStartedAt = now;
+                if (holdProgress >= 1 && loadingAnimation.apiReady) loadingAnimation.entryStartedAt = now;
             } else {
                 const entryProgress = Math.min(1, (now - loadingAnimation.entryStartedAt) / 1500);
                 const exponentialProgress = entryProgress >= 1 ? 1 : 1 - Math.exp(-5 * entryProgress);
@@ -299,7 +456,7 @@
                     loadingAnimation = null;
                     isDiving = false;
                     onReady();
-                    beginUniverseReveal();
+                    beginUniverseReveal(true);
                     return;
                 }
             }
@@ -321,7 +478,7 @@
             return beacon;
         }
 
-        function beginUniverseReveal() {
+        function beginUniverseReveal(fast = false) {
             const revealTarget = groupWorldOffset.clone();
             const revealDirection = camera.position.clone().sub(controls.target);
             if (revealDirection.lengthSq() < 0.01) revealDirection.set(0, 0, 1);
@@ -335,7 +492,10 @@
                 bubble.mesh.scale.setScalar(finalScale);
                 bubble.mesh.material.opacity = 0.95;
             });
-            camera.position.copy(revealTarget).addScaledVector(revealDirection, 46000);
+            const farDistance = fast ? 16000 : 46000;
+            const holdDuration = fast ? 220 : 5000;
+            const zoomDuration = fast ? 1280 : 9000;
+            camera.position.copy(revealTarget).addScaledVector(revealDirection, farDistance);
             controls.target.copy(revealTarget);
             targetCameraPos.copy(revealTarget).addScaledVector(revealDirection, nearDistance);
             targetControlTarget.copy(revealTarget);
@@ -344,10 +504,10 @@
                 startedAt: performance.now(),
                 target: revealTarget,
                 direction: revealDirection,
-                farDistance: 46000,
+                farDistance,
                 nearDistance,
-                holdDuration: 5000,
-                zoomDuration: 9000,
+                holdDuration,
+                zoomDuration,
                 beacon: createUniverseRevealBeacon(revealTarget)
             };
         }
