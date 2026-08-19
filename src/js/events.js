@@ -135,6 +135,7 @@
         });
         const bgmToggle = document.getElementById('bgm-toggle');
         const ngc3324Toggle = document.getElementById('ngc3324-toggle');
+        const bubbleVisualModeButtons = [...document.querySelectorAll('[data-bubble-visual-mode]')];
         const panelSizeButtons = [...document.querySelectorAll('[data-panel-size]')];
         const volumeControl = document.getElementById('audio-volume');
         const bgmTypeControl = document.getElementById('bgm-type');
@@ -164,6 +165,15 @@
         }
 
         let explorationPanelSize = applyExplorationPanelSize(storedPanelSize || 'medium');
+        const storedBubbleVisualMode = localStorage.getItem('bubblebreaker.bubbleVisualMode');
+        let selectedBubbleVisualMode = typeof setBubbleVisualMode === 'function'
+            ? setBubbleVisualMode(storedBubbleVisualMode === 'classic' ? 'classic' : 'network')
+            : 'network';
+        bubbleVisualModeButtons.forEach(button => {
+            const isSelected = button.dataset.bubbleVisualMode === selectedBubbleVisualMode;
+            button.setAttribute('aria-pressed', String(isSelected));
+            button.classList.toggle('is-selected', isSelected);
+        });
         volumeControl.value = String(audioVolume);
         bgmTypeControl.value = bgmType;
         bgmAutoNextControl.checked = bgmAutoNext;
@@ -197,6 +207,20 @@
                 explorationPanelSize = applyExplorationPanelSize(button.dataset.panelSize);
                 localStorage.setItem('bubblebreaker.panelSize', explorationPanelSize);
                 showToast(`探索パネルを${explorationPanelSize === 'small' ? '小' : explorationPanelSize === 'large' ? '大' : '中'}サイズに変更しました`);
+            });
+        });
+        bubbleVisualModeButtons.forEach(button => {
+            button.addEventListener('click', () => {
+                selectedBubbleVisualMode = typeof setBubbleVisualMode === 'function'
+                    ? setBubbleVisualMode(button.dataset.bubbleVisualMode)
+                    : 'network';
+                localStorage.setItem('bubblebreaker.bubbleVisualMode', selectedBubbleVisualMode);
+                bubbleVisualModeButtons.forEach(option => {
+                    const isSelected = option.dataset.bubbleVisualMode === selectedBubbleVisualMode;
+                    option.setAttribute('aria-pressed', String(isSelected));
+                    option.classList.toggle('is-selected', isSelected);
+                });
+                showToast(selectedBubbleVisualMode === 'network' ? 'ネットワーク天体を表示しました' : '現行の球体表示に切り替えました');
             });
         });
         volumeControl.addEventListener('input', () => {

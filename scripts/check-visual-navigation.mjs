@@ -56,7 +56,7 @@ assert.match(scene, /preserveGalaxyColor/, 'galaxy color profiles should survive
 assert.match(scene, /function relocateGalaxyUniverse\(/, 'galaxy positions should be regenerated between universes');
 assert.match(scene, /relocateGalaxyUniverse\(`category:/, 'category transitions should relocate galaxies');
 assert.match(scene, /blackHole\.userData\.eventHorizonRadius = eventHorizonRadius;/, 'black holes should expose their event horizon radius');
-assert.doesNotMatch(scene, /const horizon = new THREE\.Mesh|wireframe: true/, 'the enclosing wireframe horizon sphere should be removed');
+assert.doesNotMatch(scene, /const horizon = new THREE\.Mesh/, 'the enclosing wireframe horizon sphere should be removed');
 assert.match(scene, /function updateAutomaticBubbleApproach\(\)/, 'automatic bubble proximity handling should exist');
 assert.match(scene, /function updateAnalysisGenerationStatus\(\)/, 'analysis generation status should be visible');
 assert.match(scene, /stateName === 'loading'/, 'loading analysis should be represented in the UI');
@@ -88,5 +88,17 @@ assert.match(events, /applyExplorationPanelSize\(/, 'exploration panel size shou
 assert.match(indexHtml, /class="[^"]*cosmic-ui/, 'the interface should expose the cosmic network theme hook');
 assert.match(indexHtml, /class="[^"]*portal-panel/, 'the input screen should use the network entry panel');
 assert.match(indexHtml, /class="[^"]*exploration-panel/, 'category screens should use the exploration panel theme hook');
+assert.match(indexHtml, /data-bubble-visual-mode="network"/, 'network bubble visual mode should be selectable');
+assert.match(indexHtml, /data-bubble-visual-mode="classic"/, 'classic bubble visual mode should be selectable');
+assert.match(events, /bubblebreaker\.bubbleVisualMode/, 'bubble visual mode should persist in localStorage');
+assert.match(scene, /function createNetworkBubbleVisual\(/, 'network bubble decorations should be generated');
+assert.match(scene, /new THREE\.TorusGeometry/, 'network bubbles should include orbit rings');
+assert.match(scene, /new THREE\.Line\(/, 'network bubbles should include connection lines');
+assert.match(scene, /function disposeObjectTree\(/, 'network bubble decorations should be disposed with the bubble');
+assert.match(scene, /window\.setBubbleVisualMode = function/, 'bubble visual mode should switch without rebuilding the page');
+assert.match(animation, /networkVisual\.rotation\.y \+=/, 'network bubble decorations should animate');
+assert.match(animation, /networkAnimation\.observerRing/, 'the focus bubble should have an observer ring animation');
+assert.match(scene, /const scanRing = new THREE\.Mesh/, 'network bubbles should include an analysis scan ring');
+assert.match(animation, /analysisStatus === 'loading'/, 'analysis generation should activate the scan ring');
 
 console.log('Visual navigation invariants: OK');

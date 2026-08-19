@@ -281,6 +281,43 @@
             currentBubbles.forEach(b => {
                 // 初期Y座標を基準に絶対値で更新し、長時間実行時のdriftを防ぐ
                 b.mesh.position.y = b.baseY + Math.sin(time * 2 + b.baseX) * 0.005;
+
+                const networkVisual = b.mesh.userData && b.mesh.userData.networkVisual;
+                const networkAnimation = networkVisual && networkVisual.userData.networkAnimation;
+                if (networkVisual && networkAnimation) {
+                    networkVisual.rotation.y += 0.0014 + b.mesh.scale.x * 0.00008;
+                    networkVisual.rotation.x = Math.sin(time * 0.18 + networkAnimation.phase) * 0.08;
+                    networkAnimation.rings.forEach((ring, ringIndex) => {
+                        ring.rotation.z += 0.0022 * (ringIndex % 2 === 0 ? 1 : -1);
+                    });
+                    networkAnimation.nodes.forEach((node, nodeIndex) => {
+                        const pulse = 1 + Math.sin(time * 1.8 + networkAnimation.phase + nodeIndex * 0.7) * 0.12;
+                        node.scale.setScalar(pulse);
+                    });
+                    networkAnimation.particles.rotation.y -= 0.0018;
+                    if (networkAnimation.observerRing) {
+                        const observerPulse = 1 + Math.sin(time * 2.1 + networkAnimation.phase) * 0.07;
+                        networkAnimation.observerRing.scale.setScalar(observerPulse);
+                    }
+                    if (networkAnimation.scanRing) {
+                        const isAnalysisLoading = state.bubbleData && state.bubbleData.id === b.data.id && b.data.analysisStatus === 'loading';
+                        networkAnimation.scanRing.visible = Boolean(isAnalysisLoading);
+                        if (isAnalysisLoading) {
+                            networkAnimation.scanRing.rotation.z += 0.045;
+                            const scanPulse = 0.92 + Math.sin(time * 4.2 + networkAnimation.phase) * 0.08;
+                            networkAnimation.scanRing.scale.setScalar(scanPulse);
+                        }
+                    }
+                    const fade = Math.max(0, Math.min(1, b.mesh.material.opacity / 0.95));
+                    networkVisual.traverse(child => {
+                        if (!child.material) return;
+                        const materials = Array.isArray(child.material) ? child.material : [child.material];
+                        materials.forEach(material => {
+                            if (!Number.isFinite(material.userData.networkBaseOpacity)) material.userData.networkBaseOpacity = material.opacity;
+                            material.opacity = material.userData.networkBaseOpacity * fade;
+                        });
+                    });
+                }
                 
                 // --- 解析画面時の他バブル透過処理 ---
                 const isTarget = (state.bubbleId === b.data.id);

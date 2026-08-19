@@ -734,6 +734,7 @@
         let groupEntryCameraDistance = 25;
         let singleViewDirection = new THREE.Vector3(0, 0, 1);
         let explorerSelectedBubbleId = null;
+        let bubbleVisualMode = localStorage.getItem('bubblebreaker.bubbleVisualMode') === 'classic' ? 'classic' : 'network';
 
         function getGroupOverviewTarget() {
             if (!currentBubbles.length) return null;
@@ -825,8 +826,173 @@
             loadSingle(nearest.data);
         }
 
+        function hashBubbleValue(value) {
+            let hash = 2166136261;
+            for (let index = 0; index < String(value || '').length; index++) {
+                hash ^= String(value || '').charCodeAt(index);
+                hash = Math.imul(hash, 16777619);
+            }
+            return hash >>> 0;
+        }
+
+        function createNetworkBubbleVisual(displayColor, bubbleData, level = 'central', isFocus = false) {
+            const seed = hashBubbleValue(bubbleData && bubbleData.id);
+            const visual = new THREE.Group();
+            const profile = level === 'root'
+                ? { nodes: 4, rings: 2, particles: 12 }
+                : level === 'leaf'
+                    ? { nodes: 4, rings: 2, particles: 10 }
+                    : { nodes: 7, rings: 3, particles: 18 };
+            const accent = displayColor.clone();
+            accent.offsetHSL(((seed % 17) - 8) / 360, 0.08, 0.12);
+            const lineMaterial = new THREE.LineBasicMaterial({
+                color: accent,
+                transparent: true,
+                opacity: isFocus ? 0.78 : 0.42,
+                depthWrite: false,
+                blending: THREE.AdditiveBlending
+            });
+            const nodeMaterial = new THREE.MeshBasicMaterial({
+                color: accent,
+                transparent: true,
+                opacity: isFocus ? 0.95 : 0.76,
+                depthWrite: false,
+                blending: THREE.AdditiveBlending
+            });
+            const shellMaterial = new THREE.MeshBasicMaterial({
+                color: accent,
+                transparent: true,
+                opacity: isFocus ? 0.22 : 0.11,
+                wireframe: true,
+                depthWrite: false,
+                blending: THREE.AdditiveBlending
+            });
+            const shell = new THREE.Mesh(new THREE.SphereGeometry(1.08, 24, 16), shellMaterial);
+            visual.add(shell);
+
+            const ringGeometry = new THREE.TorusGeometry(1.22, isFocus ? 0.026 : 0.018, 6, 48);
+            const ringMaterial = new THREE.MeshBasicMaterial({
+                color: isFocus ? 0xffe38a : accent,
+                transparent: true,
+                opacity: isFocus ? 0.92 : 0.48,
+                depthWrite: false,
+                blending: THREE.AdditiveBlending
+            });
+            const rings = [];
+            for (let index = 0; index < profile.rings; index++) {
+                const ring = new THREE.Mesh(ringGeometry, ringMaterial);
+                ring.rotation.set(
+                    Math.PI * (0.22 + ((seed + index * 13) % 37) / 100),
+                    Math.PI * ((seed + index * 29) % 100) / 100,
+                    Math.PI * ((seed + index * 7) % 100) / 100
+                );
+                ring.scale.setScalar(1 + index * 0.065);
+                visual.add(ring);
+                rings.push(ring);
+            }
+
+            const nodeGeometry = new THREE.SphereGeometry(isFocus ? 0.075 : 0.055, 10, 8);
+            const nodes = [];
+            const nodePositions = [];
+            for (let index = 0; index < profile.nodes; index++) {
+                const latitude = 0.25 + ((seed + index * 31) % 50) / 100;
+                const theta = ((seed + index * 137) % 360) * Math.PI / 180;
+                const y = (index % 2 === 0 ? 1 : -1) * latitude;
+                const radial = Math.sqrt(Math.max(0.1, 1 - y * y));
+                const nodePosition = new THREE.Vector3(
+                    Math.cos(theta) * radial * 1.34,
+                    y * 1.34,
+                    Math.sin(theta) * radial * 1.34
+                );
+                const node = new THREE.Mesh(nodeGeometry, nodeMaterial);
+                node.position.copy(nodePosition);
+                visual.add(node);
+                nodes.push(node);
+                nodePositions.push(nodePosition);
+                const linkGeometry = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), nodePosition]);
+                visual.add(new THREE.Line(linkGeometry, lineMaterial));
+            }
+
+            for (let index = 1; index < nodePositions.length; index += 2) {
+                const linkGeometry = new THREE.BufferGeometry().setFromPoints([nodePositions[index - 1], nodePositions[index]]);
+                visual.add(new THREE.Line(linkGeometry, lineMaterial));
+            }
+
+            const particlePositions = new Float32Array(profile.particles * 3);
+            for (let index = 0; index < profile.particles; index++) {
+                const theta = ((seed + index * 47) % 360) * Math.PI / 180;
+                const y = (((seed + index * 19) % 200) / 100) - 1;
+                const radial = Math.sqrt(Math.max(0.05, 1 - y * y));
+                const radius = 1.12 + ((seed + index * 23) % 32) / 100;
+                particlePositions[index * 3] = Math.cos(theta) * radial * radius;
+                particlePositions[index * 3 + 1] = y * radius;
+                particlePositions[index * 3 + 2] = Math.sin(theta) * radial * radius;
+            }
+            const particleGeometry = new THREE.BufferGeometry();
+            particleGeometry.setAttribute('position', new THREE.BufferAttribute(particlePositions, 3));
+            const particles = new THREE.Points(particleGeometry, new THREE.PointsMaterial({
+                color: accent,
+                size: isFocus ? 0.07 : 0.045,
+                transparent: true,
+                opacity: isFocus ? 0.72 : 0.38,
+                depthWrite: false,
+                blending: THREE.AdditiveBlending
+            }));
+            visual.add(particles);
+
+            let observerRing = null;
+            if (isFocus) {
+                observerRing = new THREE.Mesh(
+                    new THREE.TorusGeometry(1.42, 0.035, 8, 64),
+                    new THREE.MeshBasicMaterial({ color: 0xffe38a, transparent: true, opacity: 0.86, depthWrite: false, blending: THREE.AdditiveBlending })
+                );
+                observerRing.rotation.x = Math.PI * 0.5;
+                visual.add(observerRing);
+            }
+            const scanRing = new THREE.Mesh(
+                new THREE.TorusGeometry(0.88, 0.018, 6, 48),
+                new THREE.MeshBasicMaterial({ color: 0x9beeff, transparent: true, opacity: 0.9, depthWrite: false, blending: THREE.AdditiveBlending })
+            );
+            scanRing.rotation.x = Math.PI * 0.5;
+            scanRing.visible = false;
+            visual.add(scanRing);
+            visual.userData.networkAnimation = {
+                phase: (seed % 1000) / 1000 * Math.PI * 2,
+                rings,
+                nodes,
+                particles,
+                observerRing,
+                scanRing
+            };
+            visual.userData.bubbleVisualMode = 'network';
+            return visual;
+        }
+
+        function ensureNetworkBubbleVisual(mesh, bubbleData, level, isFocus = false) {
+            if (!mesh || !bubbleData) return null;
+            if (!mesh.userData.networkVisual) {
+                const displayColor = mesh.material && mesh.material.color ? mesh.material.color.clone() : new THREE.Color(0x66ccff);
+                mesh.userData.networkVisual = createNetworkBubbleVisual(displayColor, bubbleData, level, isFocus);
+                mesh.add(mesh.userData.networkVisual);
+            }
+            mesh.userData.networkVisual.visible = bubbleVisualMode === 'network';
+            return mesh.userData.networkVisual;
+        }
+
+        window.setBubbleVisualMode = function(mode = 'network') {
+            bubbleVisualMode = mode === 'classic' ? 'classic' : 'network';
+            const bubbles = [...currentBubbles];
+            if (transitionState) bubbles.push(...(transitionState.outgoing || []));
+            bubbles.forEach(bubble => {
+                if (!bubble || !bubble.mesh) return;
+                const visual = ensureNetworkBubbleVisual(bubble.mesh, bubble.data, bubble.level, bubble.isFocus);
+                if (visual) visual.visible = bubbleVisualMode === 'network';
+            });
+            return bubbleVisualMode;
+        };
+
         // バブルの3Dモデル(Mesh)を作る関数
-        function createBubbleMesh(size, colorHex, position) {
+        function createBubbleMesh(size, colorHex, position, bubbleData = null, level = 'central', isFocus = false) {
             // ガラスのような質感を出すための物理ベースマテリアル設定
             const displayColor = new THREE.Color(colorHex);
             const hsl = {};
@@ -842,6 +1008,9 @@
             const radius = Math.max(1.15, Math.pow(Math.max(1, size), 0.62));
             mesh.scale.set(radius, radius, radius);
             mesh.position.set(...position);
+            mesh.userData.bubbleId = bubbleData && bubbleData.id ? bubbleData.id : null;
+            mesh.userData.networkVisual = null;
+            if (bubbleData && bubbleVisualMode === 'network') ensureNetworkBubbleVisual(mesh, bubbleData, level, isFocus);
             return mesh;
         }
 
@@ -855,9 +1024,32 @@
             else if (typeof material.dispose === 'function') material.dispose();
         }
 
+        function disposeObjectTree(object) {
+            if (!object) return;
+            const geometries = new Set();
+            const materials = new Set();
+            object.traverse(child => {
+                if (child.geometry) geometries.add(child.geometry);
+                if (Array.isArray(child.material)) child.material.forEach(material => materials.add(material));
+                else if (child.material) materials.add(child.material);
+            });
+            geometries.forEach(geometry => geometry.dispose());
+            materials.forEach(material => {
+                ['map', 'alphaMap', 'emissiveMap'].forEach(textureKey => {
+                    if (material[textureKey] && typeof material[textureKey].dispose === 'function') material[textureKey].dispose();
+                });
+                material.dispose();
+            });
+        }
+
         function disposeBubble(bubble) {
             if (!bubble) return;
             scene.remove(bubble.mesh);
+            if (bubble.mesh.userData && bubble.mesh.userData.networkVisual) {
+                disposeObjectTree(bubble.mesh.userData.networkVisual);
+                bubble.mesh.remove(bubble.mesh.userData.networkVisual);
+                bubble.mesh.userData.networkVisual = null;
+            }
             if (bubble.mesh.geometry && typeof bubble.mesh.geometry.dispose === 'function') bubble.mesh.geometry.dispose();
             disposeMaterial(bubble.mesh.material);
             if (bubble.label) bubble.label.remove();
@@ -986,7 +1178,8 @@
             separateBubblePositions(data.bubbles);
             data.bubbles.forEach(bData => {
                 const worldPosition = new THREE.Vector3(...bData.pos).multiplyScalar(nextScale).add(nextOffset);
-                const mesh = createBubbleMesh(bData.size, bData.color, worldPosition.toArray());
+                const isFocus = isFocusPathBubble(data, bData);
+                const mesh = createBubbleMesh(bData.size, bData.color, worldPosition.toArray(), bData, data.level, isFocus);
                 mesh.scale.multiplyScalar(nextScale);
                 const finalRadius = mesh.scale.x;
                 mesh.userData.finalScale = finalRadius;
@@ -1008,7 +1201,7 @@
                 labelsContainer.appendChild(label);
 
                 // 生成したデータを配列に保存
-                currentBubbles.push({ mesh, label, data: bData, baseX: mesh.position.x, baseY: mesh.position.y });
+                currentBubbles.push({ mesh, label, data: bData, level: data.level, isFocus, baseX: mesh.position.x, baseY: mesh.position.y });
             });
 
             if (transitionType === 'instant') {
