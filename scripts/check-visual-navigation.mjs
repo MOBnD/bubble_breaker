@@ -4,12 +4,13 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const [scene, animation, events, audio, indexHtml, buildScript] = await Promise.all([
+const [scene, animation, events, audio, indexHtml, styles, buildScript] = await Promise.all([
     readFile(path.join(root, 'src', 'js', 'scene.js'), 'utf8'),
     readFile(path.join(root, 'src', 'js', 'animation.js'), 'utf8'),
     readFile(path.join(root, 'src', 'js', 'events.js'), 'utf8'),
     readFile(path.join(root, 'src', 'js', 'audio.js'), 'utf8'),
     readFile(path.join(root, 'src', 'index.html'), 'utf8'),
+    readFile(path.join(root, 'src', 'styles.css'), 'utf8'),
     readFile(path.join(root, 'scripts', 'build.mjs'), 'utf8')
 ]);
 
@@ -100,5 +101,10 @@ assert.match(animation, /networkVisual\.rotation\.y \+=/, 'network bubble decora
 assert.match(animation, /networkAnimation\.observerRing/, 'the focus bubble should have an observer ring animation');
 assert.match(scene, /const scanRing = new THREE\.Mesh/, 'network bubbles should include an analysis scan ring');
 assert.match(animation, /analysisStatus === 'loading'/, 'analysis generation should activate the scan ring');
+assert.match(indexHtml, /id="warp-haze-toggle"/, 'warp haze should have a UI toggle');
+assert.match(events, /bubblebreaker\.warpHaze/, 'warp haze preference should persist in localStorage');
+assert.match(events, /warp-haze-active/, 'warp haze should be applied through a dedicated loading class');
+assert.match(indexHtml, /id="screen-input" class="input-screen screen-container/, 'the input screen should not carry permanent backdrop blur');
+assert.match(styles, /#screen-input\.warp-haze-active/, 'warp haze styling should be limited to the active loading state');
 
 console.log('Visual navigation invariants: OK');

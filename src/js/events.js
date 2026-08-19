@@ -75,6 +75,7 @@
             showToast('Web Searchで対象のバブル宇宙を調査しています... 🚀');
 
             startLoadingAnimation();
+            updateWarpHazeLayer();
             loadingAnimation.onReady = () => {
                 const universe = pendingUniverse;
                 pendingUniverse = null;
@@ -89,6 +90,7 @@
                 camera.rotation.set(0, 0, 0);
                 isGenerating = false;
                 button.disabled = false;
+                updateWarpHazeLayer();
                 loadGroup(universe.entryGroupId, true);
             };
         });
@@ -135,6 +137,7 @@
         });
         const bgmToggle = document.getElementById('bgm-toggle');
         const ngc3324Toggle = document.getElementById('ngc3324-toggle');
+        const warpHazeToggle = document.getElementById('warp-haze-toggle');
         const bubbleVisualModeButtons = [...document.querySelectorAll('[data-bubble-visual-mode]')];
         const panelSizeButtons = [...document.querySelectorAll('[data-panel-size]')];
         const volumeControl = document.getElementById('audio-volume');
@@ -147,6 +150,14 @@
         const ngc3324Visible = storedNGC3324Visibility !== 'off';
         ngc3324Toggle.checked = ngc3324Visible;
         if (typeof setNGC3324BackgroundVisible === 'function') setNGC3324BackgroundVisible(ngc3324Visible);
+        const storedWarpHaze = localStorage.getItem('bubblebreaker.warpHaze');
+        let warpHazeEnabled = storedWarpHaze !== 'off';
+        warpHazeToggle.checked = warpHazeEnabled;
+        function updateWarpHazeLayer() {
+            const inputScreen = document.getElementById('screen-input');
+            if (!inputScreen) return;
+            inputScreen.classList.toggle('warp-haze-active', Boolean(isDiving && warpHazeEnabled));
+        }
         const allowedPanelSizes = new Set(['small', 'medium', 'large']);
         const storedPanelSize = localStorage.getItem('bubblebreaker.panelSize');
 
@@ -201,6 +212,12 @@
             localStorage.setItem('bubblebreaker.ngc3324', visible ? 'on' : 'off');
             if (typeof setNGC3324BackgroundVisible === 'function') setNGC3324BackgroundVisible(visible);
             showToast(visible ? 'NGC 3324背景を表示しました' : 'NGC 3324背景を非表示にしました');
+        });
+        warpHazeToggle.addEventListener('change', () => {
+            warpHazeEnabled = warpHazeToggle.checked;
+            localStorage.setItem('bubblebreaker.warpHaze', warpHazeEnabled ? 'on' : 'off');
+            updateWarpHazeLayer();
+            showToast(warpHazeEnabled ? 'ワープ中の靄を表示します' : 'ワープ中の靄を非表示にします');
         });
         panelSizeButtons.forEach(button => {
             button.addEventListener('click', () => {

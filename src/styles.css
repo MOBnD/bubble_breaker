@@ -270,6 +270,11 @@
         .input-screen {
             background: radial-gradient(circle at 50% 46%, rgba(26, 69, 137, 0.17), transparent 42%), linear-gradient(180deg, rgba(1, 5, 16, 0.24), rgba(1, 5, 16, 0.72));
         }
+        #screen-input.warp-haze-active {
+            background: rgba(1, 5, 16, 0.46);
+            backdrop-filter: blur(8px) saturate(0.78);
+            -webkit-backdrop-filter: blur(8px) saturate(0.78);
+        }
         .portal-panel {
             overflow: hidden;
             border-color: rgba(72, 229, 255, 0.48);
