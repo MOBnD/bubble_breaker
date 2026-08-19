@@ -32,13 +32,6 @@ try {
     if (error.code !== 'ENOENT') throw error;
 }
 
-function usableApiKey(value) {
-    const normalized = String(value || '').trim();
-    return normalized && normalized !== 'your_api_key_here' ? normalized : '';
-}
-
-// プロセス環境変数を優先し、シェルで設定したキーが古い.envに隠れないようにする。
-const apiKey = usableApiKey(process.env.OPENAI_API_KEY) || usableApiKey(env.OPENAI_API_KEY);
 const model = String(process.env.OPENAI_MODEL || env.OPENAI_MODEL || 'gpt-5.6-luna').trim() || 'gpt-5.6-luna';
 const source = await readFile(sourcePath, 'utf8');
 const styles = await readFile(path.join(sourceDir, 'styles.css'), 'utf8');
@@ -54,7 +47,7 @@ const inlinedSource = source
     .replace(localScriptPattern, () => `<script>\n${scripts[scriptIndex++]}\n    </script>`);
 if (scriptIndex !== scripts.length) throw new Error('Not all local application scripts were inlined.');
 const output = inlinedSource
-    .replace('window.__OPENAI_API_KEY__ = "__OPENAI_API_KEY__";', `window.__OPENAI_API_KEY__ = ${JSON.stringify(apiKey)};`)
+    .replace('window.__OPENAI_API_KEY__ = "__OPENAI_API_KEY__";', 'window.__OPENAI_API_KEY__ = "";')
     .replace('window.__OPENAI_MODEL__ = "gpt-5.6-luna";', `window.__OPENAI_MODEL__ = ${JSON.stringify(model)};`)
     .replace('window.__NGC3324_TEXTURE__ = "./assets/ngc-3324-nircam-clean-4000.png";', `window.__NGC3324_TEXTURE__ = ${JSON.stringify(ngc3324Texture)};`);
 
@@ -62,4 +55,4 @@ await mkdir(outputDir, { recursive: true });
 await writeFile(outputPath, output, 'utf8');
 await rm(path.join(outputDir, 'BGM'), { recursive: true, force: true });
 await cp(path.join(root, 'BGM'), path.join(outputDir, 'BGM'), { recursive: true });
-console.log(`Built ${path.relative(root, outputPath)}${apiKey ? ' with API key' : ' without API key (fixed-data fallback enabled)'}.`);
+console.log(`Built ${path.relative(root, outputPath)} without embedded API key (runtime input required).`);

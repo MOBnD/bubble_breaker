@@ -69,16 +69,26 @@ assert.match(scene, /loadSingle\(nearest\.data\)/, 'proximity should enter the n
 assert.match(events, /markGroupCameraInteraction\(e\.deltaY < 0 \? 'zoomIn' : 'zoomOut'\)/, 'only zoom-in wheel input should arm proximity transition');
 assert.doesNotMatch(scene.match(/function addSolarSystem[\s\S]*?\n        function createCosmicEnvironment/)?.[0] || '', /blackHole/i, 'solar systems must not create black holes');
 assert.match(animation, /getLoadingBlackHoleTarget\(loadingAnimation\.targetIndex\)/, 'warp animation should target galaxy-center black holes');
-assert.match(animation, /segmentDuration: 22000/, 'black hole approach should allow a longer exploration route');
+assert.match(animation, /segmentDuration: 60000/, 'black hole approach should allow a longer exploration route');
 assert.match(animation, /approachDistance: 16000/, 'black hole approach should travel through a larger universe volume');
-assert.match(animation, /maxSpeed: 1400/, 'black hole approach should have a speed ceiling');
-assert.match(animation, /camera\.position\.distanceTo\(blackHole\) <= eventHorizonRadius/, 'warp should transition at the event horizon surface');
+assert.match(animation, /maxSpeed: 900/, 'black hole approach should have a speed ceiling');
+assert.match(animation, /blackHole\.clone\(\)\.addScaledVector\(loadingAnimation\.approachDirection, eventHorizonRadius\)/, 'warp should stop at the event horizon surface');
 assert.match(animation, /new THREE\.CatmullRomCurve3/, 'warp should follow a smooth curve');
 assert.match(animation, /desiredCount = 10 \+ Math\.floor\(Math\.random\(\) \* 11\)/, 'warp should visit ten to twenty random stops');
 assert.match(animation, /routeStops/, 'warp should retain generated galaxy and stellar-system stops');
+assert.match(animation, /routeStopProgresses/, 'warp should slow down around each swing-by stop');
+assert.match(animation, /preEntryProgress/, 'warp should stop before entering the destination galaxy');
+assert.match(animation, /preEntryStartedAt/, 'warp should hold before black hole entry');
+assert.match(animation, /entryStartedAt/, 'warp should have a distinct black hole entry phase');
+assert.match(animation, /Math\.exp\(-5 \* entryProgress\)/, 'black hole entry should accelerate exponentially');
 assert.match(animation, /routeAvoidsBlackHoles\(/, 'warp routes should be checked against black hole exclusion zones');
 assert.match(animation, /initializeLoadingRoute\(firstTarget\)/, 'each dive should receive a multi-stop route');
 assert.match(animation, /relocateGalaxyUniverse\('black-hole-universe-switch'\)/, 'black-hole universe switches should relocate galaxies');
+assert.match(animation, /updateWarpStarStreaks\(/, 'warp should turn surrounding stars into speed streaks');
+assert.match(animation, /createUniverseRevealBeacon\(/, 'the next universe should begin as a central light beacon');
+assert.match(animation, /function updateUniverseReveal\(/, 'the next universe should reveal from a distant view');
+assert.match(animation, /holdDuration: 5000/, 'the next universe beacon should remain visible for about five seconds');
+assert.match(animation, /farDistance: 46000/, 'the next universe should start from a far zoomed-out view');
 assert.doesNotMatch(animation, /nearHole|Math\.pow\(1 - p/, 'warp should not enter the black hole or decelerate at the end');
 assert.match(audio, /EDGEWORTH_BGM = 'edgeworth-kuiper-belt\.mp3'/, 'the default BGM should use a stable ASCII filename');
 assert.match(audio, /storedBgmType === LEGACY_EDGEWORTH_BGM/, 'legacy BGM selections should migrate safely');
@@ -121,7 +131,18 @@ assert.match(indexHtml, /id="panel-single-content"/, 'single panel should have a
 assert.doesNotMatch(indexHtml, /data-close-panel="panel-group"|data-close-panel="panel-single"/, 'right panels should not close');
 assert.match(indexHtml, /id="btn-toggle-title"/, 'title visibility should have a control');
 assert.match(indexHtml, /id="btn-toggle-ui"/, 'global UI visibility should have a control');
+assert.match(events, /window\.setTitleVisibility = function/, 'title visibility should be exposed for reliable button wiring');
+assert.match(events, /window\.setUIVisibility = function/, 'global UI visibility should be exposed for reliable button wiring');
+assert.match(events, /window\.toggleTitleVisibility\s*=\s*\(\)\s*=>/, 'title visibility should have a public toggle action');
+assert.match(events, /window\.toggleUIVisibility\s*=\s*\(\)\s*=>/, 'global UI visibility should have a public toggle action');
 assert.match(indexHtml, /WASD: 空間移動/, 'keyboard movement help should be visible');
+assert.match(indexHtml, /id="openai-api-key"/, 'the API key should be entered before opinion submission');
+assert.match(indexHtml, /id="btn-set-api-key"/, 'the API key entry should have an explicit setup action');
+assert.match(indexHtml, /id="api-key-status"/, 'the API key setup status should be visible');
+assert.match(indexHtml, /id="btn-dive"[^>]*disabled/, 'opinion submission should remain disabled until an API key is set');
+assert.match(events, /window\.setRuntimeOpenAIKey/, 'the entered API key should be passed to the runtime API client');
+assert.match(events, /window\.hasRuntimeOpenAIKey/, 'the UI should check the runtime API key state');
+assert.match(buildScript, /window\.__OPENAI_API_KEY__ = ""/, 'published HTML must not contain an embedded API key');
 assert.match(indexHtml, /id="bubble-color-theme"/, 'bubble color themes should be independently selectable');
 for (const theme of ['legacy', 'neon', 'warm', 'space', 'deepSea', 'data']) {
     assert.match(indexHtml, new RegExp(`value="${theme}"`), `bubble color theme ${theme} should be available`);
@@ -178,6 +199,10 @@ assert.match(styles, /\.exploration-panel\.panel-size-large[\s\S]*?33vw/, 'large
 assert.match(styles, /\.exploration-panel\.panel-size-large[\s\S]*?height: 76vh/, 'large exploration panels should be vertically expanded');
 assert.match(styles, /\.exploration-panel\.panel-size-large \.panel-section/, 'large panels should change internal section layout');
 assert.match(styles, /\.bubble-visual-options[\s\S]*?grid-template-columns: repeat\(3, 1fr\)/, 'three bubble visual modes should fit the control');
+assert.match(indexHtml, /id="group-desc"/, 'the group panel should show the parent bubble description');
+assert.match(indexHtml, /id="single-desc"/, 'the individual bubble panel should show a short description');
+assert.match(scene, /groupDisplayDescription/, 'group description should be derived from the parent bubble');
+assert.match(scene, /document\.getElementById\('single-desc'\)/, 'individual bubble description should be updated with bubble data');
 
 const [api, data] = await Promise.all([
     readFile(path.join(root, 'src', 'js', 'api.js'), 'utf8'),

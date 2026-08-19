@@ -40,8 +40,41 @@
 
         // --- ダイブボタン(入力確定)の処理 ---
         let isGenerating = false;
+        const apiKeyInput = document.getElementById('openai-api-key');
+        const apiKeySetButton = document.getElementById('btn-set-api-key');
+        const apiKeyStatus = document.getElementById('api-key-status');
+        const diveButton = document.getElementById('btn-dive');
+        function updateApiKeyUI(configured, message = null) {
+            if (apiKeyStatus) {
+                apiKeyStatus.innerText = message || (configured ? 'APIキー設定済み（このページのメモリ内のみ）' : 'APIキー未設定');
+                apiKeyStatus.classList.toggle('text-emerald-200', configured);
+                apiKeyStatus.classList.toggle('text-amber-200', !configured);
+            }
+            if (diveButton) diveButton.disabled = !configured || isGenerating;
+        }
+        const bootstrapKeyConfigured = typeof window.hasRuntimeOpenAIKey === 'function' && window.hasRuntimeOpenAIKey();
+        updateApiKeyUI(bootstrapKeyConfigured);
+        apiKeySetButton.addEventListener('click', () => {
+            const value = apiKeyInput.value.trim();
+            if (value.length < 10) {
+                if (typeof window.setRuntimeOpenAIKey === 'function') window.setRuntimeOpenAIKey('');
+                updateApiKeyUI(false, 'APIキーを入力してください');
+                return;
+            }
+            const configured = typeof window.setRuntimeOpenAIKey === 'function' && window.setRuntimeOpenAIKey(value);
+            apiKeyInput.value = '';
+            updateApiKeyUI(configured, configured ? 'APIキー設定済み（このページのメモリ内のみ）' : 'APIキーを確認してください');
+        });
+        apiKeyInput.addEventListener('keypress', event => {
+            if (event.key === 'Enter') apiKeySetButton.click();
+        });
         document.getElementById('btn-dive').addEventListener('click', async () => {
             if (isDiving || isGenerating) return;
+            if (typeof window.hasRuntimeOpenAIKey !== 'function' || !window.hasRuntimeOpenAIKey()) {
+                updateApiKeyUI(false, '意見入力の前にAPIキーを設定してください');
+                apiKeyInput.focus();
+                return;
+            }
             const input = document.getElementById('input-opinion').value.trim();
             if (!input) {
                 showToast('意見を入力してください');
@@ -52,6 +85,7 @@
             const panel = document.getElementById('input-panel');
             button.disabled = true;
             isGenerating = true;
+            updateApiKeyUI(true);
             startBackgroundMusic();
 
             // API応答をワープ演出と並行して取得する。API失敗時は既存モックDBへ戻す。
@@ -90,6 +124,7 @@
                 camera.rotation.set(0, 0, 0);
                 isGenerating = false;
                 button.disabled = false;
+                updateApiKeyUI(true);
                 updateWarpHazeLayer();
                 loadGroup(universe.entryGroupId, true);
             };
@@ -163,7 +198,7 @@
         function isTextEditingTarget(target) {
             return Boolean(target && (target.matches('input, textarea, select, button, [contenteditable="true"]') || target.isContentEditable));
         }
-        function applyTitleVisibility(visible, persist = true) {
+        window.setTitleVisibility = function(visible, persist = true) {
             const brandHud = document.querySelector('.brand-hud');
             if (brandHud) brandHud.classList.toggle('ui-title-hidden', !visible);
             if (titleToggleButton) {
@@ -173,7 +208,7 @@
             if (persist) localStorage.setItem('bubblebreaker.titleVisible', visible ? 'on' : 'off');
             return visible;
         }
-        function applyUIVisibility(visible, persist = true) {
+        window.setUIVisibility = function(visible, persist = true) {
             const uiLayer = document.getElementById('ui-layer');
             const labels = document.getElementById('labels-container');
             if (uiLayer) uiLayer.classList.toggle('ui-all-hidden', !visible);
@@ -187,22 +222,24 @@
         }
         const titleVisible = localStorage.getItem('bubblebreaker.titleVisible') !== 'off';
         const uiVisible = localStorage.getItem('bubblebreaker.uiVisible') !== 'off';
-        applyTitleVisibility(titleVisible, false);
-        applyUIVisibility(uiVisible, false);
-        titleToggleButton.addEventListener('click', () => applyTitleVisibility(!document.querySelector('.brand-hud').classList.contains('ui-title-hidden')));
-        uiToggleButton.addEventListener('click', () => applyUIVisibility(!document.getElementById('ui-layer').classList.contains('ui-all-hidden')));
+        window.setTitleVisibility(titleVisible, false);
+        window.setUIVisibility(uiVisible, false);
+        window.toggleTitleVisibility = () => window.setTitleVisibility(!document.querySelector('.brand-hud').classList.contains('ui-title-hidden'));
+        window.toggleUIVisibility = () => window.setUIVisibility(!document.getElementById('ui-layer').classList.contains('ui-all-hidden'));
+        if (titleToggleButton) titleToggleButton.addEventListener('click', window.toggleTitleVisibility);
+        if (uiToggleButton) uiToggleButton.addEventListener('click', window.toggleUIVisibility);
         window.addEventListener('keydown', event => {
             if (isTextEditingTarget(event.target)) return;
             window.__bubbleBreakerShiftDown = event.shiftKey || event.key === 'Shift';
             const key = event.key.toLowerCase();
             if (key === 'h') {
                 event.preventDefault();
-                applyTitleVisibility(document.querySelector('.brand-hud').classList.contains('ui-title-hidden'));
+                window.toggleTitleVisibility();
                 return;
             }
             if (key === 'u') {
                 event.preventDefault();
-                applyUIVisibility(document.getElementById('ui-layer').classList.contains('ui-all-hidden'));
+                window.toggleUIVisibility();
                 return;
             }
             if (['w', 'a', 's', 'd'].includes(key)) {

@@ -32,16 +32,15 @@ PowerShellの場合:
 Copy-Item .env.example .env
 ```
 
-`.env`を編集し、次の値を設定します。
+`.env`を編集し、モデル名を必要に応じて設定します。APIキーは公開HTMLへ埋め込まず、起動後に画面から入力します。
 
 ```dotenv
-OPENAI_API_KEY=your_api_key_here
 OPENAI_MODEL=gpt-5.6-luna
 ```
 
 `OPENAI_MODEL`は省略可能です。省略時は`gpt-5.6-luna`を使用します。
 
-環境変数を変更した場合は、必ず`npm run build`を再実行してください。ブラウザで開くファイルは分割ソースの`src/index.html`ではなく、ビルド後の`dist/bb_proto4.html`です。
+環境変数を変更した場合は、必要に応じて`npm run build`を再実行してください。ブラウザで開くファイルは分割ソースの`src/index.html`ではなく、ビルド後の`dist/bb_proto4.html`です。
 
 ## コマンド
 
@@ -51,7 +50,7 @@ OPENAI_MODEL=gpt-5.6-luna
 npm run build
 ```
 
-`src/index.html`と分割されたCSS・JavaScriptを読み込み、CSS・JavaScriptをインライン化した`dist/bb_proto4.html`を生成します。`.env`またはプロセス環境変数の`OPENAI_API_KEY`が設定されていれば、生成HTMLにAPIキーを注入します。キーがない場合もビルドは成功し、固定データへフォールバックするHTMLを生成します。
+`src/index.html`と分割されたCSS・JavaScriptを読み込み、CSS・JavaScriptをインライン化した`dist/bb_proto4.html`を生成します。APIキーは生成HTMLへ注入されず、画面で設定したランタイムキーをページのメモリ内だけで使用します。
 
 ### JavaScript構文チェック
 
@@ -116,20 +115,21 @@ npx serve dist
 2. 意見を入力して「宇宙へダイブ」を押します。
 3. `[BubbleBreaker][OpenAI]`で始まるログを確認します。
 
-`401`はAPIキー、`400`はモデル名またはリクエスト形式、`429`は利用上限・レート制限、`5xx`はOpenAI側の一時的なエラーです。`API_TIMEOUT`は階層生成で90秒、分析生成で60秒以内に応答がなかった場合、`API_NETWORK_ERROR`は通信・CORS・DNSなどのエラーです。APIキー未設定の場合は、リクエストを送らず固定データへフォールバックするログが表示されます。
+`401`はAPIキー、`400`はモデル名またはリクエスト形式、`429`は利用上限・レート制限、`5xx`はOpenAI側の一時的なエラーです。`API_TIMEOUT`は階層生成で90秒、分析生成で60秒以内に応答がなかった場合、`API_NETWORK_ERROR`は通信・CORS・DNSなどのエラーです。APIキー未設定の場合は、意見入力を開始できません。
 
 ## セキュリティ上の注意
 
-このプロトタイプはブラウザからOpenAI APIを直接呼び出すため、ビルド生成物にAPIキーが含まれます。`dist/bb_proto4.html`を公開配布する場合、キーが利用者から見えることを前提にしてください。本番利用では、APIキーをブラウザへ渡さないバックエンドプロキシ構成に変更してください。
+このプロトタイプはブラウザからOpenAI APIを直接呼び出します。APIキーは画面入力後、ページのメモリ内だけに保持し、localStorage・sessionStorage・Cookie・生成HTMLへ保存しません。ただしブラウザから直接APIを呼び出す以上、入力したキーはそのブラウザ上の実行環境から完全には隠せません。本番で共有キーを使う場合は、APIキーをブラウザへ渡さないバックエンドプロキシ構成に変更してください。
 
 `.env`と`dist/`は`.gitignore`で除外されています。実際のAPIキーをコミットしないでください。
 
 ## 起動
 
-1. `.env.example` を `.env` にコピーし、`OPENAI_API_KEY` を設定します。
+1. `.env.example` を `.env` にコピーし、必要なら`OPENAI_MODEL`を設定します。
 2. `npm run build` を実行します。
 3. `dist/bb_proto4.html` をWebサーバー経由で開きます。
+4. 画面で自分のAPIキーを入力して設定します。
 
-APIキーを設定せずにビルドした場合は、既存の固定データへフォールバックします。生成HTMLにはAPIキーが含まれるため、公開配布時にはキーを埋め込まない構成を使用してください。
+APIキーが未設定の間は意見入力を開始できません。生成HTMLにはAPIキーが含まれません。
 
 `npm run check` でHTML内のアプリケーションJavaScriptの構文を確認できます。

@@ -2,7 +2,11 @@
         const OPENAI_GROUP_TYPE_GUIDANCE = `typeは次の6種類から、バブルの支持分布に最も合うものを1つ選んでください: 分散型（均等に散らばる）、一極集中型（最大勢力が1つ）、多極型（3つ以上の勢力）、双極対立型（2つの対立勢力）、階層型（上位から下位へ段階的）、連鎖型（隣接関係・流れが重要）。`;
         const OPENAI_GROUP_LEVELS = ['root', 'central', 'leaf'];
         const OPENAI_MODEL = window.__OPENAI_MODEL__ || 'gpt-5.6-luna';
-        const OPENAI_API_KEY = window.__OPENAI_API_KEY__ || '';
+        function normalizeRuntimeApiKey(value) {
+            const normalized = String(value || '').trim();
+            return normalized && normalized !== '__OPENAI_API_KEY__' && normalized !== 'your_api_key_here' ? normalized : '';
+        }
+        let activeOpenAIKey = normalizeRuntimeApiKey(window.__OPENAI_API_KEY__);
         const OPENAI_STRUCTURE_TIMEOUT_MS = 90000;
         const OPENAI_ANALYSIS_TIMEOUT_MS = 60000;
         const OPENAI_STRUCTURE_MAX_ATTEMPTS = 2;
@@ -20,8 +24,8 @@
 
         function redactApiLog(value) {
             let text = String(value == null ? '' : value);
-            if (OPENAI_API_KEY && OPENAI_API_KEY !== '__OPENAI_API_KEY__') {
-                text = text.split(OPENAI_API_KEY).join('[REDACTED_API_KEY]');
+            if (activeOpenAIKey) {
+                text = text.split(activeOpenAIKey).join('[REDACTED_API_KEY]');
             }
             return text.replace(/Bearer\s+[^\s"']+/gi, 'Bearer [REDACTED]');
         }
@@ -30,11 +34,20 @@
         function apiWarn(message, details) { console.warn(OPENAI_LOG_PREFIX, message, details || ''); }
         function apiError(message, details) { console.error(OPENAI_LOG_PREFIX, message, details || ''); }
 
-        const apiKeyConfigured = Boolean(OPENAI_API_KEY && OPENAI_API_KEY !== '__OPENAI_API_KEY__');
-        if (apiKeyConfigured) {
+        function isOpenAIKeyConfigured() {
+            return Boolean(activeOpenAIKey);
+        }
+        window.setRuntimeOpenAIKey = function(value) {
+            activeOpenAIKey = normalizeRuntimeApiKey(value);
+            return isOpenAIKeyConfigured();
+        };
+        window.hasRuntimeOpenAIKey = function() {
+            return isOpenAIKeyConfigured();
+        };
+        if (isOpenAIKeyConfigured()) {
             apiLog('API設定を検出しました', { model: OPENAI_MODEL, apiKeyConfigured: true });
         } else {
-            apiWarn('APIキーが未設定またはプレースホルダーです。npm run build後にdist/bb_proto4.htmlを開いてください。', { model: OPENAI_MODEL, apiKeyConfigured: false });
+            apiWarn('APIキーが未設定です。意見入力前に画面で設定してください。', { model: OPENAI_MODEL, apiKeyConfigured: false });
         }
 
         // Responses APIのStructured Outputsで利用するスキーマ。
@@ -615,7 +628,7 @@
                     return {
                         id: String(bubble.id), name: String(bubble.name || '名称未設定'), size: bubble.size,
                         color: numericColor, htmlColor: normalizeHtmlColor(bubble.htmlColor, numericColor), pos,
-                        childId: bubble.childId ? String(bubble.childId) : null, desc: String(bubble.desc || '公開情報から生成された説明です。'),
+                        childId: bubble.childId ? String(bubble.childId) : null, desc: String(bubble.desc || `${String(bubble.name || bubble.id)}に関する意見や評価が集まるバブルです。`),
                         isEstimated: bubble.isEstimated !== false, confidence: Math.max(0, Math.min(1, Number(bubble.confidence) || 0)),
                         analysis: normalizeAnalysis(bubble.analysis), sources: normalizeSources(bubble.sources)
                     };
@@ -856,7 +869,7 @@
             const startedAt = performance.now();
             const response = await fetchWithTimeout('https://api.openai.com/v1/responses', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${OPENAI_API_KEY}` },
+                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${activeOpenAIKey}` },
                 body: JSON.stringify(requestBody)
             }, timeoutMs);
             const requestId = response.headers.get('x-request-id');
@@ -1068,7 +1081,7 @@
         async function requestDynamicUniverse(input) {
             activeAnalysisInput = String(input || '');
             bubbleAnalysisRequests.clear();
-            if (!apiKeyConfigured) {
+            if (!isOpenAIKeyConfigured()) {
                 apiWarn('階層生成APIをスキップします（APIキー未設定）');
                 return null;
             }
@@ -1119,7 +1132,7 @@
         }
 
         async function requestBubbleAnalysis(bubble, group, input = activeAnalysisInput) {
-            if (!bubble || !group || !apiKeyConfigured) return null;
+            if (!bubble || !group || !isOpenAIKeyConfigured()) return null;
             const bubbleId = String(bubble.id || '');
             if (!bubbleId) return null;
             if (bubbleAnalysisRequests.has(bubbleId)) return bubbleAnalysisRequests.get(bubbleId);
@@ -1133,7 +1146,7 @@
                     try {
                         const response = await fetchWithTimeout('https://api.openai.com/v1/responses', {
                             method: 'POST',
-                            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${OPENAI_API_KEY}` },
+                            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${activeOpenAIKey}` },
                             body: JSON.stringify(buildOpenAIBubbleAnalysisRequest(bubble, group, String(input || ''), { repair: attempt > 1 }))
                         }, OPENAI_ANALYSIS_TIMEOUT_MS);
                         requestId = response.headers.get('x-request-id');
@@ -1209,6 +1222,6 @@
         }
 
         async function requestBubbleGroupAnalyses(group, input = activeAnalysisInput) {
-            if (!group || !Array.isArray(group.bubbles) || !apiKeyConfigured) return [];
+            if (!group || !Array.isArray(group.bubbles) || !isOpenAIKeyConfigured()) return [];
             return runWithConcurrency(group.bubbles, 3, bubble => requestBubbleAnalysis(bubble, group, input));
         }

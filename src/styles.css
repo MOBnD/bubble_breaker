@@ -56,6 +56,20 @@
             text-shadow: 0 1px 5px rgba(0, 0, 0, 0.9);
         }
         #group-list > div:hover { background: rgba(96, 165, 250, 0.16); }
+        .group-description {
+            margin: 9px 0 0;
+            color: var(--ui-muted, #cbd5e1);
+            font-size: 11px;
+            line-height: 1.65;
+            border-left: 2px solid rgba(72, 229, 255, 0.55);
+            padding-left: 9px;
+        }
+        .single-description-label {
+            margin-bottom: 8px;
+            color: var(--ui-cyan, #8beeff);
+            font-size: 10px;
+            letter-spacing: 0.08em;
+        }
 
         /* 画面フェード用 */
         .screen-container { transition: opacity 0.5s ease-in-out, transform 0.5s ease, visibility 0.5s; opacity: 0; visibility: hidden; pointer-events: none; position: absolute; inset: 0; width: 100%; height: 100%; }
@@ -434,6 +448,22 @@
         }
         .portal-panel #input-opinion::placeholder { color: #718aa6; }
         .portal-panel #input-opinion:focus { border-color: var(--ui-cyan); box-shadow: 0 0 0 3px rgba(72, 229, 255, 0.1), inset 0 0 22px rgba(44, 124, 216, 0.12); }
+        .api-key-entry {
+            padding: 10px;
+            border: 1px solid rgba(72, 229, 255, 0.22);
+            border-radius: 10px;
+            background: rgba(4, 12, 28, 0.58);
+        }
+        .api-key-button {
+            min-width: 58px;
+            color: var(--ui-ink);
+            border: 1px solid rgba(72, 229, 255, 0.42);
+            border-radius: 7px;
+            background: rgba(72, 229, 255, 0.12);
+            cursor: pointer;
+        }
+        .api-key-button:hover { border-color: var(--ui-cyan); background: rgba(72, 229, 255, 0.22); }
+        #btn-dive:disabled { cursor: not-allowed; opacity: 0.42; filter: saturate(0.45); box-shadow: none; }
         .portal-panel #btn-dive {
             min-height: 52px;
             background: linear-gradient(100deg, #1b86db, #7252df 52%, #cf4caf);

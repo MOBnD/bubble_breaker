@@ -1058,16 +1058,17 @@
 
         function createAnalysisProbeVisual(isFocus = false) {
             const visual = new THREE.Group();
+            visual.scale.setScalar(isFocus ? 1.35 : 1.12);
             const orbit = new THREE.Mesh(
-                new THREE.TorusGeometry(1.035, isFocus ? 0.018 : 0.012, 6, 64),
-                new THREE.MeshBasicMaterial({ color: 0xffe38a, transparent: true, opacity: isFocus ? 0.9 : 0.56, depthWrite: false, blending: THREE.AdditiveBlending })
+                new THREE.TorusGeometry(1.04, isFocus ? 0.032 : 0.022, 8, 72),
+                new THREE.MeshBasicMaterial({ color: 0xffe38a, transparent: true, opacity: isFocus ? 1 : 0.82, depthWrite: false, blending: THREE.AdditiveBlending })
             );
             orbit.rotation.x = Math.PI * 0.5;
             visual.add(orbit);
             const probe = new THREE.Group();
             const body = new THREE.Mesh(
                 new THREE.SphereGeometry(isFocus ? 0.065 : 0.045, 10, 8),
-                new THREE.MeshBasicMaterial({ color: 0xfff4c2, transparent: true, opacity: 0.98, depthWrite: false, blending: THREE.AdditiveBlending })
+                new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 1, depthWrite: false, blending: THREE.AdditiveBlending })
             );
             const nose = new THREE.Mesh(
                 new THREE.ConeGeometry(isFocus ? 0.045 : 0.032, isFocus ? 0.16 : 0.11, 7, 1),
@@ -1081,8 +1082,13 @@
             );
             probe.add(body, nose, antenna);
             visual.add(probe);
+            const scanBeam = new THREE.Line(
+                new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3(0, 0, -0.52)]),
+                new THREE.LineBasicMaterial({ color: 0x9beeff, transparent: true, opacity: isFocus ? 0.9 : 0.62, depthWrite: false, blending: THREE.AdditiveBlending })
+            );
+            probe.add(scanBeam);
             const completionFlash = new THREE.Mesh(
-                new THREE.TorusGeometry(0.94, isFocus ? 0.045 : 0.03, 8, 64),
+                new THREE.TorusGeometry(0.94, isFocus ? 0.07 : 0.05, 10, 72),
                 new THREE.MeshBasicMaterial({ color: 0x8dffca, transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending })
             );
             completionFlash.rotation.x = Math.PI * 0.5;
@@ -1834,7 +1840,11 @@
                 ? activeDB[data.parentId].bubbles.find(bubble => bubble.childId === data.id)
                 : null;
             const groupDisplayTitle = parentAnchor ? parentAnchor.name : data.title;
+            const groupDisplayDescription = parentAnchor && parentAnchor.desc
+                ? parentAnchor.desc
+                : (data.desc || `${groupDisplayTitle}に関する意見のまとまりを観測しています。`);
             document.getElementById('group-title').innerText = groupDisplayTitle;
+            document.getElementById('group-desc').innerText = groupDisplayDescription;
             document.getElementById('group-type').innerText = data.type;
             document.getElementById('btn-zoomout-group').style.display = data.parentId ? 'flex' : 'none';
             
@@ -1904,7 +1914,7 @@
 
             // UIパネルの情報を更新
             document.getElementById('single-title').innerText = bubbleData.name;
-            document.getElementById('single-desc').innerText = bubbleData.desc || "このバブルの簡易説明です。";
+            document.getElementById('single-desc').innerText = bubbleData.desc || `${bubbleData.name}に関する意見や評価が集まるバブルです。`;
             document.getElementById('single-percent').innerText = bubbleData.size;
             document.getElementById('single-estimated').classList.toggle('hidden', bubbleData.isEstimated !== true);
             

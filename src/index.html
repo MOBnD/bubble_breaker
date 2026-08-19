@@ -107,8 +107,17 @@
             <div id="input-panel" class="portal-panel glass-panel p-10 rounded-2xl w-full max-w-lg text-center flex flex-col gap-6 transition-all duration-500 relative z-50">
                 <h2 class="text-3xl font-bold text-white mb-2">あなたの意見を教えてください</h2>
                 <p class="text-sm text-gray-300">入力した言葉から、あなたが属するバブルの宇宙を探索します。</p>
+                <div class="api-key-entry text-left">
+                    <label for="openai-api-key" class="block text-xs text-cyan-200 mb-2">OpenAI APIキー（意見入力前に設定）</label>
+                    <div class="flex gap-2">
+                        <input type="password" id="openai-api-key" autocomplete="off" placeholder="sk-..." class="flex-1 bg-black/50 border border-gray-600 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-cyan-400 transition-colors pointer-events-auto">
+                        <button id="btn-set-api-key" type="button" class="api-key-button">設定</button>
+                    </div>
+                    <div id="api-key-status" class="mt-2 text-[10px] text-amber-200">APIキー未設定</div>
+                    <p class="mt-2 text-[10px] leading-relaxed text-gray-500">キーはこのページのメモリ内だけで使用し、保存・共有しません。公開サイトでは自分のキーを入力してください。</p>
+                </div>
                 <input type="text" id="input-opinion" placeholder="例: きのこの山が好き" class="w-full bg-black/50 border border-gray-600 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-blue-500 transition-colors pointer-events-auto">
-                <button id="btn-dive" class="w-full bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 text-white font-bold py-3 px-4 rounded-lg transition-all shadow-[0_0_15px_rgba(59,130,246,0.5)] cursor-pointer pointer-events-auto">
+                <button id="btn-dive" disabled class="w-full bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 text-white font-bold py-3 px-4 rounded-lg transition-all shadow-[0_0_15px_rgba(59,130,246,0.5)] cursor-pointer pointer-events-auto">
                     宇宙へダイブ 🚀
                 </button>
             </div>
@@ -128,6 +137,7 @@
                         </span>
                     </div>
                     <h2 id="group-title" class="text-xl font-bold">--</h2>
+                    <p id="group-desc" class="group-description">--</p>
                 </div>
                 <div id="panel-group-content" class="panel-collapsible-content">
                     <div class="panel-section panel-type-card bg-black/40 rounded-lg p-3 border border-gray-700">
@@ -151,7 +161,8 @@
                 <div class="absolute -top-8 left-1/2 transform -translate-x-1/2 text-xs text-blue-300 opacity-0 group-hover:opacity-100 transition-opacity bg-black/60 px-3 py-1 rounded-full border border-blue-500/50 shadow-lg">
                     クリックして詳細解析へ
                 </div>
-                <h2 id="single-title" class="text-4xl font-bold text-white text-shadow-lg mb-4 group-hover:text-blue-200 transition-colors">--</h2>
+                <h2 id="single-title" class="text-4xl font-bold text-white text-shadow-lg mb-2 group-hover:text-blue-200 transition-colors">--</h2>
+                <div class="single-description-label">このバブルの簡易説明</div>
                 <p id="single-desc" class="text-sm text-gray-200 bg-black/50 p-4 rounded-xl backdrop-blur-md border border-white/10 group-hover:border-blue-500/50 transition-colors">--</p>
             </div>
 
