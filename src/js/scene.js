@@ -416,7 +416,15 @@
         const cosmicSystems = [];
         const shootingStars = [];
         let ngc3324Dome = null;
+        const deepSeaBackgroundGroup = new THREE.Group();
+        const dataBackgroundGroup = new THREE.Group();
+        const backgroundThemeGroups = { deepSea: deepSeaBackgroundGroup, data: dataBackgroundGroup };
+        const BACKGROUND_THEME_NAMES = ['space', 'deepSea', 'data'];
+        let backgroundTheme = BACKGROUND_THEME_NAMES.includes(localStorage.getItem('bubblebreaker.backgroundTheme'))
+            ? localStorage.getItem('bubblebreaker.backgroundTheme')
+            : 'space';
         scene.add(cosmicBackgroundGroup);
+        scene.add(deepSeaBackgroundGroup, dataBackgroundGroup);
 
         function cosmicRandom(seed) {
             const value = Math.sin(seed * 12.9898 + 78.233) * 43758.5453;
@@ -451,6 +459,151 @@
             context.fillRect(0, 0, 128, 128);
             return new THREE.CanvasTexture(canvas);
         }
+
+        function createThemeDomeTexture(theme) {
+            const canvas = document.createElement('canvas');
+            canvas.width = 2048;
+            canvas.height = 1024;
+            const context = canvas.getContext('2d');
+            const gradient = context.createLinearGradient(0, 0, 0, canvas.height);
+            if (theme === 'deepSea') {
+                gradient.addColorStop(0, '#02182e');
+                gradient.addColorStop(0.5, '#043f5a');
+                gradient.addColorStop(1, '#010817');
+                context.fillStyle = gradient;
+                context.fillRect(0, 0, canvas.width, canvas.height);
+                for (let index = 0; index < 28; index++) {
+                    const x = cosmicRandom(index * 4.3 + 20) * canvas.width;
+                    const y = (0.2 + cosmicRandom(index * 7.1 + 40) * 0.72) * canvas.height;
+                    const radius = 70 + cosmicRandom(index * 2.7 + 60) * 220;
+                    const glow = context.createRadialGradient(x, y, 0, x, y, radius);
+                    glow.addColorStop(0, 'rgba(54, 231, 218, 0.42)');
+                    glow.addColorStop(0.45, 'rgba(17, 155, 180, 0.14)');
+                    glow.addColorStop(1, 'rgba(0, 0, 0, 0)');
+                    context.fillStyle = glow;
+                    context.fillRect(x - radius, y - radius, radius * 2, radius * 2);
+                }
+            } else {
+                gradient.addColorStop(0, '#05071e');
+                gradient.addColorStop(0.5, '#11134a');
+                gradient.addColorStop(1, '#03050f');
+                context.fillStyle = gradient;
+                context.fillRect(0, 0, canvas.width, canvas.height);
+                context.strokeStyle = 'rgba(91, 220, 255, 0.12)';
+                context.lineWidth = 2;
+                for (let x = 0; x < canvas.width; x += 96) {
+                    context.beginPath(); context.moveTo(x, 0); context.lineTo(x, canvas.height); context.stroke();
+                }
+                for (let y = 0; y < canvas.height; y += 96) {
+                    context.beginPath(); context.moveTo(0, y); context.lineTo(canvas.width, y); context.stroke();
+                }
+                for (let index = 0; index < 36; index++) {
+                    const x = cosmicRandom(index * 5.2 + 80) * canvas.width;
+                    const y = cosmicRandom(index * 8.7 + 90) * canvas.height;
+                    context.fillStyle = index % 3 === 0 ? 'rgba(240, 119, 255, 0.7)' : 'rgba(76, 229, 255, 0.64)';
+                    context.fillRect(x, y, 4 + (index % 3) * 2, 4 + (index % 3) * 2);
+                }
+            }
+            const texture = new THREE.CanvasTexture(canvas);
+            texture.encoding = THREE.sRGBEncoding;
+            texture.wrapS = THREE.RepeatWrapping;
+            texture.wrapT = THREE.ClampToEdgeWrapping;
+            texture.needsUpdate = true;
+            return texture;
+        }
+
+        function createThemeDome(theme, group) {
+            const dome = new THREE.Mesh(
+                new THREE.SphereGeometry(70000, 96, 64),
+                new THREE.MeshBasicMaterial({ map: createThemeDomeTexture(theme), side: THREE.BackSide, depthWrite: false, depthTest: false, fog: false, toneMapped: false })
+            );
+            dome.renderOrder = -999;
+            group.add(dome);
+            return dome;
+        }
+
+        function createDeepSeaBackgroundTheme() {
+            const group = deepSeaBackgroundGroup;
+            const positions = new Float32Array(1600 * 3);
+            const colors = new Float32Array(1600 * 3);
+            for (let index = 0; index < 1600; index++) {
+                const position = createSphericalBackgroundPosition(index, 1600, 800, 14500, 77);
+                positions[index * 3] = position.x;
+                positions[index * 3 + 1] = position.y;
+                positions[index * 3 + 2] = position.z;
+                const color = new THREE.Color().setHSL(0.43 + cosmicRandom(index * 1.7) * 0.13, 0.82, 0.48 + cosmicRandom(index * 2.9) * 0.3);
+                colors[index * 3] = color.r; colors[index * 3 + 1] = color.g; colors[index * 3 + 2] = color.b;
+            }
+            const geometry = new THREE.BufferGeometry();
+            geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+            geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+            const plankton = new THREE.Points(geometry, new THREE.PointsMaterial({ size: 18, vertexColors: true, transparent: true, opacity: 0.66, depthWrite: false, blending: THREE.AdditiveBlending }));
+            group.add(plankton);
+            const beacons = [];
+            for (let index = 0; index < 18; index++) {
+                const beacon = new THREE.Sprite(new THREE.SpriteMaterial({ map: createGlowTexture('rgba(64,255,226,1)'), color: 0x52f0d2, transparent: true, opacity: 0.38, depthWrite: false, blending: THREE.AdditiveBlending, fog: false }));
+                beacon.position.copy(createSphericalBackgroundPosition(index, 18, 3000, 11500, 177));
+                beacon.scale.setScalar(90 + (index % 5) * 22);
+                group.add(beacon);
+                beacons.push(beacon);
+            }
+            group.userData.themeAnimation = { rotationSpeed: 0.000006, plankton, beacons, phase: 0.4 };
+        }
+
+        function createDataBackgroundTheme() {
+            const group = dataBackgroundGroup;
+            const nodeCount = 260;
+            const positions = new Float32Array(nodeCount * 3);
+            const nodePositions = [];
+            for (let index = 0; index < nodeCount; index++) {
+                const position = createSphericalBackgroundPosition(index, nodeCount, 1200, 13500, 113);
+                positions[index * 3] = position.x; positions[index * 3 + 1] = position.y; positions[index * 3 + 2] = position.z;
+                nodePositions.push(position);
+            }
+            const nodeGeometry = new THREE.BufferGeometry();
+            nodeGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+            group.add(new THREE.Points(nodeGeometry, new THREE.PointsMaterial({ color: 0x55e9ff, size: 24, transparent: true, opacity: 0.62, depthWrite: false, blending: THREE.AdditiveBlending })));
+            const linePositions = [];
+            for (let index = 0; index < nodePositions.length; index += 3) {
+                const next = nodePositions[(index + 1) % nodePositions.length];
+                linePositions.push(nodePositions[index], next);
+            }
+            const lineGeometry = new THREE.BufferGeometry().setFromPoints(linePositions);
+            group.add(new THREE.LineSegments(lineGeometry, new THREE.LineBasicMaterial({ color: 0x9a79ff, transparent: true, opacity: 0.22, depthWrite: false, blending: THREE.AdditiveBlending })));
+            const dataDome = createThemeDome('data', group);
+            group.userData.themeAnimation = { rotationSpeed: 0.00001, nodeCloud: group.children[0], dataDome, phase: 1.3 };
+        }
+
+        function createAdditionalBackgroundThemes() {
+            createThemeDome('deepSea', deepSeaBackgroundGroup);
+            createDeepSeaBackgroundTheme();
+            createDataBackgroundTheme();
+        }
+
+        function setThemeObjectsVisible(theme) {
+            const isSpace = theme === 'space';
+            starMesh.visible = isSpace;
+            galaxyClusters.forEach(cluster => { cluster.visible = isSpace; });
+            cosmicBackgroundGroup.visible = isSpace;
+            deepSeaBackgroundGroup.visible = theme === 'deepSea';
+            dataBackgroundGroup.visible = theme === 'data';
+        }
+
+        window.setBackgroundTheme = function(theme = 'space') {
+            backgroundTheme = BACKGROUND_THEME_NAMES.includes(theme) ? theme : 'space';
+            const colors = {
+                space: { clear: 0x10182d, fog: 0x10182d, density: 0.0003 },
+                deepSea: { clear: 0x021426, fog: 0x03283b, density: 0.00022 },
+                data: { clear: 0x06081e, fog: 0x0b0d32, density: 0.00018 }
+            }[backgroundTheme];
+            scene.background.set(colors.clear);
+            scene.fog.color.set(colors.fog);
+            scene.fog.density = colors.density;
+            renderer.setClearColor(colors.clear, 1);
+            setThemeObjectsVisible(backgroundTheme);
+            if (ngc3324Dome) ngc3324Dome.visible = backgroundTheme === 'space' && window.__bubbleBreakerNGC3324Visible !== false;
+            return backgroundTheme;
+        };
 
         function softenNGC3324Seam(texture) {
             const source = texture.image;
@@ -526,7 +679,7 @@
 
         function setNGC3324BackgroundVisible(visible) {
             const nextVisible = Boolean(visible);
-            if (ngc3324Dome) ngc3324Dome.visible = nextVisible;
+            if (ngc3324Dome) ngc3324Dome.visible = nextVisible && backgroundTheme === 'space';
             window.__bubbleBreakerNGC3324Visible = nextVisible;
             return nextVisible;
         }
@@ -673,6 +826,7 @@
 
         function createCosmicEnvironment() {
             createNGC3324PhotoDome();
+            createAdditionalBackgroundThemes();
             galaxyClusterCenters.forEach((center, index) => addGalaxyGlow(center, 180 + index * 22, (0.58 + index * 0.047) % 1));
             const externalSystemCount = galaxyClusterCenters.length * GALAXIES_PER_CLUSTER;
             Array.from({ length: externalSystemCount }, (_, index) => {
@@ -717,6 +871,7 @@
         }
 
         galaxyClusterCenters.forEach((center, index) => createGalaxyCluster(center, index));
+        setBackgroundTheme(backgroundTheme);
 
         // --- 個別のバブル（球体）を生成・管理する仕組み ---
         let currentBubbles = []; // 現在画面に表示されているバブルの配列を保存
@@ -735,6 +890,10 @@
         let singleViewDirection = new THREE.Vector3(0, 0, 1);
         let explorerSelectedBubbleId = null;
         let bubbleVisualMode = localStorage.getItem('bubblebreaker.bubbleVisualMode') === 'classic' ? 'classic' : 'network';
+        const BUBBLE_COLOR_THEME_NAMES = ['legacy', 'neon', 'warm', 'space', 'deepSea', 'data'];
+        let bubbleColorTheme = BUBBLE_COLOR_THEME_NAMES.includes(localStorage.getItem('bubblebreaker.bubbleColorTheme'))
+            ? localStorage.getItem('bubblebreaker.bubbleColorTheme')
+            : 'legacy';
 
         function getGroupOverviewTarget() {
             if (!currentBubbles.length) return null;
@@ -833,6 +992,51 @@
                 hash = Math.imul(hash, 16777619);
             }
             return hash >>> 0;
+        }
+
+        function getBubbleThemeColor(colorHex, bubbleData = null) {
+            const base = new THREE.Color(Number(colorHex) || 0x66ccff);
+            if (bubbleColorTheme === 'legacy') return base;
+            const hsl = {};
+            base.getHSL(hsl);
+            const seed = hashBubbleValue(bubbleData && bubbleData.id);
+            const variation = (seed % 100) / 100;
+            if (bubbleColorTheme === 'neon') {
+                hsl.h = (0.46 + variation * 0.48) % 1;
+                hsl.s = 0.88;
+                hsl.l = 0.62 + (seed % 12) / 100;
+            } else if (bubbleColorTheme === 'warm') {
+                hsl.h = 0.015 + variation * 0.13;
+                hsl.s = 0.86;
+                hsl.l = 0.58 + (seed % 15) / 100;
+            } else if (bubbleColorTheme === 'space') {
+                hsl.h = (0.57 + variation * 0.27) % 1;
+                hsl.s = 0.78;
+                hsl.l = 0.58 + (seed % 14) / 100;
+            } else if (bubbleColorTheme === 'deepSea') {
+                hsl.h = 0.43 + variation * 0.13;
+                hsl.s = 0.78;
+                hsl.l = 0.48 + (seed % 15) / 100;
+            } else if (bubbleColorTheme === 'data') {
+                hsl.h = (0.48 + variation * 0.39) % 1;
+                hsl.s = 0.92;
+                hsl.l = 0.59 + (seed % 13) / 100;
+            }
+            return base.setHSL(hsl.h, hsl.s, hsl.l);
+        }
+
+        function applyBubbleMeshColor(mesh, bubbleData) {
+            if (!mesh || !mesh.material) return;
+            const color = getBubbleThemeColor(mesh.userData.sourceColor, bubbleData);
+            mesh.material.color.copy(color);
+            if (mesh.material.emissive) mesh.material.emissive.copy(color);
+            const visuals = [mesh.userData.networkVisual, mesh.userData.cosmicVisual].filter(Boolean);
+            visuals.forEach(visual => visual.traverse(child => {
+                if (!child.material || !child.material.color) return;
+                const animation = visual.userData.networkAnimation || visual.userData.cosmicAnimation;
+                if (animation && (child === animation.observerRing || child === animation.scanRing)) return;
+                child.material.color.copy(color);
+            }));
         }
 
         function createNetworkBubbleVisual(displayColor, bubbleData, level = 'central', isFocus = false) {
@@ -968,6 +1172,72 @@
             return visual;
         }
 
+        function createCosmicBubbleVisual(displayColor, bubbleData, level = 'central', isFocus = false) {
+            const seed = hashBubbleValue(`${bubbleData && bubbleData.id}:cosmic`);
+            const visual = new THREE.Group();
+            const atmosphere = new THREE.Mesh(
+                new THREE.SphereGeometry(1.11, 28, 18),
+                new THREE.MeshBasicMaterial({ color: displayColor, transparent: true, opacity: isFocus ? 0.2 : 0.11, side: THREE.BackSide, depthWrite: false, blending: THREE.AdditiveBlending })
+            );
+            visual.add(atmosphere);
+            const orbitMaterial = new THREE.MeshBasicMaterial({ color: displayColor, transparent: true, opacity: isFocus ? 0.78 : 0.42, depthWrite: false, blending: THREE.AdditiveBlending });
+            const orbitRings = [];
+            [1.22, 1.43].forEach((radius, index) => {
+                const orbit = new THREE.Mesh(new THREE.TorusGeometry(radius, index === 0 ? 0.022 : 0.014, 6, 56), orbitMaterial);
+                orbit.rotation.set(
+                    Math.PI * (0.26 + ((seed + index * 11) % 30) / 100),
+                    Math.PI * ((seed + index * 37) % 100) / 100,
+                    Math.PI * ((seed + index * 17) % 100) / 100
+                );
+                visual.add(orbit);
+                orbitRings.push(orbit);
+            });
+            const moonMaterial = new THREE.MeshBasicMaterial({ color: displayColor, transparent: true, opacity: 0.9, depthWrite: false, blending: THREE.AdditiveBlending });
+            const moonGeometry = new THREE.SphereGeometry(isFocus ? 0.09 : 0.07, 10, 8);
+            const moons = [];
+            const moonCount = level === 'central' ? 3 : 2;
+            for (let index = 0; index < moonCount; index++) {
+                const moon = new THREE.Mesh(moonGeometry, moonMaterial);
+                visual.add(moon);
+                moons.push({ mesh: moon, radius: 1.28 + index * 0.13, angle: ((seed + index * 113) % 360) * Math.PI / 180, speed: 0.34 + index * 0.11, height: (index - 1) * 0.12 });
+            }
+            const asteroidCount = level === 'central' ? 44 : 28;
+            const asteroidPositions = new Float32Array(asteroidCount * 3);
+            for (let index = 0; index < asteroidCount; index++) {
+                const angle = ((seed + index * 71) % 360) * Math.PI / 180;
+                const radius = 1.48 + ((seed + index * 19) % 28) / 100;
+                asteroidPositions[index * 3] = Math.cos(angle) * radius;
+                asteroidPositions[index * 3 + 1] = (cosmicRandom(seed + index * 2.7) - 0.5) * 0.12;
+                asteroidPositions[index * 3 + 2] = Math.sin(angle) * radius;
+            }
+            const asteroidGeometry = new THREE.BufferGeometry();
+            asteroidGeometry.setAttribute('position', new THREE.BufferAttribute(asteroidPositions, 3));
+            const asteroidCloud = new THREE.Points(asteroidGeometry, new THREE.PointsMaterial({ color: displayColor, size: isFocus ? 0.065 : 0.045, transparent: true, opacity: 0.58, depthWrite: false, blending: THREE.AdditiveBlending }));
+            visual.add(asteroidCloud);
+
+            const comet = new THREE.Mesh(
+                new THREE.ConeGeometry(0.07, 0.62, 7, 1, true),
+                new THREE.MeshBasicMaterial({ color: isFocus ? 0xffe38a : 0xd4f7ff, transparent: true, opacity: 0.9, depthWrite: false, blending: THREE.AdditiveBlending })
+            );
+            visual.add(comet);
+            const scanRing = new THREE.Mesh(
+                new THREE.TorusGeometry(0.94, 0.018, 6, 48),
+                new THREE.MeshBasicMaterial({ color: 0x9beeff, transparent: true, opacity: 0.9, depthWrite: false, blending: THREE.AdditiveBlending })
+            );
+            scanRing.visible = false;
+            visual.add(scanRing);
+            visual.userData.cosmicAnimation = {
+                phase: (seed % 1000) / 1000 * Math.PI * 2,
+                orbitRings,
+                moons,
+                asteroidCloud,
+                comet,
+                scanRing
+            };
+            visual.userData.bubbleVisualMode = 'cosmic';
+            return visual;
+        }
+
         function ensureNetworkBubbleVisual(mesh, bubbleData, level, isFocus = false) {
             if (!mesh || !bubbleData) return null;
             if (!mesh.userData.networkVisual) {
@@ -979,22 +1249,58 @@
             return mesh.userData.networkVisual;
         }
 
+        function ensureCosmicBubbleVisual(mesh, bubbleData, level, isFocus = false) {
+            if (!mesh || !bubbleData) return null;
+            if (!mesh.userData.cosmicVisual) {
+                const displayColor = mesh.material && mesh.material.color ? mesh.material.color.clone() : new THREE.Color(0x66ccff);
+                mesh.userData.cosmicVisual = createCosmicBubbleVisual(displayColor, bubbleData, level, isFocus);
+                mesh.add(mesh.userData.cosmicVisual);
+            }
+            mesh.userData.cosmicVisual.visible = bubbleVisualMode === 'cosmic';
+            return mesh.userData.cosmicVisual;
+        }
+
+        function ensureBubbleVisual(mesh, bubbleData, level, isFocus = false) {
+            if (!mesh || !bubbleData) return null;
+            if (bubbleVisualMode === 'network') {
+                const visual = ensureNetworkBubbleVisual(mesh, bubbleData, level, isFocus);
+                if (mesh.userData.cosmicVisual) mesh.userData.cosmicVisual.visible = false;
+                return visual;
+            }
+            if (bubbleVisualMode === 'cosmic') {
+                const visual = ensureCosmicBubbleVisual(mesh, bubbleData, level, isFocus);
+                if (mesh.userData.networkVisual) mesh.userData.networkVisual.visible = false;
+                return visual;
+            }
+            if (mesh.userData.networkVisual) mesh.userData.networkVisual.visible = false;
+            if (mesh.userData.cosmicVisual) mesh.userData.cosmicVisual.visible = false;
+            return null;
+        }
+
         window.setBubbleVisualMode = function(mode = 'network') {
             bubbleVisualMode = mode === 'classic' ? 'classic' : 'network';
             const bubbles = [...currentBubbles];
             if (transitionState) bubbles.push(...(transitionState.outgoing || []));
             bubbles.forEach(bubble => {
                 if (!bubble || !bubble.mesh) return;
-                const visual = ensureNetworkBubbleVisual(bubble.mesh, bubble.data, bubble.level, bubble.isFocus);
-                if (visual) visual.visible = bubbleVisualMode === 'network';
+                ensureBubbleVisual(bubble.mesh, bubble.data, bubble.level, bubble.isFocus);
             });
             return bubbleVisualMode;
+        };
+
+        window.setBubbleColorTheme = function(theme = 'legacy') {
+            bubbleColorTheme = BUBBLE_COLOR_THEME_NAMES.includes(theme) ? theme : 'legacy';
+            const bubbles = [...currentBubbles];
+            if (transitionState) bubbles.push(...(transitionState.outgoing || []));
+            bubbles.forEach(bubble => applyBubbleMeshColor(bubble.mesh, bubble.data));
+            return bubbleColorTheme;
         };
 
         // バブルの3Dモデル(Mesh)を作る関数
         function createBubbleMesh(size, colorHex, position, bubbleData = null, level = 'central', isFocus = false) {
             // ガラスのような質感を出すための物理ベースマテリアル設定
-            const displayColor = new THREE.Color(colorHex);
+            const sourceColor = new THREE.Color(colorHex);
+            const displayColor = getBubbleThemeColor(colorHex, bubbleData);
             const hsl = {};
             displayColor.getHSL(hsl);
             displayColor.setHSL(hsl.h, Math.max(0.58, hsl.s), Math.max(0.48, hsl.l));
@@ -1009,8 +1315,10 @@
             mesh.scale.set(radius, radius, radius);
             mesh.position.set(...position);
             mesh.userData.bubbleId = bubbleData && bubbleData.id ? bubbleData.id : null;
+            mesh.userData.sourceColor = sourceColor.getHex();
             mesh.userData.networkVisual = null;
-            if (bubbleData && bubbleVisualMode === 'network') ensureNetworkBubbleVisual(mesh, bubbleData, level, isFocus);
+            mesh.userData.cosmicVisual = null;
+            if (bubbleData && bubbleVisualMode !== 'classic') ensureBubbleVisual(mesh, bubbleData, level, isFocus);
             return mesh;
         }
 
@@ -1045,11 +1353,12 @@
         function disposeBubble(bubble) {
             if (!bubble) return;
             scene.remove(bubble.mesh);
-            if (bubble.mesh.userData && bubble.mesh.userData.networkVisual) {
-                disposeObjectTree(bubble.mesh.userData.networkVisual);
-                bubble.mesh.remove(bubble.mesh.userData.networkVisual);
-                bubble.mesh.userData.networkVisual = null;
-            }
+            ['networkVisual', 'cosmicVisual'].forEach(key => {
+                if (!bubble.mesh.userData || !bubble.mesh.userData[key]) return;
+                disposeObjectTree(bubble.mesh.userData[key]);
+                bubble.mesh.remove(bubble.mesh.userData[key]);
+                bubble.mesh.userData[key] = null;
+            });
             if (bubble.mesh.geometry && typeof bubble.mesh.geometry.dispose === 'function') bubble.mesh.geometry.dispose();
             disposeMaterial(bubble.mesh.material);
             if (bubble.label) bubble.label.remove();
@@ -1175,7 +1484,7 @@
             // 新しいバブル群を生成して配置
             // 固定DBとAPIデータのどちらでも、球体の半径を考慮して重なりを解消する。
             ensureDistinctBubbleColors(data.bubbles);
-            separateBubblePositions(data.bubbles);
+            arrangeBubblePositions(data);
             data.bubbles.forEach(bData => {
                 const worldPosition = new THREE.Vector3(...bData.pos).multiplyScalar(nextScale).add(nextOffset);
                 const isFocus = isFocusPathBubble(data, bData);

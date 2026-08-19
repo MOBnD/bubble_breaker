@@ -10,7 +10,7 @@
                 ]
             },
             "kinoko_takenoko_group": {
-                id: "kinoko_takenoko_group", title: "きのこ派 vs たけのこ派", type: "多極型", parentId: "snacks_root",
+                id: "kinoko_takenoko_group", title: "きのこ派 vs たけのこ派", type: "双極対立型", parentId: "snacks_root",
                 desc: "大きな意見が対立しており、その間の距離が遠い状態。エコーチェンバーが起きやすい型。",
                 bubbles: [
                     { id: "kinoko", name: "きのこの山", size: 45, color: 0xffaa00, htmlColor: "#ffaa00", pos: [-5, 1, 0], childId: "kinoko_detail", desc: "サクサクのクラッカーとチョコの絶妙なバランスを愛する派閥。独立志向が強い。" },
@@ -19,7 +19,7 @@
                 ]
             },
             "kinoko_detail": {
-                id: "kinoko_detail", title: "きのこの山の魅力", type: "分散型", parentId: "kinoko_takenoko_group",
+                id: "kinoko_detail", title: "きのこの山の魅力", type: "連鎖型", parentId: "kinoko_takenoko_group",
                 desc: "きのこ派の中でも、何に魅力を感じているかが細分化されている状態。",
                 bubbles: [
                     { id: "choco", name: "チョコの量が適正", size: 40, color: 0x552200, htmlColor: "#552200", pos: [-3, 2, 1], childId: null, desc: "チョコの純粋な味を楽しむ層。" },
@@ -30,7 +30,7 @@
 
             // ----- 【ライトノベルカテゴリ】 (復活データ) -----
             "novels_root": {
-                id: "novels_root", title: "ライトノベルのジャンル", type: "分散型", parentId: null,
+                id: "novels_root", title: "ライトノベルのジャンル", type: "階層型", parentId: null,
                 desc: "様々なジャンルが乱立する宇宙。",
                 bubbles: [
                     { id: "narou_group", name: "なろう系", size: 45, color: 0x4488ff, htmlColor: "#4488ff", pos: [0, 0, 0], childId: "narou_group" },
@@ -39,7 +39,7 @@
                 ]
             },
             "narou_group": {
-                id: "narou_group", title: "好きななろう小説", type: "分散型", parentId: "novels_root",
+                id: "narou_group", title: "好きななろう小説", type: "多極型", parentId: "novels_root",
                 desc: "意見が複数に分かれ、それぞれが一定の規模を持って散らばっている状態。",
                 bubbles: [
                     { id: "slime", name: "転生したらスライム...", size: 30, color: 0x4488ff, htmlColor: "#4488ff", pos: [-4, 2, 1], childId: "slime_detail", desc: "国造り要素と無双感を愛する巨大派閥。" },
@@ -78,7 +78,7 @@
                 ]
             },
             "rice_detail": {
-                id: "rice_detail", title: "お米の食べ方", type: "分散型", parentId: "staple_group",
+                id: "rice_detail", title: "お米の食べ方", type: "連鎖型", parentId: "staple_group",
                 desc: "圧倒的多数派の中にも、多様な派閥が存在する。",
                 bubbles: [
                     { id: "plain", name: "白米そのまま", size: 40, color: 0xffffff, htmlColor: "#ffffff", pos: [-2, 2, 0], childId: null, desc: "米本来の甘みを味わう過激派。" },
@@ -121,5 +121,4 @@
 
         // APIで生成したDBを画面遷移ロジックから透過的に利用するための参照。
         let activeDB = DB;
-
 

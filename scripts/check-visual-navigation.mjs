@@ -91,8 +91,35 @@ assert.match(indexHtml, /class="[^"]*portal-panel/, 'the input screen should use
 assert.match(indexHtml, /class="[^"]*exploration-panel/, 'category screens should use the exploration panel theme hook');
 assert.match(indexHtml, /data-bubble-visual-mode="network"/, 'network bubble visual mode should be selectable');
 assert.match(indexHtml, /data-bubble-visual-mode="classic"/, 'classic bubble visual mode should be selectable');
+assert.match(indexHtml, /data-bubble-visual-mode="cosmic"/, 'cosmic bubble visual mode should be selectable');
+assert.match(indexHtml, /data-bubble-visual-mode="network"[^>]*>装飾あり/, 'network mode should be labelled as decorated');
+assert.match(indexHtml, /data-bubble-visual-mode="classic"[^>]*>装飾なし/, 'classic mode should be labelled as undecorated');
+assert.match(indexHtml, /data-bubble-visual-mode="cosmic"[^>]*>宇宙テーマ/, 'cosmic mode should be labelled as space themed');
+assert.match(indexHtml, /id="btn-sound-toggle"/, 'sound toggle should remain available');
+const cosmicControlStart = indexHtml.indexOf('id="panel-bgm"');
+const cosmicControlEnd = indexHtml.indexOf('<audio id="bgm-audio"');
+assert.ok(cosmicControlStart >= 0 && cosmicControlEnd > cosmicControlStart, 'Cosmic Control bounds should be present');
+assert.ok(indexHtml.slice(cosmicControlStart, cosmicControlEnd).includes('id="btn-sound-toggle"'), 'sound toggle should be inside Cosmic Control');
+assert.match(indexHtml, /id="bubble-color-theme"/, 'bubble color themes should be independently selectable');
+for (const theme of ['legacy', 'neon', 'warm', 'space', 'deepSea', 'data']) {
+    assert.match(indexHtml, new RegExp(`value="${theme}"`), `bubble color theme ${theme} should be available`);
+}
+assert.match(indexHtml, /id="background-theme"/, 'background themes should be independently selectable');
+for (const theme of ['space', 'deepSea', 'data']) {
+    assert.match(indexHtml, new RegExp(`id="background-theme"[\\s\\S]*value="${theme}"`), `background theme ${theme} should be available`);
+}
 assert.match(events, /bubblebreaker\.bubbleVisualMode/, 'bubble visual mode should persist in localStorage');
+assert.match(events, /bubblebreaker\.bubbleColorTheme/, 'bubble color theme should persist in localStorage');
+assert.match(events, /bubblebreaker\.backgroundTheme/, 'background theme should persist in localStorage');
 assert.match(scene, /function createNetworkBubbleVisual\(/, 'network bubble decorations should be generated');
+assert.match(scene, /function createCosmicBubbleVisual\(/, 'cosmic bubble decorations should be generated');
+assert.match(scene, /function createDeepSeaBackgroundTheme\(/, 'deep sea background structures should be generated');
+assert.match(scene, /function createDataBackgroundTheme\(/, 'data space background structures should be generated');
+assert.match(scene, /function createThemeDomeTexture\(theme\)/, 'non-space themes should have their own dome textures');
+assert.match(scene, /window\.setBackgroundTheme = function/, 'background theme should switch at runtime');
+assert.match(scene, /BACKGROUND_THEME_NAMES = \['space', 'deepSea', 'data'\]/, 'three background themes should be supported');
+assert.match(scene, /BUBBLE_COLOR_THEME_NAMES = \['legacy', 'neon', 'warm', 'space', 'deepSea', 'data'\]/, 'six bubble color themes should be supported');
+assert.match(scene, /window\.setBubbleColorTheme = function/, 'bubble color theme should switch at runtime');
 assert.match(scene, /new THREE\.TorusGeometry/, 'network bubbles should include orbit rings');
 assert.match(scene, /new THREE\.Line\(/, 'network bubbles should include connection lines');
 assert.match(scene, /function disposeObjectTree\(/, 'network bubble decorations should be disposed with the bubble');
@@ -101,6 +128,8 @@ assert.match(animation, /networkVisual\.rotation\.y \+=/, 'network bubble decora
 assert.match(animation, /networkAnimation\.observerRing/, 'the focus bubble should have an observer ring animation');
 assert.match(scene, /const scanRing = new THREE\.Mesh/, 'network bubbles should include an analysis scan ring');
 assert.match(animation, /analysisStatus === 'loading'/, 'analysis generation should activate the scan ring');
+assert.match(animation, /cosmicAnimation/, 'cosmic bubble decorations should animate');
+assert.match(animation, /backgroundThemeGroups/, 'non-space background structures should animate');
 assert.match(indexHtml, /id="warp-haze-toggle"/, 'warp haze should have a UI toggle');
 assert.match(events, /bubblebreaker\.warpHaze/, 'warp haze preference should persist in localStorage');
 assert.match(events, /warp-haze-active/, 'warp haze should be applied through a dedicated loading class');
@@ -110,5 +139,21 @@ assert.match(styles, /\.exploration-panel\.panel-size-small[\s\S]*?height: 42vh/
 assert.match(styles, /\.exploration-panel\.panel-size-medium[\s\S]*?height: 58vh/, 'medium exploration panels should have a distinct height');
 assert.match(styles, /\.exploration-panel\.panel-size-large[\s\S]*?33vw/, 'large exploration panels should occupy about one third of the viewport width');
 assert.match(styles, /\.exploration-panel\.panel-size-large[\s\S]*?height: 76vh/, 'large exploration panels should be vertically expanded');
+assert.match(styles, /\.exploration-panel\.panel-size-large \.panel-section/, 'large panels should change internal section layout');
+assert.match(styles, /\.bubble-visual-options[\s\S]*?grid-template-columns: repeat\(3, 1fr\)/, 'three bubble visual modes should fit the control');
+
+const [api, data] = await Promise.all([
+    readFile(path.join(root, 'src', 'js', 'api.js'), 'utf8'),
+    readFile(path.join(root, 'src', 'js', 'data.js'), 'utf8')
+]);
+for (const groupType of ['分散型', '一極集中型', '多極型', '双極対立型', '階層型', '連鎖型']) {
+    assert.match(api, new RegExp(groupType), `API should support group type ${groupType}`);
+}
+assert.match(api, /function arrangeBubblePositions\(group\)/, 'group layout should be type-aware');
+assert.match(api, /ordered\[0\]\.pos = \[0, 0, 0\]/, 'one-pole groups should center the largest bubble');
+assert.match(scene, /arrangeBubblePositions\(data\)/, 'scene generation should use type-aware layout');
+assert.match(data, /type:\s*["']双極対立型["']/, 'fixed data should exercise bipolar layout');
+assert.match(data, /type:\s*["']階層型["']/, 'fixed data should exercise hierarchy layout');
+assert.match(data, /type:\s*["']連鎖型["']/, 'fixed data should exercise chain layout');
 
 console.log('Visual navigation invariants: OK');

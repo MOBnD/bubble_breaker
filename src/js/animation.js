@@ -206,6 +206,19 @@
             }
             cosmicBackgroundGroup.rotation.y += 0.000012;
             cosmicBackgroundGroup.rotation.x += 0.0000025;
+            Object.values(backgroundThemeGroups || {}).forEach(group => {
+                if (!group || !group.visible || !group.userData.themeAnimation) return;
+                const themeAnimation = group.userData.themeAnimation;
+                group.rotation.y += themeAnimation.rotationSpeed;
+                themeAnimation.phase += 0.004;
+                if (themeAnimation.plankton) themeAnimation.plankton.rotation.y += 0.0004;
+                if (themeAnimation.nodeCloud) themeAnimation.nodeCloud.rotation.y -= 0.0007;
+                if (themeAnimation.beacons) {
+                    themeAnimation.beacons.forEach((beacon, index) => {
+                        beacon.material.opacity = 0.24 + (Math.sin(time * 1.4 + index * 0.7) + 1) * 0.12;
+                    });
+                }
+            });
         }
 
         function animate() {
@@ -315,6 +328,41 @@
                         materials.forEach(material => {
                             if (!Number.isFinite(material.userData.networkBaseOpacity)) material.userData.networkBaseOpacity = material.opacity;
                             material.opacity = material.userData.networkBaseOpacity * fade;
+                        });
+                    });
+                }
+
+                const cosmicVisual = b.mesh.userData && b.mesh.userData.cosmicVisual;
+                const cosmicAnimation = cosmicVisual && cosmicVisual.userData.cosmicAnimation;
+                if (cosmicVisual && cosmicAnimation) {
+                    cosmicVisual.rotation.y += 0.0012 + b.mesh.scale.x * 0.00006;
+                    cosmicVisual.rotation.x = Math.sin(time * 0.14 + cosmicAnimation.phase) * 0.06;
+                    cosmicAnimation.orbitRings.forEach((ring, ringIndex) => {
+                        ring.rotation.z += 0.0018 * (ringIndex % 2 === 0 ? 1 : -1);
+                    });
+                    cosmicAnimation.moons.forEach(moon => {
+                        const angle = moon.angle + time * moon.speed;
+                        moon.mesh.position.set(Math.cos(angle) * moon.radius, Math.sin(angle * 1.7) * moon.height, Math.sin(angle) * moon.radius);
+                    });
+                    cosmicAnimation.asteroidCloud.rotation.y -= 0.0025;
+                    const cometAngle = cosmicAnimation.phase + time * 0.28;
+                    cosmicAnimation.comet.position.set(Math.cos(cometAngle) * 1.36, Math.sin(cometAngle * 1.6) * 0.2, Math.sin(cometAngle) * 1.36);
+                    cosmicAnimation.comet.rotation.y = cometAngle + Math.PI;
+                    if (cosmicAnimation.scanRing) {
+                        const isAnalysisLoading = state.bubbleData && state.bubbleData.id === b.data.id && b.data.analysisStatus === 'loading';
+                        cosmicAnimation.scanRing.visible = Boolean(isAnalysisLoading);
+                        if (isAnalysisLoading) {
+                            cosmicAnimation.scanRing.rotation.z += 0.04;
+                            cosmicAnimation.scanRing.scale.setScalar(0.94 + Math.sin(time * 4 + cosmicAnimation.phase) * 0.06);
+                        }
+                    }
+                    const fade = Math.max(0, Math.min(1, b.mesh.material.opacity / 0.95));
+                    cosmicVisual.traverse(child => {
+                        if (!child.material) return;
+                        const materials = Array.isArray(child.material) ? child.material : [child.material];
+                        materials.forEach(material => {
+                            if (!Number.isFinite(material.userData.cosmicBaseOpacity)) material.userData.cosmicBaseOpacity = material.opacity;
+                            material.opacity = material.userData.cosmicBaseOpacity * fade;
                         });
                     });
                 }

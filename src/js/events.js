@@ -139,6 +139,8 @@
         const ngc3324Toggle = document.getElementById('ngc3324-toggle');
         const warpHazeToggle = document.getElementById('warp-haze-toggle');
         const bubbleVisualModeButtons = [...document.querySelectorAll('[data-bubble-visual-mode]')];
+        const bubbleColorThemeControl = document.getElementById('bubble-color-theme');
+        const backgroundThemeControl = document.getElementById('background-theme');
         const panelSizeButtons = [...document.querySelectorAll('[data-panel-size]')];
         const volumeControl = document.getElementById('audio-volume');
         const bgmTypeControl = document.getElementById('bgm-type');
@@ -178,13 +180,23 @@
         let explorationPanelSize = applyExplorationPanelSize(storedPanelSize || 'medium');
         const storedBubbleVisualMode = localStorage.getItem('bubblebreaker.bubbleVisualMode');
         let selectedBubbleVisualMode = typeof setBubbleVisualMode === 'function'
-            ? setBubbleVisualMode(storedBubbleVisualMode === 'classic' ? 'classic' : 'network')
+            ? setBubbleVisualMode(['classic', 'cosmic'].includes(storedBubbleVisualMode) ? storedBubbleVisualMode : 'network')
             : 'network';
         bubbleVisualModeButtons.forEach(button => {
             const isSelected = button.dataset.bubbleVisualMode === selectedBubbleVisualMode;
             button.setAttribute('aria-pressed', String(isSelected));
             button.classList.toggle('is-selected', isSelected);
         });
+        const bubbleColorThemeOptions = ['legacy', 'neon', 'warm', 'space', 'deepSea', 'data'];
+        const storedBubbleColorTheme = localStorage.getItem('bubblebreaker.bubbleColorTheme');
+        let selectedBubbleColorTheme = bubbleColorThemeOptions.includes(storedBubbleColorTheme) ? storedBubbleColorTheme : 'legacy';
+        if (typeof setBubbleColorTheme === 'function') selectedBubbleColorTheme = setBubbleColorTheme(selectedBubbleColorTheme);
+        bubbleColorThemeControl.value = selectedBubbleColorTheme;
+        const backgroundThemeOptions = ['space', 'deepSea', 'data'];
+        const storedBackgroundTheme = localStorage.getItem('bubblebreaker.backgroundTheme');
+        let selectedBackgroundTheme = backgroundThemeOptions.includes(storedBackgroundTheme) ? storedBackgroundTheme : 'space';
+        if (typeof setBackgroundTheme === 'function') selectedBackgroundTheme = setBackgroundTheme(selectedBackgroundTheme);
+        backgroundThemeControl.value = selectedBackgroundTheme;
         volumeControl.value = String(audioVolume);
         bgmTypeControl.value = bgmType;
         bgmAutoNextControl.checked = bgmAutoNext;
@@ -237,8 +249,23 @@
                     option.setAttribute('aria-pressed', String(isSelected));
                     option.classList.toggle('is-selected', isSelected);
                 });
-                showToast(selectedBubbleVisualMode === 'network' ? 'ネットワーク天体を表示しました' : '現行の球体表示に切り替えました');
+                const visualLabel = selectedBubbleVisualMode === 'network' ? '装飾あり' : selectedBubbleVisualMode === 'cosmic' ? '宇宙テーマ' : '装飾なし';
+                showToast(`${visualLabel}を表示しました`);
             });
+        });
+        bubbleColorThemeControl.addEventListener('change', () => {
+            selectedBubbleColorTheme = typeof setBubbleColorTheme === 'function'
+                ? setBubbleColorTheme(bubbleColorThemeControl.value)
+                : bubbleColorThemeControl.value;
+            localStorage.setItem('bubblebreaker.bubbleColorTheme', selectedBubbleColorTheme);
+            showToast(`球色テーマを「${bubbleColorThemeControl.options[bubbleColorThemeControl.selectedIndex].text}」へ変更しました`);
+        });
+        backgroundThemeControl.addEventListener('change', () => {
+            selectedBackgroundTheme = typeof setBackgroundTheme === 'function'
+                ? setBackgroundTheme(backgroundThemeControl.value)
+                : backgroundThemeControl.value;
+            localStorage.setItem('bubblebreaker.backgroundTheme', selectedBackgroundTheme);
+            showToast(`背景テーマを「${backgroundThemeControl.options[backgroundThemeControl.selectedIndex].text}」へ変更しました`);
         });
         volumeControl.addEventListener('input', () => {
             audioVolume = Number(volumeControl.value);

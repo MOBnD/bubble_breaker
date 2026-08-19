@@ -1,4 +1,5 @@
-        const OPENAI_GROUP_TYPES = ['分散型', '一極集中型', '多極型'];
+        const OPENAI_GROUP_TYPES = ['分散型', '一極集中型', '多極型', '双極対立型', '階層型', '連鎖型'];
+        const OPENAI_GROUP_TYPE_GUIDANCE = `typeは次の6種類から、バブルの支持分布に最も合うものを1つ選んでください: 分散型（均等に散らばる）、一極集中型（最大勢力が1つ）、多極型（3つ以上の勢力）、双極対立型（2つの対立勢力）、階層型（上位から下位へ段階的）、連鎖型（隣接関係・流れが重要）。`;
         const OPENAI_GROUP_LEVELS = ['root', 'central', 'leaf'];
         const OPENAI_MODEL = window.__OPENAI_MODEL__ || 'gpt-5.6-luna';
         const OPENAI_API_KEY = window.__OPENAI_API_KEY__ || '';
@@ -268,8 +269,9 @@
             });
         }
 
-        function separateBubblePositions(bubbles) {
+        function separateBubblePositions(bubbles, options = {}) {
             if (bubbles.length < 2) return;
+            const lockedIds = new Set(options.lockedIds || []);
             const spread = bubbles.reduce((max, bubble, index) => {
                 return Math.max(max, Math.hypot(bubble.pos[0] - bubbles[0].pos[0], bubble.pos[1] - bubbles[0].pos[1], bubble.pos[2] - bubbles[0].pos[2]));
             }, 0);
@@ -297,14 +299,71 @@
                         const required = Math.max(3, Math.pow(Math.max(1, a.size), 0.62) + Math.pow(Math.max(1, b.size), 0.62) + 1);
                         if (distance >= required) continue;
                         const push = (required - distance) / distance / 2;
-                        a.pos[0] -= dx * push; a.pos[1] -= dy * push; a.pos[2] -= dz * push;
-                        b.pos[0] += dx * push; b.pos[1] += dy * push; b.pos[2] += dz * push;
+                        const aLocked = lockedIds.has(a.id);
+                        const bLocked = lockedIds.has(b.id);
+                        if (!aLocked && !bLocked) {
+                            a.pos[0] -= dx * push; a.pos[1] -= dy * push; a.pos[2] -= dz * push;
+                            b.pos[0] += dx * push; b.pos[1] += dy * push; b.pos[2] += dz * push;
+                        } else if (aLocked && !bLocked) {
+                            b.pos[0] += dx * push * 2; b.pos[1] += dy * push * 2; b.pos[2] += dz * push * 2;
+                        } else if (!aLocked && bLocked) {
+                            a.pos[0] -= dx * push * 2; a.pos[1] -= dy * push * 2; a.pos[2] -= dz * push * 2;
+                        }
                         changed = true;
                     }
                 }
                 if (!changed) break;
             }
             bubbles.forEach(bubble => { bubble.pos = bubble.pos.map(value => Math.max(-90, Math.min(90, value))); });
+        }
+
+        function arrangeBubblePositions(group) {
+            const bubbles = group && Array.isArray(group.bubbles) ? group.bubbles : [];
+            if (bubbles.length < 2) return;
+            const ordered = bubbles.slice().sort((a, b) => Number(b.size || 0) - Number(a.size || 0));
+            const type = OPENAI_GROUP_TYPES.includes(group.type) ? group.type : '分散型';
+            const lockedIds = [];
+            const count = ordered.length;
+            const placeRing = (items, radius, angleOffset = 0, yScale = 0.72) => {
+                items.forEach((bubble, index) => {
+                    const angle = angleOffset + Math.PI * 2 * index / Math.max(1, items.length);
+                    bubble.pos = [Math.cos(angle) * radius, Math.sin(angle) * radius * yScale, Math.sin(angle * 1.7) * 3];
+                });
+            };
+            if (type === '一極集中型') {
+                ordered[0].pos = [0, 0, 0];
+                lockedIds.push(ordered[0].id);
+                placeRing(ordered.slice(1), 22, Math.PI * 0.25);
+            } else if (type === '双極対立型') {
+                ordered[0].pos = [-20, 0, 0];
+                if (ordered[1]) ordered[1].pos = [20, 0, 0];
+                placeRing(ordered.slice(2), 16, Math.PI * 0.5, 0.9);
+            } else if (type === '多極型') {
+                const poleCount = Math.min(3, count);
+                placeRing(ordered.slice(0, poleCount), 17, Math.PI * 0.5, 0.78);
+                placeRing(ordered.slice(poleCount), 28, 0.1, 0.7);
+            } else if (type === '階層型') {
+                ordered.forEach((bubble, index) => {
+                    const row = Math.floor(index / 2);
+                    const side = index % 2 === 0 ? -1 : 1;
+                    bubble.pos = [side * (row === 0 ? 0 : 12 + row * 2), 18 - row * 12, row * 3 - 3];
+                });
+                ordered[0].pos = [0, 20, 0];
+                lockedIds.push(ordered[0].id);
+            } else if (type === '連鎖型') {
+                ordered.forEach((bubble, index) => {
+                    const centered = index - (count - 1) / 2;
+                    bubble.pos = [centered * 12, Math.sin(index * 1.25) * 7, Math.cos(index * 1.1) * 5];
+                });
+            } else {
+                placeRing(ordered, 20, Math.PI * 0.37, 0.78);
+            }
+            separateBubblePositions(bubbles, { lockedIds });
+            lockedIds.forEach(id => {
+                const bubble = bubbles.find(item => item.id === id);
+                if (bubble && type === '一極集中型') bubble.pos = [0, 0, 0];
+                if (bubble && type === '階層型') bubble.pos = [0, 20, 0];
+            });
         }
 
         // 固定DBの緊急フォールバック専用。API生成データでは呼び出さない。
@@ -681,7 +740,7 @@
             const repairInstruction = options.repair
                 ? '\n- 前回のroot応答を検証できませんでした。rootだけを再生成し、childIdを必ずnullにしてください。'
                 : '';
-            const prompt = `ユーザーの意見: ${input}\n\nWeb Searchを使って、入力意見を含むテーマ全体の最上位カテゴリだけを生成してください。\n- groupsはroot 1つだけにし、rootのバブルは2〜${OPENAI_STRUCTURE_MAX_BUBBLES}個の意味的に異なる上位分類にしてください。\n- rootバブル名は下位候補を列挙せず、全体を包む短い名称にしてください。原則24文字以内にし、「・」「、」などで3つ以上の候補を並べないでください。\n- 入力意見が意味的に属するrootバブルを1つ選び、その実在するバブルIDをentryRootBubbleIdに設定してください。entryRootBubbleIdは必須で、曖昧でもnullにしてはいけません。\n- levelはroot、parentIdとparentBubbleIdはnull、すべてのchildIdはnullにしてください。中央・下位カテゴリはこの要求では生成しないでください。\n- 入力意見の経路だけを特別扱いせず、あとで各rootバブルを同じ調査深度で展開できる分類軸にしてください。\n- カテゴリ名・バブル名は具体的な意味内容を持たせ、テンプレート名、機械的な接尾辞、代表的な系統などの汎用ラベルは禁止です。\n- 全IDは一意な短いASCII文字列にし、analysis、metrics、sourcesは生成しないでください。JSON Schema以外の文章は出力しないでください。${repairInstruction}`;
+            const prompt = `ユーザーの意見: ${input}\n\nWeb Searchを使って、入力意見を含むテーマ全体の最上位カテゴリだけを生成してください。\n- groupsはroot 1つだけにし、rootのバブルは2〜${OPENAI_STRUCTURE_MAX_BUBBLES}個の意味的に異なる上位分類にしてください。\n- ${OPENAI_GROUP_TYPE_GUIDANCE}\n- rootバブル名は下位候補を列挙せず、全体を包む短い名称にしてください。原則24文字以内にし、「・」「、」などで3つ以上の候補を並べないでください。\n- 入力意見が意味的に属するrootバブルを1つ選び、その実在するバブルIDをentryRootBubbleIdに設定してください。entryRootBubbleIdは必須で、曖昧でもnullにしてはいけません。\n- levelはroot、parentIdとparentBubbleIdはnull、すべてのchildIdはnullにしてください。中央・下位カテゴリはこの要求では生成しないでください。\n- 入力意見の経路だけを特別扱いせず、あとで各rootバブルを同じ調査深度で展開できる分類軸にしてください。\n- カテゴリ名・バブル名は具体的な意味内容を持たせ、テンプレート名、機械的な接尾辞、代表的な系統などの汎用ラベルは禁止です。\n- 全IDは一意な短いASCII文字列にし、analysis、metrics、sourcesは生成しないでください。JSON Schema以外の文章は出力しないでください。${repairInstruction}`;
             return {
                 model: OPENAI_MODEL, store: false, reasoning: { effort: 'low' }, max_output_tokens: 7000,
                 tool_choice: 'required',
@@ -702,7 +761,7 @@
             const entryInstruction = isEntryBranch
                 ? '- このcentralはroot段階で入力意見の所属先として指定された枝です。入力意見に対応するcentralバブルを必ず1つ含め、その実在IDをentryBubbleIdに設定してください。'
                 : '- このcentralは入力意見の所属先ではありません。entryBubbleIdは必ずnullにし、入力意見バブルを作らないでください。';
-            const prompt = `ユーザーの意見: ${input}\nrootカテゴリ: ${rootGroup.title}（${rootGroup.id}）\n展開対象のrootバブル: ${rootBubble.name}（${rootBubble.id}）\n\nWeb Searchを使って、指定されたrootバブルの直下にあるcentralカテゴリを1つだけ生成してください。\n- groupsはcentral 1つだけにし、levelはcentral、parentIdは${rootGroup.id}、parentBubbleIdは${rootBubble.id}と完全一致させてください。\n- centralのバブルは2〜${OPENAI_STRUCTURE_MAX_BUBBLES}個の具体的な、互いに意味の異なる内容にしてください。各childIdはnullにしてください。\n- centralバブル名は下位候補をすべて列挙せず、意味を包む短い名称にしてください。原則24文字以内にし、「・」「、」などで3つ以上の候補を並べないでください。\n${entryInstruction}\n- rootバブルの意味に直接包含される一段下だけを生成し、二段下の内容をcentralバブルに混ぜないでください。\n- 入力意見の経路だけを特別扱いせず、他のrootバブルと同じ具体性で生成してください。テンプレート名、親名への機械的な接尾辞、汎用ラベルは禁止です。\n- 全IDは一意な短いASCII文字列にし、analysis、metrics、sourcesは生成しないでください。JSON Schema以外の文章は出力しないでください。${repairInstruction}`;
+            const prompt = `ユーザーの意見: ${input}\nrootカテゴリ: ${rootGroup.title}（${rootGroup.id}）\n展開対象のrootバブル: ${rootBubble.name}（${rootBubble.id}）\n\nWeb Searchを使って、指定されたrootバブルの直下にあるcentralカテゴリを1つだけ生成してください。\n- groupsはcentral 1つだけにし、levelはcentral、parentIdは${rootGroup.id}、parentBubbleIdは${rootBubble.id}と完全一致させてください。\n- centralのバブルは2〜${OPENAI_STRUCTURE_MAX_BUBBLES}個の具体的な、互いに意味の異なる内容にしてください。各childIdはnullにしてください。\n- ${OPENAI_GROUP_TYPE_GUIDANCE}\n- centralバブル名は下位候補をすべて列挙せず、意味を包む短い名称にしてください。原則24文字以内にし、「・」「、」などで3つ以上の候補を並べないでください。\n${entryInstruction}\n- rootバブルの意味に直接包含される一段下だけを生成し、二段下の内容をcentralバブルに混ぜないでください。\n- 入力意見の経路だけを特別扱いせず、他のrootバブルと同じ具体性で生成してください。テンプレート名、親名への機械的な接尾辞、汎用ラベルは禁止です。\n- 全IDは一意な短いASCII文字列にし、analysis、metrics、sourcesは生成しないでください。JSON Schema以外の文章は出力しないでください。${repairInstruction}`;
             return {
                 model: OPENAI_MODEL, store: false, reasoning: { effort: 'low' }, max_output_tokens: 7000,
                 tool_choice: 'required',
@@ -719,7 +778,7 @@
             const repairInstruction = options.repair
                 ? '\n- 前回のleaf応答を検証できませんでした。指定されたcentralバブルだけを親として、leaf groupを1つ再生成してください。'
                 : '';
-            const prompt = `ユーザーの意見: ${input}\ncentralカテゴリ: ${centralGroup.title}（${centralGroup.id}）\n展開対象のcentralバブル: ${centralBubble.name}（${centralBubble.id}）\n\nWeb Searchを使って、指定されたcentralバブルの直下にあるleafカテゴリを1つだけ生成してください。\n- groupsはleaf 1つだけにし、levelはleaf、parentIdは${centralGroup.id}、parentBubbleIdは${centralBubble.id}と完全一致させてください。\n- leafのバブルは2〜${OPENAI_STRUCTURE_MAX_BUBBLES}個の、親バブルに意味的に包含される具体的な選択肢・方式・製品・作品・派閥などにしてください。各childIdはnullにしてください。\n- centralバブルより一段下の内容だけを生成し、親の説明や二段上の分類をそのまま繰り返さないでください。\n- 入力意見の経路だけを特別扱いせず、すべてのcentralバブルを同じ調査深度・具体性で生成してください。テンプレート名、親名への機械的な接尾辞、汎用ラベルは禁止です。\n- 全IDは一意な短いASCII文字列にし、analysis、metrics、sourcesは生成しないでください。JSON Schema以外の文章は出力しないでください。${repairInstruction}`;
+            const prompt = `ユーザーの意見: ${input}\ncentralカテゴリ: ${centralGroup.title}（${centralGroup.id}）\n展開対象のcentralバブル: ${centralBubble.name}（${centralBubble.id}）\n\nWeb Searchを使って、指定されたcentralバブルの直下にあるleafカテゴリを1つだけ生成してください。\n- groupsはleaf 1つだけにし、levelはleaf、parentIdは${centralGroup.id}、parentBubbleIdは${centralBubble.id}と完全一致させてください。\n- leafのバブルは2〜${OPENAI_STRUCTURE_MAX_BUBBLES}個の、親バブルに意味的に包含される具体的な選択肢・方式・製品・作品・派閥などにしてください。各childIdはnullにしてください。\n- ${OPENAI_GROUP_TYPE_GUIDANCE}\n- centralバブルより一段下の内容だけを生成し、親の説明や二段上の分類をそのまま繰り返さないでください。\n- 入力意見の経路だけを特別扱いせず、すべてのcentralバブルを同じ調査深度・具体性で生成してください。テンプレート名、親名への機械的な接尾辞、汎用ラベルは禁止です。\n- 全IDは一意な短いASCII文字列にし、analysis、metrics、sourcesは生成しないでください。JSON Schema以外の文章は出力しないでください。${repairInstruction}`;
             return {
                 model: OPENAI_MODEL, store: false, reasoning: { effort: 'low' }, max_output_tokens: 7000,
                 tool_choice: 'required',
