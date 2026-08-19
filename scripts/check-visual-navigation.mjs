@@ -77,5 +77,16 @@ assert.match(audio, /EDGEWORTH_BGM = 'edgeworth-kuiper-belt\.mp3'/, 'the default
 assert.match(audio, /storedBgmType === LEGACY_EDGEWORTH_BGM/, 'legacy BGM selections should migrate safely');
 assert.match(indexHtml, /value="edgeworth-kuiper-belt\.mp3">エッジワース・カイパーベルト/, 'the BGM selector should expose the Edgeworth track');
 assert.match(buildScript, /ngc-3324-nircam-clean-4000\.png/, 'the build should embed the clean NGC 3324 asset');
+assert.match(indexHtml, /id="ngc3324-toggle"/, 'NGC 3324 visibility should have a UI toggle');
+assert.match(events, /bubblebreaker\.ngc3324/, 'NGC 3324 visibility should persist in localStorage');
+assert.match(scene, /function setNGC3324BackgroundVisible\(visible\)/, 'NGC 3324 visibility should be controlled without rebuilding the scene');
+assert.match(indexHtml, /data-panel-size="small"/, 'exploration panel size controls should include small');
+assert.match(indexHtml, /data-panel-size="medium"/, 'exploration panel size controls should include medium');
+assert.match(indexHtml, /data-panel-size="large"/, 'exploration panel size controls should include large');
+assert.match(events, /bubblebreaker\.panelSize/, 'exploration panel size should persist in localStorage');
+assert.match(events, /applyExplorationPanelSize\(/, 'exploration panel size should be applied at startup and on selection');
+assert.match(indexHtml, /class="[^"]*cosmic-ui/, 'the interface should expose the cosmic network theme hook');
+assert.match(indexHtml, /class="[^"]*portal-panel/, 'the input screen should use the network entry panel');
+assert.match(indexHtml, /class="[^"]*exploration-panel/, 'category screens should use the exploration panel theme hook');
 
 console.log('Visual navigation invariants: OK');

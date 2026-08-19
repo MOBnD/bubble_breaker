@@ -134,12 +134,36 @@
             reopenPanelsButton.classList.add('hidden');
         });
         const bgmToggle = document.getElementById('bgm-toggle');
+        const ngc3324Toggle = document.getElementById('ngc3324-toggle');
+        const panelSizeButtons = [...document.querySelectorAll('[data-panel-size]')];
         const volumeControl = document.getElementById('audio-volume');
         const bgmTypeControl = document.getElementById('bgm-type');
         const bgmAutoNextControl = document.getElementById('bgm-auto-next');
         const bgmTransitionControl = document.getElementById('bgm-transition');
         const explorerModeControl = document.getElementById('explorer-mode');
         bgmToggle.checked = bgmEnabled;
+        const storedNGC3324Visibility = localStorage.getItem('bubblebreaker.ngc3324');
+        const ngc3324Visible = storedNGC3324Visibility !== 'off';
+        ngc3324Toggle.checked = ngc3324Visible;
+        if (typeof setNGC3324BackgroundVisible === 'function') setNGC3324BackgroundVisible(ngc3324Visible);
+        const allowedPanelSizes = new Set(['small', 'medium', 'large']);
+        const storedPanelSize = localStorage.getItem('bubblebreaker.panelSize');
+
+        function applyExplorationPanelSize(size) {
+            const nextSize = allowedPanelSizes.has(size) ? size : 'medium';
+            document.querySelectorAll('.exploration-panel').forEach(panel => {
+                panel.classList.remove('panel-size-small', 'panel-size-medium', 'panel-size-large');
+                panel.classList.add(`panel-size-${nextSize}`);
+            });
+            panelSizeButtons.forEach(button => {
+                const isSelected = button.dataset.panelSize === nextSize;
+                button.setAttribute('aria-pressed', String(isSelected));
+                button.classList.toggle('is-selected', isSelected);
+            });
+            return nextSize;
+        }
+
+        let explorationPanelSize = applyExplorationPanelSize(storedPanelSize || 'medium');
         volumeControl.value = String(audioVolume);
         bgmTypeControl.value = bgmType;
         bgmAutoNextControl.checked = bgmAutoNext;
@@ -161,6 +185,19 @@
             bgmEnabled = bgmToggle.checked;
             localStorage.setItem('bubblebreaker.bgm', bgmEnabled ? 'on' : 'off');
             if (bgmEnabled) startBackgroundMusic(); else stopBackgroundMusic();
+        });
+        ngc3324Toggle.addEventListener('change', () => {
+            const visible = ngc3324Toggle.checked;
+            localStorage.setItem('bubblebreaker.ngc3324', visible ? 'on' : 'off');
+            if (typeof setNGC3324BackgroundVisible === 'function') setNGC3324BackgroundVisible(visible);
+            showToast(visible ? 'NGC 3324背景を表示しました' : 'NGC 3324背景を非表示にしました');
+        });
+        panelSizeButtons.forEach(button => {
+            button.addEventListener('click', () => {
+                explorationPanelSize = applyExplorationPanelSize(button.dataset.panelSize);
+                localStorage.setItem('bubblebreaker.panelSize', explorationPanelSize);
+                showToast(`探索パネルを${explorationPanelSize === 'small' ? '小' : explorationPanelSize === 'large' ? '大' : '中'}サイズに変更しました`);
+            });
         });
         volumeControl.addEventListener('input', () => {
             audioVolume = Number(volumeControl.value);

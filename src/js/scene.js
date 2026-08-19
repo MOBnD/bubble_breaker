@@ -524,6 +524,13 @@
             }
         }
 
+        function setNGC3324BackgroundVisible(visible) {
+            const nextVisible = Boolean(visible);
+            if (ngc3324Dome) ngc3324Dome.visible = nextVisible;
+            window.__bubbleBreakerNGC3324Visible = nextVisible;
+            return nextVisible;
+        }
+
         function addGalaxyGlow(position, scale, hue) {
             const color = new THREE.Color().setHSL(hue, 0.78, 0.58);
             const sprite = new THREE.Sprite(new THREE.SpriteMaterial({
