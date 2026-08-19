@@ -2,6 +2,7 @@
         // === 6. アニメーションループ (毎フレームの描画更新) ===
         // ==========================================
         const clock = new THREE.Clock(); // 経過時間を計るためのクラス
+        let lastAnimationTimestamp = performance.now();
 
         function getLoadingBlackHoleTarget(index) {
             if (galaxyBlackHoleTargets[index]) {
@@ -17,33 +18,95 @@
             return target.blackHole?.userData?.eventHorizonRadius || 10;
         }
 
-        function createLoadingRoute(target, direction, distance) {
+        function getWarpObstacleTargets() {
+            return galaxyBlackHoleTargets.map((target, index) => {
+                const position = target.blackHole ? target.blackHole.getWorldPosition(new THREE.Vector3()) : target.position.clone();
+                target.position.copy(position);
+                return { index, position, radius: getEventHorizonRadius(target) };
+            });
+        }
+
+        function getWarpCandidateStops(destinationIndex) {
+            const candidates = [];
+            const obstacles = getWarpObstacleTargets();
+            const randomDirection = () => {
+                const direction = new THREE.Vector3(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5);
+                return direction.normalize();
+            };
+            galaxyBlackHoleTargets.forEach((target, index) => {
+                if (index === destinationIndex) return;
+                const radius = target.galaxy?.userData?.galaxyRadius || 300;
+                for (let copy = 0; copy < 2; copy++) {
+                    const offset = randomDirection().multiplyScalar(radius * (2.45 + Math.random() * 1.25));
+                    const position = target.position.clone().add(offset);
+                    candidates.push({ type: 'galaxy-edge', sourceIndex: index, position });
+                }
+            });
+            cosmicSystems.forEach((entry, index) => {
+                const position = entry.system.getWorldPosition(new THREE.Vector3());
+                candidates.push({ type: 'stellar-system', sourceIndex: index, position });
+            });
+            const safeRadius = Math.max(680, obstacles.reduce((maximum, obstacle) => Math.max(maximum, obstacle.radius * 8), 0));
+            return candidates.filter(candidate => obstacles.every(obstacle => candidate.position.distanceTo(obstacle.position) > safeRadius));
+        }
+
+        function routeAvoidsBlackHoles(route, destinationIndex, safeRadius) {
+            const obstacles = getWarpObstacleTargets();
+            for (let sampleIndex = 0; sampleIndex <= 120; sampleIndex++) {
+                const point = route.getPoint(sampleIndex / 120);
+                for (const obstacle of obstacles) {
+                    if (obstacle.index === destinationIndex && sampleIndex >= 118) continue;
+                    if (point.distanceTo(obstacle.position) < safeRadius) return false;
+                }
+            }
+            return true;
+        }
+
+        function createLoadingRoute(target, direction, distance, destinationIndex) {
             const horizonRadius = getEventHorizonRadius(target);
             const start = target.position.clone().addScaledVector(direction, distance);
             const end = target.position.clone().addScaledVector(direction, horizonRadius);
-            const lateralAxis = new THREE.Vector3(Math.abs(direction.y) < 0.92 ? 0 : 1, Math.abs(direction.y) < 0.92 ? 1 : 0, 0)
-                .cross(direction).normalize().applyAxisAngle(direction, Math.random() * Math.PI * 2).normalize();
-            const verticalAxis = new THREE.Vector3().crossVectors(direction, lateralAxis).normalize();
-            const lateralDrift = (Math.random() - 0.5) * 5600;
-            const verticalDrift = (Math.random() - 0.5) * 3200;
-            const secondaryLateral = (Math.random() - 0.5) * 2800;
-            const tertiaryVertical = (Math.random() - 0.5) * 1900;
-            const points = [start];
-            [0.08, 0.2, 0.34, 0.49, 0.64, 0.79, 0.91, 0.97].forEach((progress, index) => {
-                const point = start.clone().lerp(end, progress);
-                const wave = Math.sin(progress * Math.PI);
-                const lateralOffset = lateralDrift * wave * Math.sin(progress * Math.PI * 1.4 + index * 0.7) + secondaryLateral * Math.sin(progress * Math.PI * 3.1 + index);
-                const verticalOffset = verticalDrift * wave * Math.cos(progress * Math.PI * 1.2) + tertiaryVertical * Math.sin(progress * Math.PI * 2.6 + index * 0.4);
-                point.addScaledVector(lateralAxis, lateralOffset);
-                point.addScaledVector(verticalAxis, verticalOffset);
-                points.push(point);
-            });
-            points.push(end);
-            return new THREE.CatmullRomCurve3(points, false, 'centripetal', 0.25);
+            const candidates = getWarpCandidateStops(destinationIndex);
+            const desiredCount = 10 + Math.floor(Math.random() * 11);
+            const selected = [];
+            let cursor = start.clone();
+            const used = new Set();
+            while (selected.length < desiredCount && used.size < candidates.length) {
+                let best = null;
+                let bestScore = -Infinity;
+                candidates.forEach((candidate, index) => {
+                    if (used.has(index)) return;
+                    const nearestSelected = selected.length
+                        ? Math.min(...selected.map(stop => stop.position.distanceTo(candidate.position)))
+                        : candidate.position.distanceTo(cursor);
+                    const destinationDistance = candidate.position.distanceTo(target.position);
+                    const score = nearestSelected * 0.72 + destinationDistance * 0.18 + Math.random() * 1800;
+                    if (score > bestScore) {
+                        best = { candidate, index };
+                        bestScore = score;
+                    }
+                });
+                if (!best) break;
+                used.add(best.index);
+                selected.push(best.candidate);
+                cursor = best.candidate.position;
+            }
+            const points = [start, ...selected.map(stop => stop.position.clone()), end];
+            const route = new THREE.CatmullRomCurve3(points, false, 'centripetal', 0.22);
+            const safeRadius = Math.max(680, getEventHorizonRadius(target) * 8);
+            return { route, stops: selected, safeRadius, safe: routeAvoidsBlackHoles(route, destinationIndex, safeRadius) };
         }
 
         function initializeLoadingRoute(target) {
-            loadingAnimation.route = createLoadingRoute(target, loadingAnimation.approachDirection, loadingAnimation.approachDistance);
+            let generated = null;
+            for (let attempt = 0; attempt < 8; attempt++) {
+                generated = createLoadingRoute(target, loadingAnimation.approachDirection, loadingAnimation.approachDistance, loadingAnimation.targetIndex);
+                if (generated.safe) break;
+                loadingAnimation.approachDirection.copy(new THREE.Vector3(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).normalize());
+            }
+            loadingAnimation.route = generated.route;
+            loadingAnimation.routeStops = generated.stops;
+            loadingAnimation.routeSafeRadius = generated.safeRadius;
             loadingAnimation.routeTargetIndex = loadingAnimation.targetIndex;
         }
 
@@ -56,12 +119,14 @@
             loadingAnimation = {
                 startedAt: now,
                 segmentStartedAt: now,
-                segmentDuration: 12000,
+                segmentDuration: 22000,
                 approachDistance: 16000,
                 maxSpeed: 1400,
-                approachDirection: new THREE.Vector3(0, 0, 1),
+                approachDirection: new THREE.Vector3(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).normalize(),
                 targetIndex: 0,
                 route: null,
+                routeStops: [],
+                routeSafeRadius: 680,
                 routeTargetIndex: -1,
                 onReady: null
             };
@@ -103,14 +168,9 @@
 
             // カメラが事象の地平面表面へ触れた瞬間に切り替える。内部座標は一度も生成しない。
             if (camera.position.distanceTo(blackHole) <= eventHorizonRadius + 0.05 || phase >= 1) {
-                loadingAnimation.targetIndex = (loadingAnimation.targetIndex + 1) % loadingBlackHoles.length;
-                loadingAnimation.segmentStartedAt = performance.now();
+                camera.position.copy(blackHole).addScaledVector(loadingAnimation.approachDirection, eventHorizonRadius);
+                targetControlTarget.copy(blackHole);
                 if (typeof relocateGalaxyUniverse === 'function') relocateGalaxyUniverse('black-hole-universe-switch');
-                const nextTarget = getLoadingBlackHoleTarget(loadingAnimation.targetIndex);
-                camera.position.copy(nextTarget.position).addScaledVector(loadingAnimation.approachDirection, loadingAnimation.approachDistance);
-                targetControlTarget.copy(nextTarget.position);
-                initializeLoadingRoute(nextTarget);
-                if (nextTarget.galaxy) nextTarget.galaxy.visible = true;
                 if (pendingUniverse && typeof loadingAnimation.onReady === 'function') {
                     const onReady = loadingAnimation.onReady;
                     loadingAnimation = null;
@@ -221,10 +281,38 @@
             });
         }
 
+        function updateKeyboardNavigation(deltaSeconds) {
+            if (!controls.enabled || loadingAnimation || transitionState || groupOverviewState || isZoomingIntoGroup) return;
+            if (state.screen !== 'GROUP' && state.screen !== 'SINGLE') return;
+            const movementKeys = window.__bubbleBreakerMovementKeys;
+            if (!movementKeys || !movementKeys.size) return;
+            const forward = controls.target.clone().sub(camera.position);
+            if (forward.lengthSq() < 0.001) return;
+            forward.normalize();
+            const worldUp = new THREE.Vector3(0, 1, 0);
+            const right = new THREE.Vector3().crossVectors(forward, worldUp).normalize();
+            const movement = new THREE.Vector3();
+            if (movementKeys.has('w')) movement.add(forward);
+            if (movementKeys.has('s')) movement.sub(forward);
+            if (movementKeys.has('d')) movement.add(right);
+            if (movementKeys.has('a')) movement.sub(right);
+            if (movement.lengthSq() < 0.001) return;
+            movement.normalize();
+            const speed = window.__bubbleBreakerShiftDown ? 96 : 32;
+            movement.multiplyScalar(speed * deltaSeconds);
+            camera.position.add(movement);
+            controls.target.add(movement);
+            targetCameraPos.add(movement);
+            targetControlTarget.add(movement);
+        }
+
         function animate() {
             // ブラウザの描画タイミングに合わせて次のフレームを予約（ループの仕組み）
             requestAnimationFrame(animate);
             const time = clock.getElapsedTime(); // アプリ起動からの経過秒数
+            const now = performance.now();
+            const deltaSeconds = Math.min(0.05, Math.max(0.001, (now - lastAnimationTimestamp) / 1000));
+            lastAnimationTimestamp = now;
             updateCosmicEnvironment(time);
 
             // --- 状態に応じたカメラ・演出の制御 ---
@@ -267,6 +355,7 @@
             } else if (controls.enabled) {
                 // 【ユーザー操作中（通常時）】
                 // マウスドラッグでの視点移動を滑らかに更新
+                updateKeyboardNavigation(deltaSeconds);
                 controls.update();
                 if (state.screen === 'SINGLE') {
                     const direction = camera.position.clone().sub(controls.target).normalize();
@@ -294,6 +383,37 @@
             currentBubbles.forEach(b => {
                 // 初期Y座標を基準に絶対値で更新し、長時間実行時のdriftを防ぐ
                 b.mesh.position.y = b.baseY + Math.sin(time * 2 + b.baseX) * 0.005;
+
+                const analysisProbe = b.mesh.userData && b.mesh.userData.analysisProbe;
+                const analysisProbeAnimation = analysisProbe && analysisProbe.userData.analysisProbeAnimation;
+                if (analysisProbe && analysisProbeAnimation) {
+                    const isAnalysisLoading = b.data && b.data.analysisStatus === 'loading';
+                    const completionAt = analysisProbeAnimation.completionStartedAt || (b.data && b.data.analysisCompletionAt) || 0;
+                    const completionProgress = completionAt ? (performance.now() - completionAt) / 950 : 1;
+                    const isCompletionPulse = completionProgress >= 0 && completionProgress < 1;
+                    analysisProbe.visible = Boolean(isAnalysisLoading || isCompletionPulse);
+                    if (isAnalysisLoading) {
+                        const orbitAngle = analysisProbeAnimation.phase + time * 2.7;
+                        const latitude = Math.sin(time * 0.85 + analysisProbeAnimation.phase) * 0.34;
+                        const radial = Math.sqrt(Math.max(0.15, 1 - latitude * latitude));
+                        analysisProbeAnimation.probe.position.set(
+                            Math.cos(orbitAngle) * radial * 1.06,
+                            latitude * 1.06,
+                            Math.sin(orbitAngle) * radial * 1.06
+                        );
+                        analysisProbeAnimation.probe.rotation.set(latitude * 0.8, -orbitAngle, Math.cos(time * 1.3 + analysisProbeAnimation.phase) * 0.22);
+                        analysisProbeAnimation.orbit.rotation.y += 0.018;
+                        analysisProbeAnimation.orbit.rotation.z = Math.sin(time * 0.8 + analysisProbeAnimation.phase) * 0.22;
+                    }
+                    if (analysisProbeAnimation.completionFlash) {
+                        analysisProbeAnimation.completionFlash.visible = isCompletionPulse;
+                        if (isCompletionPulse) {
+                            const pulse = Math.max(0, Math.min(1, completionProgress));
+                            analysisProbeAnimation.completionFlash.scale.setScalar(0.72 + pulse * 0.62);
+                            analysisProbeAnimation.completionFlash.material.opacity = (1 - pulse) * 0.95;
+                        }
+                    }
+                }
 
                 const networkVisual = b.mesh.userData && b.mesh.userData.networkVisual;
                 const networkAnimation = networkVisual && networkVisual.userData.networkAnimation;
@@ -386,6 +506,30 @@
                     deepSeaAnimation.tendrils.forEach((tendril, index) => {
                         tendril.rotation.z = Math.sin(time * 0.34 + deepSeaAnimation.phase + index) * 0.08;
                     });
+                    deepSeaAnimation.fish.forEach(fish => {
+                        const swimAngle = fish.phase + time * fish.speed * fish.direction;
+                        fish.mesh.position.set(
+                            Math.cos(swimAngle) * fish.radius,
+                            fish.height + Math.sin(time * 1.4 + fish.phase) * 0.08,
+                            Math.sin(swimAngle) * fish.radius
+                        );
+                        fish.mesh.rotation.y = -swimAngle + (fish.direction < 0 ? Math.PI : 0);
+                        fish.mesh.rotation.z = Math.sin(time * 1.8 + fish.phase) * 0.08;
+                    });
+                    deepSeaAnimation.jellies.forEach(jelly => {
+                        const jellyAngle = jelly.phase + time * jelly.speed;
+                        jelly.mesh.position.set(
+                            Math.cos(jellyAngle) * jelly.radius,
+                            0.25 + Math.sin(time * 0.9 + jelly.phase) * 0.24,
+                            Math.sin(jellyAngle) * jelly.radius
+                        );
+                        jelly.mesh.scale.y = 0.94 + Math.sin(time * 2.1 + jelly.phase) * 0.09;
+                    });
+                    deepSeaAnimation.coral.forEach((coral, index) => {
+                        coral.rotation.z = Math.sin(time * 0.55 + index * 0.8) * 0.12;
+                        coral.material.opacity = 0.42 + (Math.sin(time * 1.7 + index) + 1) * 0.1;
+                    });
+                    deepSeaAnimation.plankton.rotation.y -= 0.0022;
                     if (deepSeaAnimation.scanRing) {
                         const isAnalysisLoading = state.bubbleData && state.bubbleData.id === b.data.id && b.data.analysisStatus === 'loading';
                         deepSeaAnimation.scanRing.visible = Boolean(isAnalysisLoading);
@@ -415,6 +559,30 @@
                     });
                     dataAnimation.links.forEach((link, index) => {
                         link.material.opacity = 0.3 + (Math.sin(time * 1.5 + dataAnimation.phase + index * 0.3) + 1) * 0.12;
+                    });
+                    dataAnimation.grids.forEach((grid, index) => {
+                        grid.rotation.z += 0.0015 * (index % 2 ? -1 : 1);
+                        grid.rotation.x += 0.0008;
+                    });
+                    dataAnimation.streams.forEach((stream, index) => {
+                        stream.material.opacity = 0.34 + (Math.sin(time * 2.8 + dataAnimation.phase + index * 0.9) + 1) * 0.14;
+                    });
+                    dataAnimation.streamPackets.forEach(packet => {
+                        packet.progress = (packet.progress + 0.018) % 1;
+                        const stream = dataAnimation.streams[packet.streamIndex];
+                        const positions = stream.geometry.attributes.position;
+                        const segmentCount = positions.count - 1;
+                        const scaled = packet.progress * segmentCount;
+                        const segment = Math.min(segmentCount - 1, Math.floor(scaled));
+                        const localProgress = scaled - segment;
+                        const start = new THREE.Vector3().fromBufferAttribute(positions, segment);
+                        const end = new THREE.Vector3().fromBufferAttribute(positions, segment + 1);
+                        packet.mesh.position.lerpVectors(start, end, localProgress);
+                    });
+                    dataAnimation.dataCubes.forEach((cube, index) => {
+                        cube.rotation.x += 0.012 + index * 0.001;
+                        cube.rotation.y -= 0.009 + index * 0.001;
+                        cube.material.opacity = 0.48 + (Math.sin(time * 2 + dataAnimation.phase + index) + 1) * 0.14;
                     });
                     dataAnimation.packets.forEach(packet => {
                         packet.progress = (packet.progress + 0.012) % 1;

@@ -889,6 +889,14 @@
         let groupEntryCameraDistance = 25;
         let singleViewDirection = new THREE.Vector3(0, 0, 1);
         let explorerSelectedBubbleId = null;
+        window.markBubbleAnalysisComplete = function(bubbleId) {
+            const bubble = activeDB && Object.values(activeDB).flatMap(group => group.bubbles || []).find(item => String(item.id) === String(bubbleId));
+            if (bubble) bubble.analysisCompletionAt = performance.now();
+            const visibleBubble = currentBubbles.find(item => String(item.data && item.data.id) === String(bubbleId));
+            if (visibleBubble && visibleBubble.mesh && visibleBubble.mesh.userData.analysisProbe) {
+                visibleBubble.mesh.userData.analysisProbe.userData.analysisProbeAnimation.completionStartedAt = performance.now();
+            }
+        };
         const BUBBLE_VISUAL_MODE_NAMES = ['network', 'classic', 'cosmic', 'deepSea', 'data'];
         let bubbleVisualMode = BUBBLE_VISUAL_MODE_NAMES.includes(localStorage.getItem('bubblebreaker.bubbleVisualMode'))
             ? localStorage.getItem('bubblebreaker.bubbleVisualMode')
@@ -1037,7 +1045,8 @@
                 mesh.userData.networkVisual,
                 mesh.userData.cosmicVisual,
                 mesh.userData.deepSeaVisual,
-                mesh.userData.dataVisual
+                mesh.userData.dataVisual,
+                mesh.userData.analysisProbe
             ].filter(Boolean);
             visuals.forEach(visual => visual.traverse(child => {
                 if (!child.material || !child.material.color) return;
@@ -1045,6 +1054,47 @@
                 if (animation && (child === animation.observerRing || child === animation.scanRing)) return;
                 child.material.color.copy(color);
             }));
+        }
+
+        function createAnalysisProbeVisual(isFocus = false) {
+            const visual = new THREE.Group();
+            const orbit = new THREE.Mesh(
+                new THREE.TorusGeometry(1.035, isFocus ? 0.018 : 0.012, 6, 64),
+                new THREE.MeshBasicMaterial({ color: 0xffe38a, transparent: true, opacity: isFocus ? 0.9 : 0.56, depthWrite: false, blending: THREE.AdditiveBlending })
+            );
+            orbit.rotation.x = Math.PI * 0.5;
+            visual.add(orbit);
+            const probe = new THREE.Group();
+            const body = new THREE.Mesh(
+                new THREE.SphereGeometry(isFocus ? 0.065 : 0.045, 10, 8),
+                new THREE.MeshBasicMaterial({ color: 0xfff4c2, transparent: true, opacity: 0.98, depthWrite: false, blending: THREE.AdditiveBlending })
+            );
+            const nose = new THREE.Mesh(
+                new THREE.ConeGeometry(isFocus ? 0.045 : 0.032, isFocus ? 0.16 : 0.11, 7, 1),
+                new THREE.MeshBasicMaterial({ color: 0xffb84d, transparent: true, opacity: 0.96, depthWrite: false, blending: THREE.AdditiveBlending })
+            );
+            nose.rotation.z = -Math.PI * 0.5;
+            nose.position.x = isFocus ? 0.075 : 0.055;
+            const antenna = new THREE.Line(
+                new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0, 0.025, 0), new THREE.Vector3(0, isFocus ? 0.14 : 0.1, 0)]),
+                new THREE.LineBasicMaterial({ color: 0x9beeff, transparent: true, opacity: 0.9, depthWrite: false, blending: THREE.AdditiveBlending })
+            );
+            probe.add(body, nose, antenna);
+            visual.add(probe);
+            const completionFlash = new THREE.Mesh(
+                new THREE.TorusGeometry(0.94, isFocus ? 0.045 : 0.03, 8, 64),
+                new THREE.MeshBasicMaterial({ color: 0x8dffca, transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending })
+            );
+            completionFlash.rotation.x = Math.PI * 0.5;
+            completionFlash.visible = false;
+            visual.add(completionFlash);
+            visual.userData.analysisProbeAnimation = {
+                phase: Math.random() * Math.PI * 2,
+                orbit,
+                probe,
+                completionFlash
+            };
+            return visual;
         }
 
         function createNetworkBubbleVisual(displayColor, bubbleData, level = 'central', isFocus = false) {
@@ -1287,13 +1337,73 @@
                 visual.add(tendril);
                 tendrils.push(tendril);
             }
+            const fish = [];
+            const fishCount = level === 'central' ? 7 : 4;
+            for (let index = 0; index < fishCount; index++) {
+                const fishGroup = new THREE.Group();
+                const fishBody = new THREE.Mesh(
+                    new THREE.SphereGeometry(isFocus ? 0.075 : 0.055, 10, 7),
+                    new THREE.MeshBasicMaterial({ color: index % 2 ? 0x8dfff0 : 0xb9d6ff, transparent: true, opacity: 0.86, depthWrite: false, blending: THREE.AdditiveBlending })
+                );
+                fishBody.scale.set(1.45, 0.68, 0.68);
+                const fishTail = new THREE.Mesh(
+                    new THREE.ConeGeometry(isFocus ? 0.07 : 0.05, isFocus ? 0.2 : 0.14, 4, 1),
+                    new THREE.MeshBasicMaterial({ color: accent, transparent: true, opacity: 0.72, depthWrite: false, blending: THREE.AdditiveBlending })
+                );
+                fishTail.rotation.z = -Math.PI * 0.5;
+                fishTail.position.x = isFocus ? -0.14 : -0.1;
+                fishGroup.add(fishBody, fishTail);
+                visual.add(fishGroup);
+                fish.push({ mesh: fishGroup, phase: (seed + index * 61) % 360 * Math.PI / 180, radius: 0.65 + (index % 3) * 0.16, height: -0.15 + (index % 4) * 0.2, speed: 0.24 + (index % 3) * 0.06, direction: index % 2 ? 1 : -1 });
+            }
+            const jellies = [];
+            const jellyCount = level === 'central' ? 3 : 2;
+            for (let index = 0; index < jellyCount; index++) {
+                const jelly = new THREE.Group();
+                const bell = new THREE.Mesh(
+                    new THREE.SphereGeometry(isFocus ? 0.12 : 0.085, 12, 8, 0, Math.PI * 2, 0, Math.PI * 0.58),
+                    new THREE.MeshBasicMaterial({ color: 0xd09dff, transparent: true, opacity: 0.68, depthWrite: false, blending: THREE.AdditiveBlending })
+                );
+                const tentacleMaterial = new THREE.LineBasicMaterial({ color: 0x9dfff1, transparent: true, opacity: 0.6, depthWrite: false, blending: THREE.AdditiveBlending });
+                const tentacles = [];
+                for (let tentacleIndex = 0; tentacleIndex < 3; tentacleIndex++) {
+                    const points = [new THREE.Vector3((tentacleIndex - 1) * 0.055, -0.05, 0), new THREE.Vector3((tentacleIndex - 1) * 0.08, -0.22, (tentacleIndex % 2 ? 0.04 : -0.04))];
+                    const tentacle = new THREE.Line(new THREE.BufferGeometry().setFromPoints(points), tentacleMaterial);
+                    jelly.add(tentacle);
+                    tentacles.push(tentacle);
+                }
+                jelly.add(bell);
+                visual.add(jelly);
+                jellies.push({ mesh: jelly, phase: (seed + index * 97) % 360 * Math.PI / 180, radius: 0.72 + index * 0.2, speed: 0.16 + index * 0.04, tentacles });
+            }
+            const coral = [];
+            const coralMaterial = new THREE.MeshBasicMaterial({ color: 0xff7fc8, transparent: true, opacity: 0.58, depthWrite: false, blending: THREE.AdditiveBlending });
+            for (let index = 0; index < (level === 'central' ? 8 : 5); index++) {
+                const angle = (seed + index * 43) % 360 * Math.PI / 180;
+                const coralMesh = new THREE.Mesh(new THREE.ConeGeometry(0.05 + (index % 3) * 0.018, 0.32 + (index % 4) * 0.09, 5, 1), coralMaterial);
+                coralMesh.position.set(Math.cos(angle) * (0.72 + (index % 2) * 0.18), -0.72 + (index % 3) * 0.04, Math.sin(angle) * (0.72 + (index % 2) * 0.18));
+                visual.add(coralMesh);
+                coral.push(coralMesh);
+            }
+            const planktonPositions = new Float32Array((level === 'central' ? 90 : 55) * 3);
+            for (let index = 0; index < planktonPositions.length / 3; index++) {
+                const angle = cosmicRandom(seed + index * 1.7) * Math.PI * 2;
+                const radius = 0.45 + cosmicRandom(seed + index * 2.3) * 0.92;
+                planktonPositions[index * 3] = Math.cos(angle) * radius;
+                planktonPositions[index * 3 + 1] = (cosmicRandom(seed + index * 3.1) - 0.5) * 1.8;
+                planktonPositions[index * 3 + 2] = Math.sin(angle) * radius;
+            }
+            const planktonGeometry = new THREE.BufferGeometry();
+            planktonGeometry.setAttribute('position', new THREE.BufferAttribute(planktonPositions, 3));
+            const plankton = new THREE.Points(planktonGeometry, new THREE.PointsMaterial({ color: 0xb5fff4, size: isFocus ? 0.035 : 0.024, transparent: true, opacity: 0.52, depthWrite: false, blending: THREE.AdditiveBlending }));
+            visual.add(plankton);
             const scanRing = new THREE.Mesh(
                 new THREE.TorusGeometry(0.92, 0.018, 6, 48),
                 new THREE.MeshBasicMaterial({ color: 0xb5fff4, transparent: true, opacity: 0.9, depthWrite: false, blending: THREE.AdditiveBlending })
             );
             scanRing.visible = false;
             visual.add(scanRing);
-            visual.userData.deepSeaAnimation = { phase: (seed % 1000) / 1000 * Math.PI * 2, current, bubbles, tendrils, scanRing };
+            visual.userData.deepSeaAnimation = { phase: (seed % 1000) / 1000 * Math.PI * 2, current, bubbles, tendrils, fish, jellies, coral, plankton, scanRing };
             visual.userData.bubbleVisualMode = 'deepSea';
             return visual;
         }
@@ -1338,13 +1448,56 @@
                 visual.add(packet);
                 return { mesh: packet, edge: index, progress: (seed % 100) / 100 + index * 0.19 };
             });
+            const grids = [];
+            const gridMaterial = new THREE.LineBasicMaterial({ color: accent, transparent: true, opacity: isFocus ? 0.36 : 0.2, depthWrite: false, blending: THREE.AdditiveBlending });
+            [0.58, 0.82, 1.06].forEach((radius, index) => {
+                const grid = new THREE.Mesh(new THREE.TorusGeometry(radius, 0.008 + index * 0.003, 5, 40), gridMaterial);
+                grid.rotation.set(index * 0.72, index * 0.43, index * 0.31);
+                visual.add(grid);
+                grids.push(grid);
+            });
+            const streams = [];
+            const streamPackets = [];
+            const streamMaterial = new THREE.LineBasicMaterial({ color: 0x67e8ff, transparent: true, opacity: 0.54, depthWrite: false, blending: THREE.AdditiveBlending });
+            for (let streamIndex = 0; streamIndex < (level === 'central' ? 5 : 3); streamIndex++) {
+                const streamPoints = [];
+                const streamAngle = (seed + streamIndex * 71) % 360 * Math.PI / 180;
+                for (let pointIndex = 0; pointIndex < 7; pointIndex++) {
+                    const progress = pointIndex / 6;
+                    const radius = 0.28 + progress * 0.96;
+                    streamPoints.push(new THREE.Vector3(
+                        Math.cos(streamAngle + progress * 1.5) * radius,
+                        Math.sin(streamAngle * 0.7 + progress * 2.2) * 0.46,
+                        Math.sin(streamAngle + progress * 1.5) * radius
+                    ));
+                }
+                const stream = new THREE.Line(new THREE.BufferGeometry().setFromPoints(streamPoints), streamMaterial);
+                visual.add(stream);
+                streams.push(stream);
+                for (let packetIndex = 0; packetIndex < 4; packetIndex++) {
+                    const packet = new THREE.Mesh(new THREE.BoxGeometry(0.045, 0.045, 0.045), packetMaterial);
+                    visual.add(packet);
+                    streamPackets.push({ mesh: packet, streamIndex, progress: packetIndex * 0.23 + (seed % 50) / 100 });
+                }
+            }
+            const dataCubes = [];
+            for (let index = 0; index < (level === 'central' ? 6 : 3); index++) {
+                const cube = new THREE.Mesh(
+                    new THREE.BoxGeometry(0.11, 0.11, 0.11),
+                    new THREE.MeshBasicMaterial({ color: index % 2 ? 0xffe38a : 0xff7bd8, transparent: true, opacity: 0.72, wireframe: true, depthWrite: false, blending: THREE.AdditiveBlending })
+                );
+                const angle = (seed + index * 53) % 360 * Math.PI / 180;
+                cube.position.set(Math.cos(angle) * (0.72 + index * 0.03), Math.sin(angle * 1.8) * 0.58, Math.sin(angle) * (0.72 + index * 0.03));
+                visual.add(cube);
+                dataCubes.push(cube);
+            }
             const scanRing = new THREE.Mesh(
                 new THREE.TorusGeometry(0.9, 0.018, 6, 48),
                 new THREE.MeshBasicMaterial({ color: 0x9afcff, transparent: true, opacity: 0.9, depthWrite: false, blending: THREE.AdditiveBlending })
             );
             scanRing.visible = false;
             visual.add(scanRing);
-            visual.userData.dataAnimation = { phase: (seed % 1000) / 1000 * Math.PI * 2, nodes, links, positions, packets, scanRing };
+            visual.userData.dataAnimation = { phase: (seed % 1000) / 1000 * Math.PI * 2, nodes, links, positions, packets, grids, streams, streamPackets, dataCubes, scanRing };
             visual.userData.bubbleVisualMode = 'data';
             return visual;
         }
@@ -1473,6 +1626,8 @@
             mesh.userData.cosmicVisual = null;
             mesh.userData.deepSeaVisual = null;
             mesh.userData.dataVisual = null;
+            mesh.userData.analysisProbe = createAnalysisProbeVisual(isFocus);
+            mesh.add(mesh.userData.analysisProbe);
             if (bubbleData && bubbleVisualMode !== 'classic') ensureBubbleVisual(mesh, bubbleData, level, isFocus);
             return mesh;
         }
@@ -1508,7 +1663,7 @@
         function disposeBubble(bubble) {
             if (!bubble) return;
             scene.remove(bubble.mesh);
-            ['networkVisual', 'cosmicVisual', 'deepSeaVisual', 'dataVisual'].forEach(key => {
+            ['networkVisual', 'cosmicVisual', 'deepSeaVisual', 'dataVisual', 'analysisProbe'].forEach(key => {
                 if (!bubble.mesh.userData || !bubble.mesh.userData[key]) return;
                 disposeObjectTree(bubble.mesh.userData[key]);
                 bubble.mesh.remove(bubble.mesh.userData[key]);

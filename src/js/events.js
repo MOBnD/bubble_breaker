@@ -120,7 +120,6 @@
             if (soundEnabled) playSound('ui');
         });
         document.getElementById('btn-sound-toggle').innerText = soundEnabled ? '🔊 効果音ON' : '🔇 効果音OFF';
-        const reopenPanelsButton = document.getElementById('btn-reopen-panels');
         const collapsiblePanelButtons = [...document.querySelectorAll('[data-collapse-panel]')];
         function setPanelCollapsed(panelId, collapsed, persist = true) {
             const panel = document.getElementById(panelId);
@@ -129,7 +128,7 @@
             panel.classList.toggle('panel-is-collapsed', collapsed);
             button.setAttribute('aria-expanded', String(!collapsed));
             button.textContent = collapsed ? '+' : '−';
-            button.title = collapsed ? '設定を展開' : '設定を畳む';
+            button.title = collapsed ? 'パネルを展開' : 'パネルを畳む';
             if (persist) localStorage.setItem(`bubblebreaker.${panelId}.collapsed`, collapsed ? 'on' : 'off');
             return collapsed;
         }
@@ -140,21 +139,10 @@
                 setPanelCollapsed(button.dataset.collapsePanel, !panel.classList.contains('panel-is-collapsed'));
             });
         });
-        const storedBgmPanelCollapsed = localStorage.getItem('bubblebreaker.panel-bgm.collapsed') === 'on';
-        setPanelCollapsed('panel-bgm', storedBgmPanelCollapsed, false);
-        document.querySelectorAll('[data-close-panel]').forEach(button => {
-            button.addEventListener('click', () => {
-                const panel = document.getElementById(button.dataset.closePanel);
-                if (panel) panel.classList.add('hidden');
-                reopenPanelsButton.classList.remove('hidden');
-            });
-        });
-        reopenPanelsButton.addEventListener('click', () => {
-            document.querySelectorAll('[data-close-panel]').forEach(button => {
-                const panel = document.getElementById(button.dataset.closePanel);
-                if (panel) panel.classList.remove('hidden');
-            });
-            reopenPanelsButton.classList.add('hidden');
+        collapsiblePanelButtons.forEach(button => {
+            const panelId = button.dataset.collapsePanel;
+            const storedCollapsed = localStorage.getItem(`bubblebreaker.${panelId}.collapsed`) === 'on';
+            setPanelCollapsed(panelId, storedCollapsed, false);
         });
         const bgmToggle = document.getElementById('bgm-toggle');
         const ngc3324Toggle = document.getElementById('ngc3324-toggle');
@@ -168,6 +156,68 @@
         const bgmAutoNextControl = document.getElementById('bgm-auto-next');
         const bgmTransitionControl = document.getElementById('bgm-transition');
         const explorerModeControl = document.getElementById('explorer-mode');
+        const titleToggleButton = document.getElementById('btn-toggle-title');
+        const uiToggleButton = document.getElementById('btn-toggle-ui');
+        const movementKeys = window.__bubbleBreakerMovementKeys || new Set();
+        window.__bubbleBreakerMovementKeys = movementKeys;
+        function isTextEditingTarget(target) {
+            return Boolean(target && (target.matches('input, textarea, select, button, [contenteditable="true"]') || target.isContentEditable));
+        }
+        function applyTitleVisibility(visible, persist = true) {
+            const brandHud = document.querySelector('.brand-hud');
+            if (brandHud) brandHud.classList.toggle('ui-title-hidden', !visible);
+            if (titleToggleButton) {
+                titleToggleButton.setAttribute('aria-pressed', String(visible));
+                titleToggleButton.textContent = `タイトル表示 ${visible ? 'ON' : 'OFF'}`;
+            }
+            if (persist) localStorage.setItem('bubblebreaker.titleVisible', visible ? 'on' : 'off');
+            return visible;
+        }
+        function applyUIVisibility(visible, persist = true) {
+            const uiLayer = document.getElementById('ui-layer');
+            const labels = document.getElementById('labels-container');
+            if (uiLayer) uiLayer.classList.toggle('ui-all-hidden', !visible);
+            if (labels) labels.classList.toggle('ui-all-hidden', !visible);
+            if (uiToggleButton) {
+                uiToggleButton.setAttribute('aria-pressed', String(visible));
+                uiToggleButton.textContent = `UI表示 ${visible ? 'ON' : 'OFF'}`;
+            }
+            if (persist) localStorage.setItem('bubblebreaker.uiVisible', visible ? 'on' : 'off');
+            return visible;
+        }
+        const titleVisible = localStorage.getItem('bubblebreaker.titleVisible') !== 'off';
+        const uiVisible = localStorage.getItem('bubblebreaker.uiVisible') !== 'off';
+        applyTitleVisibility(titleVisible, false);
+        applyUIVisibility(uiVisible, false);
+        titleToggleButton.addEventListener('click', () => applyTitleVisibility(!document.querySelector('.brand-hud').classList.contains('ui-title-hidden')));
+        uiToggleButton.addEventListener('click', () => applyUIVisibility(!document.getElementById('ui-layer').classList.contains('ui-all-hidden')));
+        window.addEventListener('keydown', event => {
+            if (isTextEditingTarget(event.target)) return;
+            window.__bubbleBreakerShiftDown = event.shiftKey || event.key === 'Shift';
+            const key = event.key.toLowerCase();
+            if (key === 'h') {
+                event.preventDefault();
+                applyTitleVisibility(document.querySelector('.brand-hud').classList.contains('ui-title-hidden'));
+                return;
+            }
+            if (key === 'u') {
+                event.preventDefault();
+                applyUIVisibility(document.getElementById('ui-layer').classList.contains('ui-all-hidden'));
+                return;
+            }
+            if (['w', 'a', 's', 'd'].includes(key)) {
+                movementKeys.add(key);
+                event.preventDefault();
+            }
+        });
+        window.addEventListener('keyup', event => {
+            movementKeys.delete(event.key.toLowerCase());
+            if (event.key === 'Shift') window.__bubbleBreakerShiftDown = false;
+        });
+        window.addEventListener('blur', () => {
+            movementKeys.clear();
+            window.__bubbleBreakerShiftDown = false;
+        });
         bgmToggle.checked = bgmEnabled;
         const storedNGC3324Visibility = localStorage.getItem('bubblebreaker.ngc3324');
         const ngc3324Visible = storedNGC3324Visibility !== 'off';

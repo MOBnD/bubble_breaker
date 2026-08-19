@@ -1177,6 +1177,8 @@
                         bubble.analysis = normalizeAnalysis(parsed.analysis);
                         bubble.sources = normalizeSources(parsed.sources);
                         bubble.analysisStatus = 'ready';
+                        bubble.analysisCompletionAt = performance.now();
+                        if (typeof window.markBubbleAnalysisComplete === 'function') window.markBubbleAnalysisComplete(bubbleId);
                         apiLog('バブル分析の遅延生成に成功', { bubbleId, groupId: group.id, attempt, requestId, elapsedMs: Math.round(performance.now() - startedAt) });
                         if (typeof window.refreshAnalysisView === 'function') window.refreshAnalysisView(bubbleId);
                         return { analysis: bubble.analysis, sources: bubble.sources };
