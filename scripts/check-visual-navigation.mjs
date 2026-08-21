@@ -4,14 +4,15 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const [scene, animation, events, audio, indexHtml, styles, buildScript] = await Promise.all([
+const [scene, animation, events, audio, indexHtml, styles, buildScript, apiSource] = await Promise.all([
     readFile(path.join(root, 'src', 'js', 'scene.js'), 'utf8'),
     readFile(path.join(root, 'src', 'js', 'animation.js'), 'utf8'),
     readFile(path.join(root, 'src', 'js', 'events.js'), 'utf8'),
     readFile(path.join(root, 'src', 'js', 'audio.js'), 'utf8'),
     readFile(path.join(root, 'src', 'index.html'), 'utf8'),
     readFile(path.join(root, 'src', 'styles.css'), 'utf8'),
-    readFile(path.join(root, 'scripts', 'build.mjs'), 'utf8')
+    readFile(path.join(root, 'scripts', 'build.mjs'), 'utf8'),
+    readFile(path.join(root, 'src', 'js', 'api.js'), 'utf8')
 ]);
 
 const shapeMatch = scene.match(/const GALAXY_SHAPE_NAMES\s*=\s*\[([^\]]+)\]/);
@@ -61,6 +62,16 @@ assert.doesNotMatch(scene, /const horizon = new THREE\.Mesh/, 'the enclosing wir
 assert.match(scene, /function updateAutomaticBubbleApproach\(\)/, 'automatic bubble proximity handling should exist');
 assert.match(scene, /function updateAnalysisGenerationStatus\(\)/, 'analysis generation status should be visible');
 assert.match(scene, /stateName === 'loading'/, 'loading analysis should be represented in the UI');
+assert.match(scene, /analysis-evaluation-summary/, 'opposition criticism should be reflected in the analysis preview');
+assert.match(scene, /analysis-evaluation-insight/, 'opposition criticism focus should be reflected in the analysis preview');
+assert.match(scene, /'evaluation': '反対派からの批判'/, 'evaluation detail title should describe opposition criticism');
+assert.match(indexHtml, /反対派からの批判/, 'analysis card should be labelled as opposition criticism');
+assert.match(indexHtml, /反対派の主な批判/, 'analysis card should expose the main criticism label');
+assert.doesNotMatch(indexHtml, /内部からの視点\(自認\)|外部からの視点\(印象\)/, 'analysis card should not use the old inside/outside evaluation labels');
+assert.match(apiSource, /evaluationは「内と外からの評価」ではなく/, 'analysis generation should request opposition criticism');
+assert.match(apiSource, /反対派の主な批判/, 'analysis generation should define the opposition summary');
+assert.match(apiSource, /藁人形論法/, 'analysis generation should avoid fabricated strawman criticism');
+assert.match(apiSource, /このバブルに対する反対派の批判/, 'fallback analysis should describe opposition criticism');
 assert.match(scene, /function createAnalysisProbeVisual\(/, 'analysis loading should use a surface probe');
 assert.match(scene, /window\.markBubbleAnalysisComplete = function/, 'analysis completion should notify the bubble scene');
 assert.match(animation, /analysisProbeAnimation/, 'analysis probes should animate around bubbles');
@@ -73,7 +84,9 @@ assert.match(animation, /segmentDuration: 60000/, 'black hole approach should al
 assert.match(animation, /approachDistance: 16000/, 'black hole approach should travel through a larger universe volume');
 assert.match(animation, /maxSpeed: 900/, 'black hole approach should have a speed ceiling');
 assert.match(animation, /blackHole\.clone\(\)\.addScaledVector\(loadingAnimation\.approachDirection, eventHorizonRadius\)/, 'warp should stop at the event horizon surface');
-assert.match(animation, /new THREE\.CatmullRomCurve3/, 'warp should follow a smooth curve');
+assert.match(animation, /new THREE\.CurvePath/, 'warp should be assembled from continuous curve segments');
+assert.match(animation, /new THREE\.CubicBezierCurve3/, 'warp should use cubic Bezier segments');
+assert.doesNotMatch(animation, /new THREE\.CatmullRomCurve3/, 'warp should not use unstable point-spline interpolation');
 assert.match(animation, /WARP_STOP_COUNT_MIN/, 'warp should use the configured zero to thirty stop range');
 assert.match(animation, /routeStops/, 'warp should retain generated galaxy and stellar-system stops');
 assert.match(animation, /selectWarpCandidates\(/, 'warp should select actual galaxy and stellar-system anchors');
@@ -81,8 +94,27 @@ assert.match(animation, /candidate\.anchor/, 'warp candidates should be anchored
 assert.match(animation, /createSwingByArc\(/, 'warp should curve around each selected object');
 assert.match(animation, /getSwingByAxis\(/, 'warp should define an orbital plane around each selected object');
 assert.match(animation, /arcPoints/, 'warp should contain multiple points on the swing-by arc');
+assert.match(animation, /createCircularArcCurves\(/, 'warp should approximate each flyby with tangent-preserving circular Bezier arcs');
+assert.match(animation, /const sweepAngle = Math\.PI/, 'warp flybys should use a 180 degree sweep');
+assert.match(animation, /const exitRadial = radialStart\.clone\(\)\.negate\(\)/, 'warp flybys should exit from the side opposite the entry');
+assert.match(animation, /createSmoothBezierSegment\(/, 'warp should connect flybys with smooth tangent handles');
 assert.match(animation, /getRouteMinimumDistance\(/, 'warp should verify the route stays centered on the flyby radius');
+assert.match(animation, /function routeHasContinuousHeading\(/, 'warp should reject routes with abrupt heading changes');
+assert.match(animation, /previousTangent\.dot\(tangent\) < 0\.82/, 'warp should enforce a minimum heading continuity');
 assert.match(animation, /flybyRadius/, 'warp should keep a safe flyby radius around each object');
+assert.match(animation, /function getRouteLookTarget\(/, 'warp camera should use a route look target');
+assert.match(animation, /getTangentAtDistance/, 'warp camera should follow the distance-sampled route tangent');
+assert.match(animation, /function createRouteDistanceSampler\(/, 'warp should sample route positions by traveled distance');
+assert.match(animation, /function updateRouteCameraLook\(/, 'warp camera should smooth its tangent-following direction');
+assert.match(animation, /routeLookDirection/, 'warp camera should retain a smoothed heading');
+assert.match(animation, /routeUpDirection/, 'warp camera should preserve a stable horizon basis');
+assert.match(animation, /camera\.quaternion\.slerp/, 'warp camera should smoothly apply its travel orientation');
+assert.doesNotMatch(animation, /bankAngle/, 'warp camera should not introduce a turn bank');
+assert.match(animation, /function getRouteStopSpeedFactor\(/, 'warp should calculate a slowdown zone around stops');
+assert.match(animation, /slowdownDistance/, 'warp should use a long slowdown zone around stops');
+assert.match(animation, /routeLength \* 0\.16/, 'warp slowdown should cover a long sixteen percent route zone');
+assert.match(animation, /return 0\.24 \+ easedDistance/, 'warp should retain a controlled minimum speed through stops');
+assert.doesNotMatch(animation, /targetControlTarget\.copy\(loadingAnimation\.routeStopAnchors\[/, 'warp camera should not look directly at swing-by anchors');
 assert.match(animation, /routeStopProgresses/, 'warp should slow down around each swing-by stop');
 assert.match(animation, /preEntryProgress/, 'warp should stop before entering the destination galaxy');
 assert.match(animation, /preEntryStartedAt/, 'warp should hold before black hole entry');
@@ -93,14 +125,25 @@ assert.match(animation, /camera\.fov = configuredFieldOfView/, 'normal warp FOV 
 assert.match(animation, /targetControlTarget\.copy\(blackHole\)/, 'the final approach should aim at the destination black hole');
 assert.match(animation, /routeAvoidsBlackHoles\(/, 'warp routes should be checked against black hole exclusion zones');
 assert.match(animation, /createUTurnRoute\(/, 'loading completion should create a return U-turn route');
+assert.match(animation, /function beginNextLoadingUniverse\(/, 'an unfinished load should continue through a new universe after black-hole entry');
+assert.match(animation, /startPosition = null/, 'subsequent universes should accept the current camera position as route start');
+assert.match(animation, /targetIndex = \(loadingAnimation\.targetIndex \+ 1\)/, 'subsequent universes should advance to the next black hole');
 assert.match(animation, /window\.markLoadingUniverseReady/, 'API completion should notify the loading animation');
 assert.match(animation, /returningToDestination/, 'the loading route should switch to the destination return phase');
 assert.match(animation, /initializeLoadingRoute\(firstTarget\)/, 'each dive should receive a multi-stop route');
 assert.match(animation, /relocateGalaxyUniverse\('black-hole-universe-switch'\)/, 'black-hole universe switches should relocate galaxies');
 assert.doesNotMatch(animation, /warpStarStreakGroup|updateWarpStarStreaks/, 'concentration-line warp overlays should be removed');
-assert.match(scene, /motionBlurCanvas/, 'motion blur should use a separate overlay canvas');
+assert.match(scene, /const motionBlurRenderTarget = new THREE\.WebGLRenderTarget/, 'motion blur should render the scene into a texture first');
+assert.match(scene, /const motionBlurRenderScene = new THREE\.Scene\(\)/, 'motion blur should use a dedicated post-process scene');
+assert.match(scene, /uBlurAmount/, 'motion blur should expose a shader blur amount');
+assert.match(scene, /for \(int sampleIndex = 1; sampleIndex <= 14; sampleIndex\+\+\)/, 'motion blur should use multiple radial texture samples');
+assert.match(scene, /mix\(vUv, uCenter, progress \* uBlurAmount\)/, 'motion blur samples should stretch toward the vanishing point');
+assert.match(scene, /function renderMotionBlurPass\(/, 'motion blur should have a dedicated post-process render pass');
+assert.match(scene, /renderer\.setRenderTarget\(motionBlurRenderTarget\)/, 'motion blur should capture the main scene into a render target');
+assert.doesNotMatch(scene, /MOTION_BLUR_LINE_COUNT|motionBlurGeometry|motionBlurOverlayScene|renderer\.clearDepth\(\)/, 'motion blur should not use the old speed-line overlay');
 assert.match(scene, /window\.setMotionBlurEnabled/, 'motion blur should have a runtime toggle');
 assert.match(animation, /updateMotionBlurFrame\(/, 'motion blur should be updated after the scene render');
+assert.match(animation, /renderMotionBlurPass\(/, 'animation should finish each frame through the motion blur pass');
 assert.match(animation, /createUniverseRevealBeacon\(/, 'the next universe should begin as a central light beacon');
 assert.match(animation, /function updateUniverseReveal\(/, 'the next universe should reveal from a distant view');
 assert.match(animation, /beginUniverseReveal\(true\)/, 'the next universe should use the fast reveal mode after a dive');
@@ -152,14 +195,18 @@ assert.match(indexHtml, /id="fov-range"/, 'FOV should have a range control');
 assert.match(indexHtml, /id="fov-value"/, 'FOV should show its current value');
 assert.match(indexHtml, /id="warp-speed-range"/, 'warp speed should have a range control');
 assert.match(indexHtml, /id="warp-stops-range"/, 'warp stop count should have a range control');
+assert.match(indexHtml, /id="warp-stops-value"[^>]*>3個<\//, 'warp stop count UI should default to three');
+assert.match(indexHtml, /id="warp-stops-range"[^>]*value="3"/, 'warp stop range should start at three');
 assert.match(indexHtml, /id="motion-blur-toggle"/, 'motion blur should have an ON/OFF control');
 assert.match(indexHtml, /id="motion-blur-strength-range"/, 'motion blur should have a strength range control');
+assert.match(indexHtml, /速度線強度/, 'speed-line strength should be clearly labelled');
 assert.match(indexHtml, /id="motion-blur-strength-range"[^>]*min="0"[^>]*max="100"/, 'motion blur strength should range from zero to one hundred');
 assert.match(indexHtml, /id="warp-stops-range"[^>]*min="0"[^>]*max="30"/, 'warp stop range should range from zero to thirty');
 assert.match(indexHtml, /id="warp-speed-range"[^>]*max="3"/, 'warp speed range should cap at three times');
 assert.match(events, /window\.setFieldOfView/, 'FOV control should update the camera setting');
 assert.match(events, /window\.setWarpSpeedFactor/, 'warp speed control should update navigation speed');
 assert.match(events, /window\.setWarpStopCount/, 'warp stop control should update navigation count');
+assert.match(events, /storedWarpStops == null \? 3/, 'missing stored warp stop count should default to three');
 assert.match(events, /window\.setMotionBlurStrength/, 'motion blur strength should update the rendering effect');
 assert.match(events, /bubblebreaker\.motionBlur/, 'motion blur preference should persist');
 assert.match(events, /bubblebreaker\.motionBlurStrength/, 'motion blur strength should persist');
@@ -169,7 +216,7 @@ assert.match(scene, /WARP_SPEED_MIN = 0\.25/, 'warp speed should support low spe
 assert.match(scene, /WARP_SPEED_MAX = 3/, 'warp speed should support three times speed');
 assert.match(scene, /WARP_STOP_COUNT_MIN = 0/, 'warp stop count should allow zero stops');
 assert.match(scene, /WARP_STOP_COUNT_MAX = 30/, 'warp stop count should allow thirty stops');
-assert.match(scene, /DEFAULT_WARP_STOP_COUNT = 5/, 'warp stop count should default to five');
+assert.match(scene, /DEFAULT_WARP_STOP_COUNT = 3/, 'warp stop count should default to three');
 assert.match(scene, /motionBlurStrength/, 'motion blur should use a configurable intensity');
 assert.match(events, /window\.setTitleVisibility = function/, 'title visibility should be exposed for reliable button wiring');
 assert.match(events, /window\.setUIVisibility = function/, 'global UI visibility should be exposed for reliable button wiring');

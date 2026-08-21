@@ -105,11 +105,11 @@
             return selected;
         }
 
-        function getSwingByAxis(incomingRadial, outgoingRadial) {
-            const axis = new THREE.Vector3().crossVectors(incomingRadial, outgoingRadial);
+        function getSwingByAxis(incomingDirection, outgoingDirection) {
+            const axis = new THREE.Vector3().crossVectors(incomingDirection, outgoingDirection);
             if (axis.lengthSq() < 0.0001) {
-                axis.copy(new THREE.Vector3(0, 1, 0).cross(incomingRadial));
-                if (axis.lengthSq() < 0.0001) axis.set(1, 0, 0).cross(incomingRadial);
+                axis.copy(new THREE.Vector3(0, 1, 0).cross(incomingDirection));
+                if (axis.lengthSq() < 0.0001) axis.set(1, 0, 0).cross(incomingDirection);
             }
             return axis.normalize();
         }
@@ -118,29 +118,77 @@
             return radial.clone().applyQuaternion(new THREE.Quaternion().setFromAxisAngle(axis, angle)).normalize();
         }
 
+        function createSmoothBezierSegment(start, end, startTangent, endTangent) {
+            const distance = start.distanceTo(end);
+            if (distance < 0.001) return new THREE.LineCurve3(start.clone(), end.clone());
+            const safeStartTangent = startTangent.clone().normalize();
+            const safeEndTangent = endTangent.clone().normalize();
+            const chord = end.clone().sub(start).normalize();
+            const startAlignment = Math.max(0.18, (safeStartTangent.dot(chord) + 1) * 0.5);
+            const endAlignment = Math.max(0.18, (safeEndTangent.dot(chord) + 1) * 0.5);
+            const handle = Math.min(distance * 0.28, 1200);
+            const controlStart = start.clone().addScaledVector(safeStartTangent, handle * startAlignment);
+            const controlEnd = end.clone().addScaledVector(safeEndTangent, -handle * endAlignment);
+            return new THREE.CubicBezierCurve3(start.clone(), controlStart, controlEnd, end.clone());
+        }
+
+        function createCircularArcCurves(anchor, radialStart, axis, sweepAngle, radius) {
+            const segmentCount = Math.max(1, Math.ceil(Math.abs(sweepAngle) / (Math.PI / 4)));
+            const segmentAngle = sweepAngle / segmentCount;
+            const curves = [];
+            const arcPoints = [];
+            for (let segmentIndex = 0; segmentIndex < segmentCount; segmentIndex++) {
+                const angleStart = segmentAngle * segmentIndex;
+                const angleEnd = segmentAngle * (segmentIndex + 1);
+                const radial0 = rotateRadial(radialStart, axis, angleStart);
+                const radial1 = rotateRadial(radialStart, axis, angleEnd);
+                const tangent0 = new THREE.Vector3().crossVectors(axis, radial0).normalize();
+                const tangent1 = new THREE.Vector3().crossVectors(axis, radial1).normalize();
+                const point0 = anchor.clone().addScaledVector(radial0, radius);
+                const point1 = anchor.clone().addScaledVector(radial1, radius);
+                const tangentLength = radius * (4 / 3) * Math.tan(Math.abs(segmentAngle) / 4);
+                curves.push(new THREE.CubicBezierCurve3(
+                    point0,
+                    point0.clone().addScaledVector(tangent0, tangentLength),
+                    point1.clone().addScaledVector(tangent1, -tangentLength),
+                    point1
+                ));
+                if (segmentIndex === 0) arcPoints.push(point0);
+                arcPoints.push(point1);
+            }
+            return { curves, arcPoints };
+        }
+
         function createSwingByArc(candidate, previousPoint, nextPoint, radiusScale = 1) {
             const anchor = candidate.anchor;
-            const incomingRadial = previousPoint.clone().sub(anchor).normalize();
-            const outgoingRadial = nextPoint.clone().sub(anchor).normalize();
-            const axis = getSwingByAxis(incomingRadial, outgoingRadial);
-            const dot = Math.max(-1, Math.min(1, incomingRadial.dot(outgoingRadial)));
-            const directAngle = Math.acos(dot);
-            // 直線を少し膨らませる場合も、中心から一定距離の円弧として構成する。
-            // これにより「経由地の反対側へ曲がる」点列だけの挙動を廃止する。
-            const sweepAngle = directAngle < Math.PI * 0.35 ? Math.PI * 0.72 : directAngle;
-            const radius = candidate.flybyRadius * radiusScale;
-            const arcPoints = [];
-            const sampleCount = 10;
-            for (let sampleIndex = 0; sampleIndex <= sampleCount; sampleIndex++) {
-                const progress = sampleIndex / sampleCount;
-                const radial = rotateRadial(incomingRadial, axis, sweepAngle * progress);
-                arcPoints.push(anchor.clone().addScaledVector(radial, radius));
+            const incomingDirection = anchor.clone().sub(previousPoint).normalize();
+            const outgoingDirection = nextPoint.clone().sub(anchor).normalize();
+            const radialStart = incomingDirection.clone().negate();
+            let axis = getSwingByAxis(incomingDirection, outgoingDirection);
+            const entryPointBeforeArc = anchor.clone().addScaledVector(radialStart, candidate.flybyRadius * radiusScale);
+            const entryTangent = new THREE.Vector3().crossVectors(axis, radialStart).normalize();
+            if (entryTangent.dot(entryPointBeforeArc.clone().sub(previousPoint).normalize()) < 0) {
+                axis.negate();
             }
-            const exitPoint = anchor.clone().addScaledVector(outgoingRadial, radius);
-            if (arcPoints[arcPoints.length - 1].distanceTo(exitPoint) > radius * 0.12) arcPoints.push(exitPoint);
-            const midpoint = arcPoints[Math.floor(arcPoints.length / 2)].clone();
+            // 入射した半径の正反対へ抜ける180度スイングバイを基本にする。
+            // 次の目的地への方向調整は出口後のBezier接続で行い、出口地点は動かさない。
+            const sweepAngle = Math.PI;
+            const radius = candidate.flybyRadius * radiusScale;
+            const arc = createCircularArcCurves(anchor, radialStart, axis, sweepAngle, radius);
+            const entryPoint = arc.arcPoints[0].clone();
+            const exitRadial = radialStart.clone().negate();
+            const exitPoint = anchor.clone().addScaledVector(exitRadial, radius);
+            const exitTangent = new THREE.Vector3().crossVectors(axis, exitRadial).normalize();
+            const midpointRadial = rotateRadial(radialStart, axis, sweepAngle * 0.5);
+            const midpoint = anchor.clone().addScaledVector(midpointRadial, radius);
             return {
-                points: arcPoints,
+                curves: arc.curves,
+                arcPoints: arc.arcPoints,
+                entryPoint,
+                exitPoint,
+                exitRadial,
+                entryTangent: new THREE.Vector3().crossVectors(axis, radialStart).normalize(),
+                exitTangent,
                 anchor: anchor.clone(),
                 flybyPosition: midpoint,
                 flybyRadius: radius,
@@ -157,9 +205,115 @@
             return minimum;
         }
 
-        function createLoadingRoute(target, direction, distance, destinationIndex) {
+        function createRouteDistanceSampler(route) {
+            const curves = route.curves || [];
+            const lengths = curves.map(curve => Math.max(0.001, curve.getLength()));
+            const cumulativeLengths = [0];
+            lengths.forEach(length => cumulativeLengths.push(cumulativeLengths[cumulativeLengths.length - 1] + length));
+            const totalLength = Math.max(1, cumulativeLengths[cumulativeLengths.length - 1]);
+            function getSegmentIndex(distance) {
+                const safeDistance = Math.max(0, Math.min(totalLength, distance));
+                for (let index = 0; index < lengths.length - 1; index++) {
+                    if (safeDistance < cumulativeLengths[index + 1] - 0.001) return index;
+                }
+                return Math.max(0, lengths.length - 1);
+            }
+            function getCurveSample(distance, tangent = false) {
+                const index = getSegmentIndex(distance);
+                const curve = curves[index];
+                if (!curve) return tangent ? new THREE.Vector3(0, 0, -1) : new THREE.Vector3();
+                const localDistance = Math.max(0, Math.min(lengths[index], distance - cumulativeLengths[index]));
+                const localProgress = localDistance / lengths[index];
+                return tangent ? curve.getTangentAt(localProgress).normalize() : curve.getPointAt(localProgress);
+            }
+            return {
+                totalLength,
+                cumulativeLengths,
+                getPointAtDistance: distance => getCurveSample(distance, false),
+                getTangentAtDistance: distance => getCurveSample(distance, true)
+            };
+        }
+
+        function routeHasContinuousHeading(route, samples = 240) {
+            const sampler = createRouteDistanceSampler(route);
+            let previousTangent = null;
+            for (let sampleIndex = 0; sampleIndex <= samples; sampleIndex++) {
+                const distance = sampler.totalLength * Math.min(0.999, sampleIndex / samples);
+                const tangent = sampler.getTangentAtDistance(distance);
+                if (!tangent || tangent.lengthSq() < 0.0001 || !Number.isFinite(tangent.x)) return false;
+                tangent.normalize();
+                if (previousTangent && previousTangent.dot(tangent) < 0.82) return false;
+                previousTangent = tangent;
+            }
+            return true;
+        }
+
+        function getRouteLookTarget(route, progress, routeLength) {
+            const sampler = createRouteDistanceSampler(route);
+            const safeProgress = Math.min(0.998, Math.max(0, progress));
+            const point = sampler.getPointAtDistance(safeProgress * sampler.totalLength);
+            const lookAheadDistance = Math.min(1000, Math.max(180, routeLength * 0.035));
+            const tangent = sampler.getTangentAtDistance(Math.min(sampler.totalLength, safeProgress * sampler.totalLength + lookAheadDistance));
+            if (!tangent || tangent.lengthSq() < 0.0001 || !Number.isFinite(tangent.x)) {
+                return point.clone().add(new THREE.Vector3(0, 0, -1));
+            }
+            return point.clone().addScaledVector(tangent.normalize(), lookAheadDistance);
+        }
+
+        function updateRouteCameraLook(loadingState, routeLength, deltaSeconds) {
+            const progress = Math.min(0.998, Math.max(0, loadingState.routeProgress));
+            const sampler = loadingState.routeSampler || createRouteDistanceSampler(loadingState.route);
+            loadingState.routeSampler = sampler;
+            const currentDistance = progress * sampler.totalLength;
+            const tangent = sampler.getTangentAtDistance(currentDistance).normalize();
+            if (!tangent || tangent.lengthSq() < 0.0001 || !Number.isFinite(tangent.x)) return;
+            if (loadingState.routeLookDirection.lengthSq() < 0.0001) loadingState.routeLookDirection.copy(tangent);
+            if (loadingState.routeLookDirection.dot(tangent) < -0.2) {
+                loadingState.routeLookDirection.copy(tangent);
+                loadingState.routeUpDirection.set(0, 1, 0);
+            }
+            const response = 1 - Math.exp(-Math.min(24, Math.max(0.001, deltaSeconds * 12)));
+            loadingState.routeLookDirection.lerp(tangent, response).normalize();
+            const worldUp = new THREE.Vector3(0, 1, 0);
+            const projectedUp = worldUp.addScaledVector(loadingState.routeLookDirection, -worldUp.dot(loadingState.routeLookDirection));
+            if (projectedUp.lengthSq() > 0.0001) {
+                projectedUp.normalize();
+            } else {
+                projectedUp.copy(loadingState.routeUpDirection)
+                    .addScaledVector(loadingState.routeLookDirection, -loadingState.routeUpDirection.dot(loadingState.routeLookDirection));
+                if (projectedUp.lengthSq() < 0.0001) projectedUp.set(0, 0, 1);
+                projectedUp.normalize();
+            }
+            if (loadingState.routeUpDirection.lengthSq() > 0.0001 && projectedUp.dot(loadingState.routeUpDirection) < 0) projectedUp.negate();
+            loadingState.routeUpDirection.copy(projectedUp);
+            const right = new THREE.Vector3().crossVectors(loadingState.routeLookDirection, loadingState.routeUpDirection).normalize();
+            loadingState.routeRightDirection.copy(right);
+            loadingState.routeUpDirection.crossVectors(right, loadingState.routeLookDirection).normalize();
+            const lookAheadDistance = Math.min(1000, Math.max(180, routeLength * 0.035));
+            const lookTarget = camera.position.clone().addScaledVector(loadingState.routeLookDirection, lookAheadDistance);
+            const lookMatrix = new THREE.Matrix4().lookAt(camera.position, lookTarget, loadingState.routeUpDirection);
+            const desiredQuaternion = new THREE.Quaternion().setFromRotationMatrix(lookMatrix);
+            camera.quaternion.slerp(desiredQuaternion, response);
+            targetControlTarget.copy(lookTarget);
+            return true;
+        }
+
+        function getRouteStopSpeedFactor(loadingState, routeLength) {
+            const stopProgresses = loadingState.routeStopProgresses || [];
+            if (!stopProgresses.length) return 1;
+            const currentDistance = loadingState.routeProgress * routeLength;
+            const nearestStopDistance = Math.min(...stopProgresses.map(progress => Math.abs(progress * routeLength - currentDistance)));
+            const slowdownDistance = Math.max(900, Math.min(3200, routeLength * 0.16));
+            const normalizedDistance = Math.min(1, nearestStopDistance / slowdownDistance);
+            const easedDistance = normalizedDistance * normalizedDistance * (3 - normalizedDistance * 2);
+            return 0.24 + easedDistance * 0.76;
+        }
+
+        function createLoadingRoute(target, direction, distance, destinationIndex, startPosition = null) {
             const horizonRadius = getEventHorizonRadius(target);
-            const start = target.position.clone().addScaledVector(direction, distance);
+            const start = startPosition
+                ? startPosition.clone()
+                : target.position.clone().addScaledVector(direction, distance);
             const preEntryDistance = horizonRadius + 420;
             const preEntry = target.position.clone().addScaledVector(direction, preEntryDistance);
             const end = target.position.clone().addScaledVector(direction, horizonRadius);
@@ -170,34 +324,66 @@
             let swingByDiagnostics = [];
             let stopProgresses = [];
             let preEntryProgress = 0.96;
-            for (const radiusScale of [1, 1.18, 1.4, 1.7]) {
-                const points = [start];
-                const stopPointIndices = [];
+            let fallbackCandidate = null;
+            for (const radiusScale of [1, 1.15, 1.35, 1.6]) {
+                const candidateRoute = new THREE.CurvePath();
                 const diagnostics = [];
+                const stopLengths = [];
+                let currentPoint = start.clone();
+                let currentTangent = target.position.clone().sub(start).normalize();
+                let accumulatedLength = 0;
                 selected.forEach((candidate, index) => {
-                    const previousPoint = index === 0 ? start : selected[index - 1].anchor;
                     const nextPoint = index === selected.length - 1 ? preEntry : selected[index + 1].anchor;
-                    const arc = createSwingByArc(candidate, previousPoint, nextPoint, radiusScale);
-                    points.push(...arc.points);
-                    stopPointIndices.push(points.length - Math.ceil(arc.points.length / 2));
+                    const arc = createSwingByArc(candidate, currentPoint, nextPoint, radiusScale);
+                    const connector = createSmoothBezierSegment(currentPoint, arc.entryPoint, currentTangent, arc.entryTangent);
+                    candidateRoute.add(connector);
+                    accumulatedLength += connector.getLength();
+                    const arcStartLength = accumulatedLength;
+                    arc.curves.forEach(curve => {
+                        candidateRoute.add(curve);
+                        accumulatedLength += curve.getLength();
+                    });
+                    stopLengths.push(arcStartLength + (accumulatedLength - arcStartLength) * 0.5);
                     diagnostics.push(arc);
+                    currentPoint = arc.exitPoint.clone();
+                    currentTangent = arc.exitTangent.clone();
                 });
-                points.push(preEntry, end);
-                const candidateRoute = new THREE.CatmullRomCurve3(points, false, 'centripetal', 0.08);
-                const lengths = [0];
-                for (let index = 1; index < points.length; index++) lengths[index] = lengths[index - 1] + points[index].distanceTo(points[index - 1]);
-                const totalLength = Math.max(1, lengths[lengths.length - 1]);
-                const candidateStopProgresses = stopPointIndices.map(pointIndex => lengths[pointIndex] / totalLength);
-                const candidatePreEntryProgress = lengths[lengths.length - 2] / totalLength;
-                const arcClear = diagnostics.every(arc => getRouteMinimumDistance(candidateRoute, arc.anchor) >= arc.flybyRadius * 0.78);
+                const finalTangent = preEntry.clone().sub(currentPoint).normalize();
+                const approachCurve = createSmoothBezierSegment(currentPoint, preEntry, currentTangent, finalTangent);
+                candidateRoute.add(approachCurve);
+                accumulatedLength += approachCurve.getLength();
+                const preEntryLength = accumulatedLength;
+                const entryCurve = new THREE.LineCurve3(preEntry.clone(), end.clone());
+                candidateRoute.add(entryCurve);
+                accumulatedLength += entryCurve.getLength();
+                const totalLength = Math.max(1, accumulatedLength);
+                const candidateStopProgresses = stopLengths.map(length => length / totalLength);
+                const candidatePreEntryProgress = preEntryLength / totalLength;
+                const arcClear = diagnostics.every(arc => getRouteMinimumDistance(candidateRoute, arc.anchor) >= arc.flybyRadius * 0.9);
+                const continuousHeading = routeHasContinuousHeading(candidateRoute);
                 const candidateSafe = routeAvoidsBlackHoles(candidateRoute, destinationIndex, candidatePools.safeRadius);
-                if ((arcClear && candidateSafe) || radiusScale === 1.7) {
+                if (!fallbackCandidate || (arcClear && continuousHeading)) {
+                    fallbackCandidate = {
+                        route: candidateRoute,
+                        diagnostics,
+                        stopProgresses: candidateStopProgresses,
+                        preEntryProgress: candidatePreEntryProgress,
+                        safe: candidateSafe
+                    };
+                }
+                if (arcClear && continuousHeading && candidateSafe) {
                     route = candidateRoute;
                     swingByDiagnostics = diagnostics;
                     stopProgresses = candidateStopProgresses;
                     preEntryProgress = candidatePreEntryProgress;
                     break;
                 }
+            }
+            if (!route && fallbackCandidate) {
+                route = fallbackCandidate.route;
+                swingByDiagnostics = fallbackCandidate.diagnostics;
+                stopProgresses = fallbackCandidate.stopProgresses;
+                preEntryProgress = fallbackCandidate.preEntryProgress;
             }
             selected.forEach((candidate, index) => {
                 const diagnostic = swingByDiagnostics[index];
@@ -224,40 +410,35 @@
         function createUTurnRoute(currentPosition, currentTangent, target, direction) {
             const eventHorizonRadius = getEventHorizonRadius(target);
             const preEntry = target.position.clone().addScaledVector(direction, eventHorizonRadius + 420);
-            const toDestination = preEntry.clone().sub(currentPosition);
-            const tangent = currentTangent.clone().normalize();
-            const side = new THREE.Vector3().crossVectors(tangent, toDestination.normalize());
-            if (side.lengthSq() < 0.0001) side.copy(new THREE.Vector3(0, 1, 0).cross(tangent));
-            if (side.lengthSq() < 0.0001) side.set(1, 0, 0).cross(tangent);
-            side.normalize();
-            const turnRadius = Math.min(6000, Math.max(1800, currentPosition.distanceTo(preEntry) * 0.18));
-            const turnCenter = currentPosition.clone().addScaledVector(side, turnRadius);
-            const points = [];
-            const arcSampleCount = 14;
-            for (let sampleIndex = 0; sampleIndex <= arcSampleCount; sampleIndex++) {
-                const angle = Math.PI * sampleIndex / arcSampleCount;
-                const radial = side.clone().multiplyScalar(-Math.cos(angle)).addScaledVector(tangent, Math.sin(angle));
-                points.push(turnCenter.clone().addScaledVector(radial, turnRadius));
-            }
-            points.push(preEntry, target.position.clone().addScaledVector(direction, eventHorizonRadius));
-            const route = new THREE.CatmullRomCurve3(points, false, 'centripetal', 0.08);
-            const lengths = [0];
-            for (let index = 1; index < points.length; index++) lengths[index] = lengths[index - 1] + points[index].distanceTo(points[index - 1]);
-            const totalLength = Math.max(1, lengths[lengths.length - 1]);
+            const end = target.position.clone().addScaledVector(direction, eventHorizonRadius);
+            const approachDirection = preEntry.clone().sub(currentPosition).normalize();
+            const route = new THREE.CurvePath();
+            const approachCurve = createSmoothBezierSegment(currentPosition, preEntry, currentTangent, approachDirection);
+            route.add(approachCurve);
+            const approachLength = approachCurve.getLength();
+            const entryCurve = new THREE.LineCurve3(preEntry.clone(), end.clone());
+            route.add(entryCurve);
+            const totalLength = Math.max(1, approachLength + entryCurve.getLength());
             return {
                 route,
-                preEntryProgress: lengths[lengths.length - 2] / totalLength,
-                turnRadius,
-                arcPoints: points.slice(0, arcSampleCount + 1)
+                preEntryProgress: approachLength / totalLength,
+                turnRadius: Math.max(1800, Math.min(6000, currentPosition.distanceTo(preEntry) * 0.18)),
+                arcPoints: [currentPosition.clone(), preEntry.clone()]
             };
         }
 
         function beginReturnToDestination() {
-            if (!loadingAnimation || loadingAnimation.returnRoute) return;
+            if (!loadingAnimation || loadingAnimation.returnRoute || loadingAnimation.preEntryStartedAt || loadingAnimation.entryStartedAt) return;
             const target = getLoadingBlackHoleTarget(loadingAnimation.targetIndex);
             const currentPosition = camera.position.clone();
-            const currentTangent = loadingAnimation.route
-                ? loadingAnimation.route.getTangentAt(Math.min(0.999, Math.max(0, loadingAnimation.routeProgress))).normalize()
+            const currentSampler = loadingAnimation.route
+                ? (loadingAnimation.routeSampler || createRouteDistanceSampler(loadingAnimation.route))
+                : null;
+            loadingAnimation.routeSampler = currentSampler;
+            const currentTangent = currentSampler
+                ? currentSampler.getTangentAtDistance(
+                    Math.min(0.999, Math.max(0, loadingAnimation.routeProgress)) * currentSampler.totalLength
+                ).normalize()
                 : controls.target.clone().sub(camera.position).normalize();
             const generated = createUTurnRoute(currentPosition, currentTangent, target, loadingAnimation.approachDirection);
             loadingAnimation.returnRoute = generated.route;
@@ -277,6 +458,10 @@
             loadingAnimation.stellarStops = [];
             loadingAnimation.routeSpeed = 0;
             loadingAnimation.lastRouteTimestamp = performance.now();
+            loadingAnimation.routeSampler = createRouteDistanceSampler(generated.route);
+            loadingAnimation.routeLookDirection.copy(loadingAnimation.routeSampler.getTangentAtDistance(0));
+            loadingAnimation.routeUpDirection.set(0, 1, 0);
+            loadingAnimation.routeRightDirection.set(1, 0, 0);
             loadingAnimation.returningToDestination = true;
         }
 
@@ -284,14 +469,14 @@
             if (!loadingAnimation) return false;
             loadingAnimation.apiReady = true;
             loadingAnimation.universeReadyAt = performance.now();
-            beginReturnToDestination();
+            if (!loadingAnimation.preEntryStartedAt && !loadingAnimation.entryStartedAt) beginReturnToDestination();
             return true;
         };
 
-        function initializeLoadingRoute(target) {
+        function initializeLoadingRoute(target, startPosition = null) {
             let generated = null;
             for (let attempt = 0; attempt < 8; attempt++) {
-                generated = createLoadingRoute(target, loadingAnimation.approachDirection, loadingAnimation.approachDistance, loadingAnimation.targetIndex);
+                generated = createLoadingRoute(target, loadingAnimation.approachDirection, loadingAnimation.approachDistance, loadingAnimation.targetIndex, startPosition);
                 if (generated.safe) break;
                 loadingAnimation.approachDirection.copy(new THREE.Vector3(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).normalize());
             }
@@ -308,6 +493,49 @@
             loadingAnimation.routeSpeed = 0;
             loadingAnimation.lastRouteTimestamp = performance.now();
             loadingAnimation.routeTargetIndex = loadingAnimation.targetIndex;
+            loadingAnimation.routeSampler = createRouteDistanceSampler(generated.route);
+            loadingAnimation.routeLookDirection.copy(loadingAnimation.routeSampler.getTangentAtDistance(0));
+            loadingAnimation.routeUpDirection.set(0, 1, 0);
+            loadingAnimation.routeRightDirection.set(1, 0, 0);
+        }
+
+        function beginNextLoadingUniverse() {
+            if (!loadingAnimation || loadingAnimation.apiReady || !galaxyBlackHoleTargets.length) return false;
+            const startPosition = camera.position.clone();
+            if (typeof relocateGalaxyUniverse === 'function') relocateGalaxyUniverse('black-hole-universe-switch');
+
+            loadingAnimation.targetIndex = (loadingAnimation.targetIndex + 1) % galaxyBlackHoleTargets.length;
+            const nextTarget = getLoadingBlackHoleTarget(loadingAnimation.targetIndex);
+            const nextDirection = startPosition.clone().sub(nextTarget.position);
+            if (nextDirection.lengthSq() < 0.0001) {
+                nextDirection.set(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).normalize();
+            } else {
+                nextDirection.normalize();
+            }
+            loadingAnimation.approachDirection.copy(nextDirection);
+            loadingAnimation.approachDistance = Math.max(1, startPosition.distanceTo(nextTarget.position));
+            loadingAnimation.route = null;
+            loadingAnimation.returnRoute = null;
+            loadingAnimation.returnRouteProgress = 0;
+            loadingAnimation.returnRouteStartedAt = null;
+            loadingAnimation.returnArcPoints = [];
+            loadingAnimation.routeStops = [];
+            loadingAnimation.galaxyStops = [];
+            loadingAnimation.stellarStops = [];
+            loadingAnimation.routeStopProgresses = [];
+            loadingAnimation.routeStopAnchors = [];
+            loadingAnimation.preEntryProgress = 0.96;
+            loadingAnimation.routeProgress = 0;
+            loadingAnimation.routeSpeed = 0;
+            loadingAnimation.preEntryStartedAt = null;
+            loadingAnimation.entryStartedAt = null;
+            loadingAnimation.routeTargetIndex = -1;
+            initializeLoadingRoute(nextTarget, startPosition);
+            camera.position.copy(startPosition);
+            targetControlTarget.copy(camera.position).addScaledVector(loadingAnimation.routeLookDirection, 800);
+            camera.lookAt(targetControlTarget);
+            if (nextTarget.galaxy) nextTarget.galaxy.visible = true;
+            return true;
         }
 
         function startLoadingAnimation() {
@@ -336,6 +564,10 @@
                 preEntryProgress: 0.96,
                 routeProgress: 0,
                 routeSpeed: 0,
+                routeLookDirection: new THREE.Vector3(),
+                routeUpDirection: new THREE.Vector3(0, 1, 0),
+                routeRightDirection: new THREE.Vector3(1, 0, 0),
+                routeSampler: null,
                 lastRouteTimestamp: now,
                 apiReady: false,
                 universeReadyAt: null,
@@ -356,6 +588,7 @@
             camera.position.copy(firstTarget.position).addScaledVector(loadingAnimation.approachDirection, loadingAnimation.approachDistance);
             targetControlTarget.copy(firstTarget.position);
             initializeLoadingRoute(firstTarget);
+            targetControlTarget.copy(camera.position).addScaledVector(loadingAnimation.routeLookDirection, 800);
             if (firstTarget.galaxy) firstTarget.galaxy.visible = true;
             camera.lookAt(targetControlTarget);
             galaxyClusters.forEach(cluster => { cluster.visible = true; });
@@ -374,65 +607,47 @@
                 loadingAnimation.apiReady = true;
                 loadingAnimation.universeReadyAt = now;
             }
-            if (loadingAnimation.apiReady && !loadingAnimation.returnRoute) beginReturnToDestination();
             loadingAnimation.segmentDuration = 60000 / Math.max(WARP_SPEED_MIN, Math.min(WARP_SPEED_MAX, warpSpeedFactor));
             loadingAnimation.maxSpeed = 900 * Math.max(WARP_SPEED_MIN, Math.min(WARP_SPEED_MAX, warpSpeedFactor));
             if (!loadingAnimation.route || loadingAnimation.routeTargetIndex !== loadingAnimation.targetIndex) initializeLoadingRoute(target);
-            const routeLength = Math.max(1, loadingAnimation.route.getLength());
+            if (loadingAnimation.apiReady && !loadingAnimation.returnRoute && !loadingAnimation.preEntryStartedAt && !loadingAnimation.entryStartedAt) beginReturnToDestination();
+            const routeSampler = loadingAnimation.routeSampler || createRouteDistanceSampler(loadingAnimation.route);
+            loadingAnimation.routeSampler = routeSampler;
+            const routeLength = routeSampler.totalLength;
             const preEntryProgress = Math.min(0.995, loadingAnimation.preEntryProgress || 0.96);
-            const finalStopProgress = loadingAnimation.routeStopProgresses.length
-                ? loadingAnimation.routeStopProgresses[loadingAnimation.routeStopProgresses.length - 1]
-                : 0;
-            const finalApproachStart = finalStopProgress > 0 ? Math.max(0, finalStopProgress - 0.06) : preEntryProgress;
+            let routeCameraOrientationApplied = false;
             if (!loadingAnimation.preEntryStartedAt && loadingAnimation.routeProgress < preEntryProgress) {
                 camera.fov = configuredFieldOfView;
                 camera.updateProjectionMatrix();
-                const distanceToStop = Math.min(...(loadingAnimation.routeStopProgresses || []).map(progress => Math.abs(loadingAnimation.routeProgress - progress)), 1);
-                const nearestStopFactor = distanceToStop < 0.035 ? 0.28 + Math.min(0.72, distanceToStop / 0.035 * 0.72) : 1;
+                const nearestStopFactor = getRouteStopSpeedFactor(loadingAnimation, routeLength);
                 const routeDurationSeconds = loadingAnimation.segmentDuration / 1000;
                 const cruiseWorldSpeed = Math.min(loadingAnimation.maxSpeed, routeLength / (routeDurationSeconds * 0.72));
                 const targetRouteSpeed = (cruiseWorldSpeed / routeLength) * nearestStopFactor;
-                loadingAnimation.routeSpeed += (targetRouteSpeed - loadingAnimation.routeSpeed) * Math.min(1, deltaSeconds * 2.4);
+                loadingAnimation.routeSpeed += (targetRouteSpeed - loadingAnimation.routeSpeed) * Math.min(1, deltaSeconds * 1.8);
                 loadingAnimation.routeProgress = Math.min(preEntryProgress, loadingAnimation.routeProgress + loadingAnimation.routeSpeed * deltaSeconds);
-                const lookAhead = Math.min(0.035, 220 / routeLength);
-                camera.position.copy(loadingAnimation.route.getPointAt(loadingAnimation.routeProgress));
-                const lookProgress = Math.min(preEntryProgress, loadingAnimation.routeProgress + lookAhead);
-                if (loadingAnimation.routeProgress >= finalApproachStart) targetControlTarget.copy(blackHole);
-                else {
-                    let nearestStopIndex = -1;
-                    let nearestStopDistance = Infinity;
-                    (loadingAnimation.routeStopProgresses || []).forEach((stopProgress, index) => {
-                        const distance = Math.abs(loadingAnimation.routeProgress - stopProgress);
-                        if (distance < nearestStopDistance) {
-                            nearestStopDistance = distance;
-                            nearestStopIndex = index;
-                        }
-                    });
-                    if (nearestStopIndex >= 0 && nearestStopDistance < 0.055 && loadingAnimation.routeStopAnchors[nearestStopIndex]) {
-                        targetControlTarget.copy(loadingAnimation.routeStopAnchors[nearestStopIndex]);
-                    } else targetControlTarget.copy(loadingAnimation.route.getPointAt(lookProgress));
-                }
+                camera.position.copy(routeSampler.getPointAtDistance(loadingAnimation.routeProgress * routeLength));
+                routeCameraOrientationApplied = updateRouteCameraLook(loadingAnimation, routeLength, deltaSeconds);
                 updateZoomSound(Math.min(1, loadingAnimation.routeProgress * 1.2));
             } else if (!loadingAnimation.preEntryStartedAt) {
                 loadingAnimation.preEntryStartedAt = now;
                 loadingAnimation.routeProgress = preEntryProgress;
-                camera.position.copy(loadingAnimation.route.getPointAt(preEntryProgress));
+                camera.position.copy(routeSampler.getPointAtDistance(preEntryProgress * routeLength));
                 targetControlTarget.copy(blackHole);
                 camera.fov = configuredFieldOfView;
                 camera.updateProjectionMatrix();
                 updateZoomSound(0.58);
             } else if (!loadingAnimation.entryStartedAt) {
                 const holdProgress = Math.min(1, (now - loadingAnimation.preEntryStartedAt) / 1000);
-                camera.position.copy(loadingAnimation.route.getPointAt(preEntryProgress));
+                camera.position.copy(routeSampler.getPointAtDistance(preEntryProgress * routeLength));
                 targetControlTarget.copy(blackHole);
                 camera.fov = configuredFieldOfView;
                 camera.updateProjectionMatrix();
                 updateZoomSound(0.42);
-                if (holdProgress >= 1 && loadingAnimation.apiReady) loadingAnimation.entryStartedAt = now;
+                if (holdProgress >= 1) loadingAnimation.entryStartedAt = now;
             } else {
                 const entryProgress = Math.min(1, (now - loadingAnimation.entryStartedAt) / 1500);
                 const exponentialProgress = entryProgress >= 1 ? 1 : 1 - Math.exp(-5 * entryProgress);
-                const preEntryPosition = loadingAnimation.route.getPointAt(preEntryProgress);
+                const preEntryPosition = routeSampler.getPointAtDistance(preEntryProgress * routeLength);
                 camera.position.copy(preEntryPosition).lerp(blackHole.clone().addScaledVector(loadingAnimation.approachDirection, eventHorizonRadius), exponentialProgress);
                 targetControlTarget.copy(blackHole);
                 const fovProgress = Math.pow(entryProgress, 3);
@@ -444,19 +659,22 @@
                     return;
                 }
             }
-            camera.lookAt(targetControlTarget);
+            if (!routeCameraOrientationApplied) camera.lookAt(targetControlTarget);
 
-            // 事象の地平面に触れた瞬間に切り替える。途中のブラックホールは経由しない。
+            // 事象の地平面に触れた瞬間に切り替える。
             if (loadingAnimation.entryStartedAt && now - loadingAnimation.entryStartedAt >= 1500) {
                 camera.position.copy(blackHole).addScaledVector(loadingAnimation.approachDirection, eventHorizonRadius);
                 targetControlTarget.copy(blackHole);
-                if (typeof relocateGalaxyUniverse === 'function') relocateGalaxyUniverse('black-hole-universe-switch');
-                if (pendingUniverse && typeof loadingAnimation.onReady === 'function') {
+                if (pendingUniverse && loadingAnimation.apiReady && typeof loadingAnimation.onReady === 'function') {
                     const onReady = loadingAnimation.onReady;
                     loadingAnimation = null;
                     isDiving = false;
                     onReady();
                     beginUniverseReveal(true);
+                    return;
+                }
+                if (!loadingAnimation.apiReady) {
+                    beginNextLoadingUniverse();
                     return;
                 }
             }
@@ -1017,11 +1235,11 @@
             // 個別画面への遷移はクリック、ラベル選択、または意図した近接ズームで行う。
 
             // 最後に、全ての計算結果をもとに画面を描画（レンダリング）する
-            renderer.render(scene, camera);
             const motionBlurSpeed = loadingAnimation && loadingAnimation.route
-                ? Math.min(1, Math.max(0, loadingAnimation.routeSpeed * loadingAnimation.route.getLength() / 900))
+                ? Math.min(1, Math.max(0, loadingAnimation.routeSpeed * (loadingAnimation.routeSampler?.totalLength || loadingAnimation.route.getLength()) / 900))
                 : 0;
-            updateMotionBlurFrame(Boolean(loadingAnimation), motionBlurSpeed);
+            updateMotionBlurFrame(Boolean(loadingAnimation), motionBlurSpeed, deltaSeconds);
+            renderMotionBlurPass();
         }
 
         // --- 画面サイズが変更された時の対応処理 ---
@@ -1031,7 +1249,9 @@
             camera.aspect = width / height; // カメラの縦横比を修正
             camera.updateProjectionMatrix(); // カメラ設定を更新
             renderer.setSize(width, height); // レンダラーのサイズを更新
-            resizeMotionBlurLayer(width, height);
+            const pixelRatio = renderer.getPixelRatio();
+            motionBlurRenderTarget.setSize(Math.max(1, Math.floor(width * pixelRatio)), Math.max(1, Math.floor(height * pixelRatio)));
+            clearMotionBlurLayer();
         });
 
         // アニメーションループを開始！

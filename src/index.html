@@ -51,12 +51,12 @@
                         <input id="warp-speed-range" type="range" min="0.25" max="3" step="0.25" value="1">
                     </label>
                     <label class="navigation-range-row" for="warp-stops-range">
-                        <span>経由天体数 <output id="warp-stops-value" for="warp-stops-range">5個</output></span>
-                        <input id="warp-stops-range" type="range" min="0" max="30" step="1" value="5">
+                        <span>経由天体数 <output id="warp-stops-value" for="warp-stops-range">3個</output></span>
+                        <input id="warp-stops-range" type="range" min="0" max="30" step="1" value="3">
                     </label>
-                    <label class="flex items-center gap-2"><input id="motion-blur-toggle" type="checkbox" checked> 航行モーションブラー</label>
+                    <label class="flex items-center gap-2"><input id="motion-blur-toggle" type="checkbox" checked> 航行速度線（モーションブラー）</label>
                     <label class="navigation-range-row" for="motion-blur-strength-range">
-                        <span>ブラー強度 <output id="motion-blur-strength-value" for="motion-blur-strength-range">50</output></span>
+                        <span>速度線強度 <output id="motion-blur-strength-value" for="motion-blur-strength-range">50</output></span>
                         <input id="motion-blur-strength-range" type="range" min="0" max="100" step="1" value="50">
                     </label>
                 </div>
@@ -278,15 +278,15 @@
 
                 <div class="card-br card-anim absolute bottom-0 right-0 lg:right-10 pointer-events-auto">
                     <div onclick="showDetail('evaluation')" class="analysis-card w-64 glass-panel p-4 rounded-xl cursor-pointer hover:scale-105 hover:border-purple-400 transition-all group">
-                        <h3 class="text-sm font-bold text-purple-300 mb-2 border-b border-purple-500/30 pb-1">👁️ 内と外からの評価</h3>
+                        <h3 class="text-sm font-bold text-purple-300 mb-2 border-b border-purple-500/30 pb-1">⚖️ 反対派からの批判</h3>
                         <div class="text-xs space-y-2">
                             <div class="bg-blue-900/30 p-2 rounded border-l-2 border-blue-500">
-                                <span class="text-[10px] text-blue-400 block mb-1">内部からの視点(自認)</span>
-                                「私たちは真実を見極めている正当な派閥だ」
+                                <span class="text-[10px] text-blue-400 block mb-1">反対派の主な批判</span>
+                                <span id="analysis-evaluation-summary">分析生成中…</span>
                             </div>
                             <div class="bg-red-900/30 p-2 rounded border-l-2 border-red-500">
-                                <span class="text-[10px] text-red-400 block mb-1">外部からの視点(印象)</span>
-                                「極端な意見ばかりで話が通じない集団」
+                                <span class="text-[10px] text-red-400 block mb-1">批判の焦点</span>
+                                <span id="analysis-evaluation-insight">異なる立場が問題視する前提や影響を整理します。</span>
                             </div>
                         </div>
                     </div>
@@ -310,7 +310,7 @@
                         <p id="detail-description" class="text-lg leading-relaxed">ここに詳細な解析テキストが入ります。個別バブル解析画面でクリックされた解析バブルの詳細を画面全体で見ることができます。（一枚スライド風）</p>
                         
                         <div class="bg-black/50 p-6 rounded-xl border border-gray-800">
-                            <h4 class="text-white font-bold mb-3">AIによる分析インサイト</h4>
+                            <h4 id="detail-insight-label" class="text-white font-bold mb-3">AIによる分析インサイト</h4>
                             <p id="detail-insight" class="text-sm">このバブルは、特定のキーワードに対するアルゴリズムの推薦によって強化されています。情報源が限定されることで、構成員の思考が単一化しやすい傾向にあります。フィルターバブルを脱出するには、対極にある情報源を意図的にフォローすることが推奨されます。</p>
                         </div>
 

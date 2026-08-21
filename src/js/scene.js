@@ -22,47 +22,77 @@
         renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)); // 高解像度ディスプレイ対応
         container.appendChild(renderer.domElement);
 
-        // 航行中だけ使う軽量フレーム残像レイヤー。WebGLの描画結果を薄く重ね、
-        // 追加のポストプロセス依存なしで速度感を表現する。
-        const motionBlurCanvas = document.createElement('canvas');
-        motionBlurCanvas.id = 'motion-blur-layer';
-        motionBlurCanvas.setAttribute('aria-hidden', 'true');
-        const motionBlurContext = motionBlurCanvas.getContext('2d');
-        container.appendChild(motionBlurCanvas);
+        // 航行中の3Dシーンを一度テクスチャへ描画し、画面中央へ向けて複数回再サンプリングする
+        // フルスクリーン放射ブラー。速度線を重ねるだけでなく、実際の天体像を伸ばして超高速感を作る。
+        const motionBlurRenderScene = new THREE.Scene();
+        const motionBlurRenderCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+        motionBlurRenderCamera.position.z = 1;
+        const motionBlurRenderTarget = new THREE.WebGLRenderTarget(
+            Math.max(1, Math.floor(window.innerWidth * renderer.getPixelRatio())),
+            Math.max(1, Math.floor(window.innerHeight * renderer.getPixelRatio())),
+            { minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter, format: THREE.RGBAFormat, depthBuffer: true, stencilBuffer: false }
+        );
+        motionBlurRenderTarget.texture.generateMipmaps = false;
+        const motionBlurQuadGeometry = new THREE.PlaneGeometry(2, 2);
+        const motionBlurMaterial = new THREE.ShaderMaterial({
+            depthTest: false,
+            depthWrite: false,
+            uniforms: {
+                uScene: { value: motionBlurRenderTarget.texture },
+                uBlurAmount: { value: 0 },
+                uCenter: { value: new THREE.Vector2(0.5, 0.5) }
+            },
+            vertexShader: `
+                varying vec2 vUv;
+                void main() {
+                    vUv = uv;
+                    gl_Position = vec4(position, 1.0);
+                }
+            `,
+            fragmentShader: `
+                uniform sampler2D uScene;
+                uniform float uBlurAmount;
+                uniform vec2 uCenter;
+                varying vec2 vUv;
+                void main() {
+                    vec4 accumulated = texture2D(uScene, vUv) * 0.24;
+                    float totalWeight = 0.24;
+                    for (int sampleIndex = 1; sampleIndex <= 14; sampleIndex++) {
+                        float progress = float(sampleIndex) / 14.0;
+                        float weight = 0.92 - progress * 0.045;
+                        vec2 sampleUv = mix(vUv, uCenter, progress * uBlurAmount);
+                        accumulated += texture2D(uScene, sampleUv) * weight;
+                        totalWeight += weight;
+                    }
+                    gl_FragColor = accumulated / totalWeight;
+                }
+            `
+        });
+        motionBlurMaterial.toneMapped = false;
+        const motionBlurQuad = new THREE.Mesh(motionBlurQuadGeometry, motionBlurMaterial);
+        motionBlurQuad.frustumCulled = false;
+        motionBlurRenderScene.add(motionBlurQuad);
         let motionBlurEnabled = localStorage.getItem('bubblebreaker.motionBlur') !== 'off';
         let motionBlurStrength = clampSceneSetting(localStorage.getItem('bubblebreaker.motionBlurStrength'), 0, 100, 50);
-        function resizeMotionBlurLayer(width, height) {
-            const pixelRatio = Math.min(window.devicePixelRatio || 1, 2);
-            motionBlurCanvas.style.width = `${width}px`;
-            motionBlurCanvas.style.height = `${height}px`;
-            motionBlurCanvas.width = Math.max(1, Math.floor(width * pixelRatio));
-            motionBlurCanvas.height = Math.max(1, Math.floor(height * pixelRatio));
-            if (motionBlurContext) motionBlurContext.clearRect(0, 0, motionBlurCanvas.width, motionBlurCanvas.height);
-        }
         function clearMotionBlurLayer() {
-            if (motionBlurContext) motionBlurContext.clearRect(0, 0, motionBlurCanvas.width, motionBlurCanvas.height);
+            motionBlurMaterial.uniforms.uBlurAmount.value = 0;
         }
-        function updateMotionBlurFrame(active, normalizedSpeed = 0) {
-            if (!motionBlurContext || !motionBlurEnabled || !active) {
-                clearMotionBlurLayer();
-                return;
-            }
+        function updateMotionBlurFrame(active, normalizedSpeed = 0, deltaSeconds = 0.016) {
             const speed = Math.max(0, Math.min(1, normalizedSpeed));
             const intensity = Math.max(0, Math.min(1, motionBlurStrength / 100));
-            if (intensity <= 0) {
+            if (!motionBlurEnabled || !active || intensity <= 0 || speed < 0.01) {
                 clearMotionBlurLayer();
-                return;
+                return false;
             }
-            const fadeAlpha = 0.1 + speed * 0.14;
-            const imageAlpha = (0.08 + speed * 0.18) * intensity;
-            motionBlurContext.globalCompositeOperation = 'destination-out';
-            motionBlurContext.globalAlpha = fadeAlpha;
-            motionBlurContext.fillStyle = '#000';
-            motionBlurContext.fillRect(0, 0, motionBlurCanvas.width, motionBlurCanvas.height);
-            motionBlurContext.globalCompositeOperation = 'source-over';
-            motionBlurContext.globalAlpha = imageAlpha;
-            motionBlurContext.drawImage(renderer.domElement, 0, 0, motionBlurCanvas.width, motionBlurCanvas.height);
-            motionBlurContext.globalAlpha = 1;
+            const blurAmount = Math.min(0.72, intensity * speed * (0.14 + intensity * 0.52));
+            motionBlurMaterial.uniforms.uBlurAmount.value = blurAmount;
+            return blurAmount > 0;
+        }
+        function renderMotionBlurPass() {
+            renderer.setRenderTarget(motionBlurRenderTarget);
+            renderer.render(scene, camera);
+            renderer.setRenderTarget(null);
+            renderer.render(motionBlurRenderScene, motionBlurRenderCamera);
         }
         window.setMotionBlurEnabled = function(enabled, persist = true) {
             motionBlurEnabled = Boolean(enabled);
@@ -76,8 +106,6 @@
             if (persist) localStorage.setItem('bubblebreaker.motionBlurStrength', String(motionBlurStrength));
             return motionBlurStrength;
         };
-        resizeMotionBlurLayer(window.innerWidth, window.innerHeight);
-
         // OrbitControls：マウスのドラッグで視点移動するための標準プラグイン
         const controls = new THREE.OrbitControls(camera, renderer.domElement);
         controls.enableDamping = true; // 視点移動に滑らかな慣性をつける
@@ -953,7 +981,7 @@
         const DEFAULT_WARP_SPEED = 1;
         const WARP_STOP_COUNT_MIN = 0;
         const WARP_STOP_COUNT_MAX = 30;
-        const DEFAULT_WARP_STOP_COUNT = 5;
+        const DEFAULT_WARP_STOP_COUNT = 3;
         function clampSceneSetting(value, minimum, maximum, fallback) {
             if (value === null || value === undefined || value === '') return fallback;
             const numeric = Number(value);
@@ -2042,6 +2070,21 @@
                 element.classList.toggle('text-red-200', failed);
                 element.classList.toggle('text-cyan-200', !failed);
             });
+            const evaluation = state.bubbleData && state.bubbleData.analysis
+                ? state.bubbleData.analysis.evaluation || DEFAULT_ANALYSIS.evaluation
+                : DEFAULT_ANALYSIS.evaluation;
+            const summary = document.getElementById('analysis-evaluation-summary');
+            const insight = document.getElementById('analysis-evaluation-insight');
+            if (summary) summary.innerText = loading
+                ? '反対派の批判を調査しています…'
+                : failed
+                    ? '反対派の批判を取得できませんでした。'
+                    : evaluation.summary;
+            if (insight) insight.innerText = loading
+                ? '異なる立場の根拠を整理しています…'
+                : failed
+                    ? '詳細画面から分析を再試行できます。'
+                    : evaluation.insight;
         }
 
         window.loadAnalysis = function() {
@@ -2077,7 +2120,7 @@
                 'overview': 'バブルの概要と特徴',
                 'history': '形成の歴史と拡大要因',
                 'demographic': '構成層・情報源の分析',
-                'evaluation': '内と外からの評価のギャップ'
+                'evaluation': '反対派からの批判'
             };
             const analysis = state.bubbleData && state.bubbleData.analysis
                 ? state.bubbleData.analysis[cardType] || DEFAULT_ANALYSIS[cardType]
@@ -2089,6 +2132,10 @@
             document.getElementById('detail-origin-title').innerText = state.bubbleData.name;
             document.getElementById('detail-description').innerText = analysis.summary;
             document.getElementById('detail-insight').innerText = analysis.insight;
+            const insightLabel = document.getElementById('detail-insight-label');
+            if (insightLabel) insightLabel.innerText = cardType === 'evaluation'
+                ? '反対派が問題視する点'
+                : 'AIによる分析インサイト';
 
             const metrics = Array.isArray(analysis.metrics) ? analysis.metrics : [];
             const metricText = metrics.length

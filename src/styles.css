@@ -11,7 +11,6 @@
         #canvas-container { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 1; overflow: hidden; }
         #canvas-container > canvas { position: absolute; inset: 0; display: block; }
         #canvas-container > canvas:first-child { z-index: 1; }
-        #motion-blur-layer { z-index: 2; pointer-events: none; mix-blend-mode: screen; }
         
         /* 3D空間に追従するHTMLラベル */
         #labels-container { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 5; pointer-events: none; overflow: hidden; }

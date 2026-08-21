@@ -290,10 +290,10 @@
         const storedWarpStops = localStorage.getItem('bubblebreaker.warpStops');
         const initialFov = storedFov == null ? 60 : Number(storedFov);
         const initialWarpSpeed = storedWarpSpeed == null ? 1 : Number(storedWarpSpeed);
-        const initialWarpStops = storedWarpStops == null ? 5 : Number(storedWarpStops);
+        const initialWarpStops = storedWarpStops == null ? 3 : Number(storedWarpStops);
         fovRange.value = String(typeof window.setFieldOfView === 'function' ? window.setFieldOfView(initialFov, false) : (Number.isFinite(initialFov) ? initialFov : 60));
         warpSpeedRange.value = String(typeof window.setWarpSpeedFactor === 'function' ? window.setWarpSpeedFactor(initialWarpSpeed, false) : (Number.isFinite(initialWarpSpeed) ? initialWarpSpeed : 1));
-        warpStopsRange.value = String(typeof window.setWarpStopCount === 'function' ? window.setWarpStopCount(initialWarpStops, false) : (Number.isFinite(initialWarpStops) ? initialWarpStops : 5));
+        warpStopsRange.value = String(typeof window.setWarpStopCount === 'function' ? window.setWarpStopCount(initialWarpStops, false) : (Number.isFinite(initialWarpStops) ? initialWarpStops : 3));
         motionBlurToggle.checked = localStorage.getItem('bubblebreaker.motionBlur') !== 'off';
         if (typeof window.setMotionBlurEnabled === 'function') window.setMotionBlurEnabled(motionBlurToggle.checked, false);
         const storedMotionBlurStrength = localStorage.getItem('bubblebreaker.motionBlurStrength');
@@ -320,7 +320,7 @@
         });
         motionBlurToggle.addEventListener('change', () => {
             if (typeof window.setMotionBlurEnabled === 'function') window.setMotionBlurEnabled(motionBlurToggle.checked);
-            showToast(motionBlurToggle.checked ? '航行モーションブラーをONにしました' : '航行モーションブラーをOFFにしました');
+            showToast(motionBlurToggle.checked ? '航行速度線をONにしました' : '航行速度線をOFFにしました');
         });
         const allowedPanelSizes = new Set(['small', 'medium', 'large']);
         const storedPanelSize = localStorage.getItem('bubblebreaker.panelSize');

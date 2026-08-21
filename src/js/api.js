@@ -157,7 +157,7 @@
             overview: { summary: 'このバブルを形成する主な意見の概要です。', insight: '公開情報が十分でないため、一般的な説明を表示しています。', metrics: [], isEstimated: true },
             history: { summary: '形成時期を確認できる公開情報がありません。', insight: '検索結果が増えると形成の歴史を推定できます。', metrics: [], isEstimated: true },
             demographic: { summary: '構成層・情報源を確認できる公開情報がありません。', insight: '検索で得られた情報源の傾向から推定します。', metrics: [], isEstimated: true },
-            evaluation: { summary: '内外からの評価を確認できる公開情報がありません。', insight: '異なる立場の公開情報を比較して表示します。', metrics: [], isEstimated: true }
+            evaluation: { summary: 'このバブルに対する反対派の批判を確認できる公開情報がありません。', insight: '異なる立場が問題視している点を比較できる情報が見つかると、批判の背景を表示できます。', metrics: [], isEstimated: true }
         };
 
         function fallbackEntryGroupId(input) {
@@ -808,7 +808,7 @@
             const repairInstruction = options.repair
                 ? '\n前回の応答を検証できなかったため、今回は必ず指定スキーマのJSONオブジェクトだけを返してください。4セクションすべてを埋め、metricsのvalueは数値、sourcesのurlは完全なhttp(s) URLにしてください。'
                 : '';
-            const prompt = `ユーザーの意見: ${input}\n所属カテゴリ: ${group.title}\n対象バブル: ${bubble.name}\n対象バブルの説明: ${bubble.desc || 'なし'}\n\nWeb Searchを使い、対象バブルだけの分析を生成してください。overview、history、demographic、evaluationの各summary・insight・metricsを具体的な公開情報に基づいて作成し、参照した公開ソースをsourcesに入れてください。分析項目名をバブル名にせず、根拠が足りない値はisEstimated=trueにしてください。JSON Schema以外の文章は出力しないでください。${repairInstruction}`;
+            const prompt = `ユーザーの意見: ${input}\n所属カテゴリ: ${group.title}\n対象バブル: ${bubble.name}\n対象バブルの説明: ${bubble.desc || 'なし'}\n\nWeb Searchを使い、対象バブルだけの分析を生成してください。overview、history、demographic、evaluationの各summary・insight・metricsを具体的な公開情報に基づいて作成し、参照した公開ソースをsourcesに入れてください。evaluationは「内と外からの評価」ではなく、このバブルに対して反対派・異なる立場・異なる利害関係者がどのように批判しているかを扱ってください。evaluation.summaryには反対派の主な批判を、evaluation.insightにはその批判が問題視する前提・影響・根拠を具体的に記述してください。反対派を戯画化したり、根拠のない藁人形論法を作ったりせず、実在する公開情報や異なる立場の主張に基づいてください。批判が事実への異議なのか、価値観や利害の違いなのかを可能な範囲で区別してください。分析項目名をバブル名にせず、根拠が足りない値はisEstimated=trueにしてください。JSON Schema以外の文章は出力しないでください。${repairInstruction}`;
             return {
                 model: OPENAI_MODEL,
                 store: false,
