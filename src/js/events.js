@@ -464,29 +464,16 @@
             if (explorerMode && state.screen === 'SINGLE' && state.groupId) loadGroup(state.groupId);
         });
 
-        // --- マウスホイール(トラックパッドのスワイプ)操作によるズーム/階層移動 ---
+        // --- マウスホイール・ピンチ操作によるズーム/階層移動 ---
         let wheelTimeout; // 連続スクロールの過剰反応を防ぐためのタイマー
 
-        window.addEventListener('wheel', (e) => {
-            // スクロール可能なUI領域（右側のリストなど）を操作している場合は、階層移動を発生させない
-            const scrollable = e.target.closest('.overflow-y-auto');
-            if(scrollable && state.screen !== 'SINGLE' && state.screen !== 'ANALYSIS') {
-                if(e.ctrlKey) e.preventDefault(); // Ctrlキー押下時のブラウザの文字拡大は防ぐ
-                return; 
-            }
-            
-            // それ以外の空間をホイールした場合は、ブラウザのデフォルトスクロールを止める
-            e.preventDefault();
-            
-            // 一度スクロール判定したら、1秒間は次の判定を受け付けない（誤作動防止）
+        function handleZoomNavigation(direction) {
             if (state.screen === 'GROUP' && typeof markGroupCameraInteraction === 'function') {
-                markGroupCameraInteraction(e.deltaY < 0 ? 'zoomIn' : 'zoomOut');
+                markGroupCameraInteraction(direction);
             }
-            if(wheelTimeout) return;
-            wheelTimeout = setTimeout(() => { wheelTimeout = null; }, 1000);
 
-            if (e.deltaY > 0) { 
-                // 下スクロール（手前に引く）＝ ズームアウト（親階層へ戻る）
+            if (direction === 'zoomOut') {
+                // 下スクロール（手前に引く）＝ズームアウト（親階層へ戻る）
                 if (state.screen === 'DETAIL') switchScreen('ANALYSIS');
                 else if (state.screen === 'ANALYSIS') loadSingle(state.bubbleData);
                 else if (state.screen === 'SINGLE') loadGroup(state.groupId);
@@ -497,16 +484,73 @@
                         loadGroup(state.groupData.parentId);
                     }
                 }
-            } else if (e.deltaY < 0) { 
-                // 上スクロール（奥へ押し込む）＝ ズームイン（子階層へ進む）
-                if (state.screen === 'SINGLE' && state.bubbleData && state.bubbleData.childId) {
-                    loadGroup(state.bubbleData.childId);
-                } else if (state.screen === 'GROUP' && explorerMode) {
-                    const targetBubble = getExplorerZoomTarget();
-                    if (targetBubble) {
-                        explorerSelectedBubbleId = targetBubble.id;
-                        loadGroup(targetBubble.childId);
-                    }
+                return;
+            }
+
+            // 上スクロール（奥へ押し込む）＝ズームイン（子階層へ進む）
+            if (state.screen === 'SINGLE' && state.bubbleData && state.bubbleData.childId) {
+                loadGroup(state.bubbleData.childId);
+            } else if (state.screen === 'GROUP' && explorerMode) {
+                const targetBubble = getExplorerZoomTarget();
+                if (targetBubble) {
+                    explorerSelectedBubbleId = targetBubble.id;
+                    loadGroup(targetBubble.childId);
                 }
             }
+        }
+
+        const canvasElement = document.querySelector('#canvas-container canvas');
+        const touchZoomState = { lastDistance: null, handled: false };
+        function getTouchDistance(touches) {
+            if (!touches || touches.length < 2) return null;
+            const first = touches[0];
+            const second = touches[1];
+            return Math.hypot(second.clientX - first.clientX, second.clientY - first.clientY);
+        }
+        if (canvasElement) {
+            canvasElement.addEventListener('touchstart', event => {
+                if (event.touches.length !== 2) return;
+                touchZoomState.lastDistance = getTouchDistance(event.touches);
+                touchZoomState.handled = false;
+                event.preventDefault();
+            }, { passive: false });
+            canvasElement.addEventListener('touchmove', event => {
+                if (event.touches.length !== 2) return;
+                const currentDistance = getTouchDistance(event.touches);
+                if (currentDistance === null || touchZoomState.lastDistance === null) return;
+                const distanceDelta = currentDistance - touchZoomState.lastDistance;
+                touchZoomState.lastDistance = currentDistance;
+                event.preventDefault();
+                if (touchZoomState.handled || Math.abs(distanceDelta) < 8) return;
+                touchZoomState.handled = true;
+                handleZoomNavigation(distanceDelta > 0 ? 'zoomIn' : 'zoomOut');
+            }, { passive: false });
+            const resetTouchZoom = () => {
+                touchZoomState.lastDistance = null;
+                touchZoomState.handled = false;
+            };
+            canvasElement.addEventListener('touchend', resetTouchZoom, { passive: false });
+            canvasElement.addEventListener('touchcancel', resetTouchZoom, { passive: false });
+        }
+
+        window.addEventListener('wheel', (e) => {
+            // スクロール可能なUI領域（右側のリストなど）を操作している場合は、階層移動を発生させない
+            const cosmicControl = e.target.closest('#panel-bgm');
+            if (cosmicControl) {
+                if (e.ctrlKey) e.preventDefault(); // Ctrlキー押下時のブラウザの文字拡大は防ぐ
+                return;
+            }
+            const scrollable = e.target.closest('.overflow-y-auto');
+            if(scrollable && state.screen !== 'SINGLE' && state.screen !== 'ANALYSIS') {
+                if(e.ctrlKey) e.preventDefault(); // Ctrlキー押下時のブラウザの文字拡大は防ぐ
+                return;
+            }
+
+            // それ以外の空間をホイールした場合は、ブラウザのデフォルトスクロールを止める
+            e.preventDefault();
+
+            // 一度スクロール判定したら、1秒間は次の判定を受け付けない（誤作動防止）
+            if(wheelTimeout) return;
+            wheelTimeout = setTimeout(() => { wheelTimeout = null; }, 1000);
+            if (e.deltaY !== 0) handleZoomNavigation(e.deltaY > 0 ? 'zoomOut' : 'zoomIn');
         }, { passive: false }); // e.preventDefault()を機能させるために必要

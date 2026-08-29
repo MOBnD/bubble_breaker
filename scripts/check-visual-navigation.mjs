@@ -62,6 +62,19 @@ assert.doesNotMatch(scene, /const horizon = new THREE\.Mesh/, 'the enclosing wir
 assert.match(scene, /function updateAutomaticBubbleApproach\(\)/, 'automatic bubble proximity handling should exist');
 assert.match(scene, /function updateAnalysisGenerationStatus\(\)/, 'analysis generation status should be visible');
 assert.match(scene, /stateName === 'loading'/, 'loading analysis should be represented in the UI');
+assert.match(styles, /\.command-console\s*\{[\s\S]*?max-height: calc\(100vh - 96px\)/, 'Cosmic Control should be limited to the viewport height');
+assert.match(styles, /\.command-console\s*\{[\s\S]*?overflow-y: auto/, 'Cosmic Control should scroll vertically');
+assert.match(styles, /\.command-console\s*\{[\s\S]*?overscroll-behavior: contain/, 'Cosmic Control scrolling should not chain to the scene');
+assert.match(styles, /\.command-console \{ top: 58px !important;[\s\S]*?max-height: calc\(100vh - 72px\)/, 'mobile Cosmic Control should leave space below the top offset');
+assert.match(events, /e\.target\.closest\('#panel-bgm'\)/, 'Cosmic Control wheel input should stay inside the panel');
+assert.match(indexHtml, /name="viewport" content="width=device-width, initial-scale=1\.0, maximum-scale=1, user-scalable=no"/, 'mobile page zoom should be disabled for the full-screen app');
+assert.match(styles, /#canvas-container[^\{]*\{[^\}]*touch-action: none/, 'the canvas container should keep touch gestures inside the app');
+assert.match(styles, /#canvas-container > canvas[^\{]*\{[^\}]*touch-action: none/, 'the Three.js canvas should not trigger browser gestures');
+assert.match(events, /canvasElement\.addEventListener\('touchstart'/, 'mobile pinch gestures should be captured on the canvas');
+assert.match(events, /getTouchDistance\(touches\)/, 'pinch distance should be measured from two touch points');
+assert.match(events, /handleZoomNavigation\(distanceDelta > 0 \? 'zoomIn' : 'zoomOut'\)/, 'pinch direction should map to application zoom direction');
+assert.match(events, /touchZoomState\.handled/, 'one pinch gesture should not trigger repeated hierarchy transitions');
+assert.match(events, /function handleZoomNavigation\(direction\)/, 'wheel and touch zoom should share navigation behavior');
 assert.match(scene, /analysis-evaluation-summary/, 'opposition criticism should be reflected in the analysis preview');
 assert.match(scene, /analysis-evaluation-insight/, 'opposition criticism focus should be reflected in the analysis preview');
 assert.match(scene, /'evaluation': '反対派からの批判'/, 'evaluation detail title should describe opposition criticism');
@@ -77,7 +90,7 @@ assert.match(scene, /window\.markBubbleAnalysisComplete = function/, 'analysis c
 assert.match(animation, /analysisProbeAnimation/, 'analysis probes should animate around bubbles');
 assert.match(animation, /isCompletionPulse/, 'analysis completion should show a transient pulse');
 assert.match(scene, /loadSingle\(nearest\.data\)/, 'proximity should enter the nearest bubble detail view');
-assert.match(events, /markGroupCameraInteraction\(e\.deltaY < 0 \? 'zoomIn' : 'zoomOut'\)/, 'only zoom-in wheel input should arm proximity transition');
+assert.match(events, /markGroupCameraInteraction\(direction\)/, 'zoom-in navigation should arm proximity transition through the shared handler');
 assert.doesNotMatch(scene.match(/function addSolarSystem[\s\S]*?\n        function createCosmicEnvironment/)?.[0] || '', /blackHole/i, 'solar systems must not create black holes');
 assert.match(animation, /getLoadingBlackHoleTarget\(loadingAnimation\.targetIndex\)/, 'warp animation should target galaxy-center black holes');
 assert.match(animation, /segmentDuration: 60000/, 'black hole approach should allow a longer exploration route');
