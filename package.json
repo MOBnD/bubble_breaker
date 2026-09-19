@@ -4,6 +4,8 @@
   "type": "module",
   "scripts": {
     "build": "node scripts/build.mjs",
-    "check": "node scripts/check-inline-script.mjs"
+    "check": "node scripts/check-inline-script.mjs",
+    "check:visual": "node scripts/check-visual-navigation.mjs",
+    "test": "node scripts/check-universe-hierarchy.mjs"
   }
 }

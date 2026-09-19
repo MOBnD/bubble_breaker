@@ -1,9 +1,10 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { cp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const sourcePath = path.join(root, 'bb_proto4.html');
+const sourcePath = path.join(root, 'src', 'index.html');
+const sourceDir = path.dirname(sourcePath);
 const outputDir = path.join(root, 'dist');
 const outputPath = path.join(outputDir, 'bb_proto4.html');
 
@@ -31,13 +32,27 @@ try {
     if (error.code !== 'ENOENT') throw error;
 }
 
-const apiKey = env.OPENAI_API_KEY || process.env.OPENAI_API_KEY || '';
-const model = env.OPENAI_MODEL || process.env.OPENAI_MODEL || 'gpt-5.6-luna';
+const model = String(process.env.OPENAI_MODEL || env.OPENAI_MODEL || 'gpt-5.6-luna').trim() || 'gpt-5.6-luna';
 const source = await readFile(sourcePath, 'utf8');
-const output = source
-    .replace('window.__OPENAI_API_KEY__ = "__OPENAI_API_KEY__";', `window.__OPENAI_API_KEY__ = ${JSON.stringify(apiKey)};`)
-    .replace('window.__OPENAI_MODEL__ = "gpt-5.6-luna";', `window.__OPENAI_MODEL__ = ${JSON.stringify(model)};`);
+const styles = await readFile(path.join(sourceDir, 'styles.css'), 'utf8');
+const ngc3324Image = await readFile(path.join(sourceDir, 'assets', 'ngc-3324-nircam-clean-4000.png'));
+const ngc3324Texture = `data:image/png;base64,${ngc3324Image.toString('base64')}`;
+const localScriptPattern = /<script src="\.\/([^\"]+)"><\/script>/g;
+const scriptPaths = [...source.matchAll(localScriptPattern)].map(match => match[1]);
+if (scriptPaths.length === 0) throw new Error('No local application scripts were found in src/index.html.');
+const scripts = await Promise.all(scriptPaths.map(relativePath => readFile(path.join(sourceDir, relativePath), 'utf8')));
+let scriptIndex = 0;
+const inlinedSource = source
+    .replace('    <link rel="stylesheet" href="./styles.css">', `<style>\n${styles}\n    </style>`)
+    .replace(localScriptPattern, () => `<script>\n${scripts[scriptIndex++]}\n    </script>`);
+if (scriptIndex !== scripts.length) throw new Error('Not all local application scripts were inlined.');
+const output = inlinedSource
+    .replace('window.__OPENAI_API_KEY__ = "__OPENAI_API_KEY__";', 'window.__OPENAI_API_KEY__ = "";')
+    .replace('window.__OPENAI_MODEL__ = "gpt-5.6-luna";', `window.__OPENAI_MODEL__ = ${JSON.stringify(model)};`)
+    .replace('window.__NGC3324_TEXTURE__ = "./assets/ngc-3324-nircam-clean-4000.png";', `window.__NGC3324_TEXTURE__ = ${JSON.stringify(ngc3324Texture)};`);
 
 await mkdir(outputDir, { recursive: true });
 await writeFile(outputPath, output, 'utf8');
-console.log(`Built ${path.relative(root, outputPath)}${apiKey ? ' with API key' : ' without API key (fixed-data fallback enabled)'}.`);
+await rm(path.join(outputDir, 'BGM'), { recursive: true, force: true });
+await cp(path.join(root, 'BGM'), path.join(outputDir, 'BGM'), { recursive: true });
+console.log(`Built ${path.relative(root, outputPath)} without embedded API key (runtime input required).`);
