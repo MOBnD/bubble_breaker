@@ -1,7 +1,7 @@
 {
-  "name": "bubble-breaker-v2",
+  "name": "bubble-breaker-adventure-core",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -14,8 +14,7 @@
   },
   "dependencies": {
     "react": "^19.3.0",
-    "react-dom": "^19.3.0",
-    "react-router-dom": "^7.1.1"
+    "react-dom": "^19.3.0"
   },
   "devDependencies": {
     "@playwright/test": "^1.49.1",

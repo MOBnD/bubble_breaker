@@ -1,75 +1,60 @@
-# BubbleBreaker v2 — Information Adventure
+# BubbleBreaker — Adventure Core
 
-興味の近くに閉じず、意味のある意外な接続をたどって未知の情報分野を冒険するUXプロトタイプです。
+「ゲーム」への興味から出発し、問い、発見、意外な接続、世界の拡張を通して、普段は探さない情報領域へ進むUXプロトタイプです。
 
-このブランチでは、v1の静的HTML／JavaScript構成をReact／TypeScript／Vite構成へ置き換えています。v1の実装は`main`ブランチのGit履歴にあり、関連資料は`docs/v1/`に保存しています。v2の要件定義は`docs/v2/`を参照してください。
+現在の唯一の仕様は **docs/v2/** のAdventure Core要件です。旧仕様のカテゴリブラウザではなく、次の感情ループを体験の中心にしています。
 
-## 動作環境
+    好奇心 → 接近 → 発見 → 意外な接続 → 世界の拡張 → 次の好奇心
 
-- Node.js `^20.19.0` または `>=22.12.0`
-- npm
+## 起動
 
-## セットアップと起動
+Node.js ^20.19.0 または >=22.12.0 とnpmを使用します。
 
-リポジトリ直下で次のコマンドを実行します。
+    npm ci
+    npm run dev
 
-```powershell
-npm ci
-npm run dev
-```
+ブラウザで表示されたURLを開きます。アプリは単一のAdventure Experienceで、進行状況は **bubble-breaker:v2:adventure-state:v1** としてlocalStorageへ保存されます。旧実装の保存データは読み込まず、削除もしません。
 
-ターミナルに表示されたURLをブラウザで開きます。`/#/demo`では「ゲーム」から「災害避難」までのガイド付き標準シナリオを体験できます。
+## 実装済み
 
-本番用ビルドとローカルプレビューは次のコマンドで実行できます。
+- 「ゲーム」だけを操作可能にした静かな出発画面
+- ラベルを明かす前に、問いと気配へ接近するEncounter
+- ゲーム世界 → 空間／レベル設計 → ランドマーク → ウェイファインディングの第一発見
+- 発見後に霧、道、橋、都市が現れる世界拡張
+- ウェイファインディング → 視線と空間構成 → 経路選択 → 都市／建築の第二発見
+- 「追う／寄り道／深く潜る」から選ぶ3つの次回Encounter
+- 発見、接続、開いた世界と出典を残す最小冒険記
+- 旧12テーマを非表示のKnowledge Graphとして保持し、検証済み接続だけをVertical Sliceで利用
+- デスクトップ／モバイル、キーボード、reduced-motion対応
 
-```powershell
-npm run build
-npm run preview
-```
+## 未実装
 
-ビルド成果物は`dist/`に生成され、Gitの追跡対象には含まれません。
+- 3つの次回Encounterより先のReveal
+- ゲーム以外の出発地点
+- 自動推薦、個人化、大規模Knowledge Graph
+- アカウント、ソーシャル、ランキング、XP、戦闘、インベントリ
+- バックエンド、音声
 
-## 画面
+## 現在のUX上の課題
 
-- `/#/` — 3つの出発方法を選ぶホーム画面
-- `/#/world` — パン・ズーム可能な霧の世界地図
-- `/#/discovery/:topicId` — 発見内容、到達理由、次の3方向を表示する画面
-- `/#/log` — 歩いた道、発見、探索分野を残す冒険記
-- `/#/demo` — 通常履歴を変更しないガイド付きデモ
+- CuriosityやAdventure feelingは自動テストだけでは判定できないため、初見ユーザーによる5分間の観察テストが必要です。
+- MVPの事実コンテンツは少数の研究資料に基づく手動キュレーションです。対象集団が限定された研究は、その範囲を超えて一般化しない表現にしています。
+- 世界表現はCSSとインラインSVGによるプロトタイプであり、音や高密度な環境演出は含みません。
 
-## データと保存
+## 構成
 
-Phase 1では、12テーマと36本の方向付き接続を固定データとして収録しています。各テーマには「深く潜る」「横へ進む」「未踏の地へ」が1本ずつあり、すべての遷移に説明可能な中間概念と到達理由があります。
-
-通常の冒険は`bubble-breaker-v2:journeys:v1`としてブラウザのlocalStorageへ保存します。デモ履歴はメモリ内だけに保持し、通常の冒険記には混在しません。
-
-現在のPhase 1には、バックエンド、OpenAI API、認証、BGMは含まれていません。
-
-## 主なディレクトリ
-
-- `src/pages/` — 各画面
-- `src/components/` — 共通UIと世界地図
-- `src/data/` — テーマ、接続、デモデータ
-- `src/state/` — 冒険状態とlocalStorageへの保存処理
-- `src/lib/` — 経路選択などのドメインロジック
-- `src/test/` — Vitestの共通セットアップ
-- `e2e/` — PlaywrightによるE2Eテスト
-- `docs/v1/` — v1の資料
-- `docs/v2/` — v2の要件定義
+- **src/data/** — 非表示の知識グラフ、出典、キュレーション済み発見
+- **src/lib/** — Adventure状態機械
+- **src/state/** — React Contextとv2専用localStorage
+- **src/components/** — 世界シーン、体験パネル、冒険記
+- **e2e/** — デスクトップ／モバイルのVertical Slice検証
+- **docs/v2/** — 唯一の現行要件
 
 ## 検証
 
-```powershell
-npm run check
-npm test
-npm run build
-npm run test:e2e
-```
+    npm run check
+    npm test
+    npm run build
+    npm run test:e2e
 
-E2Eテストを初めて実行する環境では、先にChromiumを導入します。
-
-```powershell
-npx playwright install chromium
-```
-
-単体・コンポーネントテストでは、テーマグラフ、状態保存、出発画面、デモ開始を検証します。Playwrightでは、デスクトップとモバイルの標準シナリオ、および再読み込み後の継続動作を検証します。
+E2Eで使用するChromiumがない場合は、先に **npx playwright install chromium** を実行してください。

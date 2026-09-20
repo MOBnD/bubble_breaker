@@ -1,76 +1,96 @@
-export type BranchKind = 'deep' | 'sideways' | 'uncharted';
+export type ExperienceStage =
+  | 'departure'
+  | 'arrival'
+  | 'firstEncounter'
+  | 'firstReveal'
+  | 'firstExpansion'
+  | 'secondEncounter'
+  | 'secondReveal'
+  | 'choice'
+  | 'continuationEncounter';
 
-export type TopicCategory =
-  | 'creative'
-  | 'mind'
-  | 'technology'
-  | 'society'
-  | 'knowledge';
+export type ContinuationKind = 'pursue' | 'detour' | 'deepen';
 
-export interface MapPosition {
-  x: number;
-  y: number;
-}
-
-export interface Topic {
+export interface ConceptNode {
   id: string;
-  name: string;
-  categoryId: TopicCategory;
-  categoryLabel: string;
+  label: string;
+  domain: string;
   summary: string;
-  worldType: 'kingdom' | 'city' | 'village' | 'ruin' | 'tower';
-  landmark: string;
-  position: MapPosition;
-  accent: string;
+  legacy?: boolean;
 }
 
-export interface TopicConnection {
+export interface SourceReference {
   id: string;
-  fromTopicId: string;
-  toTopicId: string;
-  branchKind: BranchKind;
-  distance: number;
-  relationshipType: string;
-  explanation: string;
-  surpriseScore: number;
-  bridgeLabels: string[];
+  title: string;
+  authors: string;
+  year: number;
+  url: string;
+  note: string;
 }
 
-export interface JourneyStep {
-  topicId: string;
-  fromTopicId?: string;
-  connectionId?: string;
-  branchKind?: BranchKind;
+export interface KnowledgeConnection {
+  id: string;
+  fromConceptId: string;
+  toConceptId: string;
   bridgeLabels: string[];
-  explanation?: string;
-  surpriseScore: number;
+  explanation: string;
+  sourceIds: string[];
+  prototypeEligible: boolean;
+}
+
+export interface DiscoveryDefinition {
+  id: string;
+  encounterId: string;
+  question: string;
+  signal: string;
+  revealTitle: string;
+  chain: string[];
+  explanation: string;
+  connectionId: string;
+  discoveredConceptIds: string[];
+  unlockRegionId: string;
+  unlockDescription: string;
+  nextUncertainty: string;
+  sourceIds: string[];
+}
+
+export interface ContinuationChoice {
+  kind: ContinuationKind;
+  title: string;
+  description: string;
+  signal: string;
+  encounterQuestion: string;
+  destinationConceptId: string;
+  regionId: string;
+}
+
+export interface AdventurePathEvent {
+  id: string;
+  type: 'departure' | 'encounter' | 'discovery' | 'expansion' | 'choice';
+  occurredAt: string;
+}
+
+export interface JournalEntry {
+  id: string;
+  discoveryId: string;
+  title: string;
+  chain: string[];
+  explanation: string;
+  openedWorld: string;
+  sourceIds: string[];
   discoveredAt: string;
 }
 
-export interface Journey {
-  id: string;
-  startedAt: string;
-  updatedAt: string;
-  startTopicId: string;
-  currentTopicId: string;
-  steps: JourneyStep[];
-}
-
-export interface PersistedJourneyState {
-  version: 1;
-  journeys: Journey[];
-  activeJourneyId: string | null;
-}
-
-export interface JourneyRuntimeState extends PersistedJourneyState {
-  isDemo: boolean;
-  demoJourney: Journey | null;
-}
-
-export interface DemoStep {
-  currentTopicId: string | null;
-  screen: 'home' | 'world' | 'discovery' | 'log';
-  targetTopicId?: string;
-  title: string;
-  instruction: string;
+export interface AdventureSession {
+  schemaVersion: 1;
+  stage: ExperienceStage;
+  currentConcept: string | null;
+  visitedConcepts: string[];
+  revealedRegions: string[];
+  knownConnections: string[];
+  unexploredClues: string[];
+  adventurePath: AdventurePathEvent[];
+  sessionStartConcept: string | null;
+  journalEntries: JournalEntry[];
+  selectedContinuation: ContinuationKind | null;
 }
