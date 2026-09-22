@@ -8,10 +8,7 @@
         }
         let activeOpenAIKey = normalizeRuntimeApiKey(window.__OPENAI_API_KEY__);
         const OPENAI_STRUCTURE_TIMEOUT_MS = 90000;
-        const OPENAI_ANALYSIS_TIMEOUT_MS = 60000;
         const OPENAI_STRUCTURE_MAX_ATTEMPTS = 2;
-        const OPENAI_ANALYSIS_MAX_ATTEMPTS = 3;
-        const OPENAI_ANALYSIS_RETRY_DELAY_MS = 1200;
         const OPENAI_STRUCTURE_MAX_BUBBLES = 5;
         const OPENAI_LOG_PREFIX = '[BubbleBreaker][OpenAI]';
         let activeAnalysisInput = '';
@@ -56,17 +53,6 @@
             type: 'object', additionalProperties: false,
             required: ['label', 'value'],
             properties: { label: { type: 'string' }, value: { type: 'number' } }
-        };
-        const OPENAI_SOURCE_SCHEMA = {
-            type: 'object', additionalProperties: false,
-            required: ['title', 'url', 'domain', 'publishedAt', 'claims'],
-            properties: {
-                title: { type: 'string' },
-                url: { type: 'string' },
-                domain: { type: 'string' },
-                publishedAt: { type: ['string', 'null'] },
-                claims: { type: 'array', items: { type: 'string' }, maxItems: 2 }
-            }
         };
         const OPENAI_ANALYSIS_SECTION_SCHEMA = {
             type: 'object', additionalProperties: false,
@@ -144,15 +130,6 @@
             type: 'object', additionalProperties: false, required: ['groups'],
             properties: { groups: { type: 'array', minItems: 1, maxItems: 1, items: OPENAI_LEAF_GROUP_SCHEMA } }
         };
-        const OPENAI_BUBBLE_ANALYSIS_RESPONSE_SCHEMA = {
-            type: 'object', additionalProperties: false,
-            required: ['analysis', 'sources'],
-            properties: {
-                analysis: OPENAI_ANALYSIS_SCHEMA,
-                sources: { type: 'array', items: OPENAI_SOURCE_SCHEMA, maxItems: 3 }
-            }
-        };
-
         const DEFAULT_ANALYSIS = {
             overview: { summary: 'このバブルを形成する主な意見の概要です。', insight: '公開情報が十分でないため、一般的な説明を表示しています。', metrics: [], isEstimated: true },
             history: { summary: '形成時期を確認できる公開情報がありません。', insight: '検索結果が増えると形成の歴史を推定できます。', metrics: [], isEstimated: true },
@@ -236,7 +213,14 @@
                 url: String(source.url),
                 domain: String(source.domain || (() => { try { return new URL(source.url).hostname; } catch (_) { return ''; } })()),
                 publishedAt: source.publishedAt ? String(source.publishedAt) : null,
-                claims: Array.isArray(source.claims) ? source.claims.slice(0, 5).map(String) : []
+                claims: (Array.isArray(source.claims) ? source.claims : (Array.isArray(source.claimCandidates) ? source.claimCandidates : [])).slice(0, 5).map(String),
+                sourceId: source.sourceId ? String(source.sourceId) : null,
+                sourceType: source.sourceType ? String(source.sourceType) : 'UNKNOWN',
+                publisher: source.publisher ? String(source.publisher) : '',
+                isPrimary: source.isPrimary === true,
+                relevantExcerpt: source.relevantExcerpt ? String(source.relevantExcerpt) : '',
+                independenceGroup: source.independenceGroup ? String(source.independenceGroup) : null,
+                independenceEstimated: source.independenceEstimated === true
             }));
         }
 
@@ -804,26 +788,6 @@
             };
         }
 
-        function buildOpenAIBubbleAnalysisRequest(bubble, group, input, options = {}) {
-            const repairInstruction = options.repair
-                ? '\n前回の応答を検証できなかったため、今回は必ず指定スキーマのJSONオブジェクトだけを返してください。4セクションすべてを埋め、metricsのvalueは数値、sourcesのurlは完全なhttp(s) URLにしてください。'
-                : '';
-            const prompt = `ユーザーの意見: ${input}\n所属カテゴリ: ${group.title}\n対象バブル: ${bubble.name}\n対象バブルの説明: ${bubble.desc || 'なし'}\n\nWeb Searchを使い、対象バブルだけの分析を生成してください。overview、history、demographic、evaluationの各summary・insight・metricsを具体的な公開情報に基づいて作成し、参照した公開ソースをsourcesに入れてください。evaluationは「内と外からの評価」ではなく、このバブルに対して反対派・異なる立場・異なる利害関係者がどのように批判しているかを扱ってください。evaluation.summaryには反対派の主な批判を、evaluation.insightにはその批判が問題視する前提・影響・根拠を具体的に記述してください。反対派を戯画化したり、根拠のない藁人形論法を作ったりせず、実在する公開情報や異なる立場の主張に基づいてください。批判が事実への異議なのか、価値観や利害の違いなのかを可能な範囲で区別してください。分析項目名をバブル名にせず、根拠が足りない値はisEstimated=trueにしてください。JSON Schema以外の文章は出力しないでください。${repairInstruction}`;
-            return {
-                model: OPENAI_MODEL,
-                store: false,
-                reasoning: { effort: 'low' },
-                max_output_tokens: options.repair ? 6500 : 5000,
-                tool_choice: 'required',
-                tools: [{ type: 'web_search', search_context_size: 'medium', user_location: { type: 'approximate', country: 'JP', timezone: 'Asia/Tokyo' } }],
-                input: [
-                    { role: 'system', content: [{ type: 'input_text', text: 'あなたはBubbleBreakerのバブル分析エンジンです。対象バブル以外の階層を生成せず、公開情報と推定を区別した短い構造化分析を返してください。' }] },
-                    { role: 'user', content: [{ type: 'input_text', text: prompt }] }
-                ],
-                text: { format: { type: 'json_schema', name: 'bubble_analysis', strict: true, schema: OPENAI_BUBBLE_ANALYSIS_RESPONSE_SCHEMA } }
-            };
-        }
-
         async function fetchWithTimeout(url, options, timeoutMs = OPENAI_STRUCTURE_TIMEOUT_MS) {
             const controller = new AbortController();
             const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -852,17 +816,6 @@
                 .filter(item => item && (item.type === 'output_text' || typeof item.text === 'string'))
                 .map(item => String(item.text || ''))
                 .join('');
-        }
-
-        function isRetryableAnalysisError(error) {
-            if (!error) return true;
-            if (error.status === 401 || error.status === 403) return false;
-            if (error.code === 'API_ABORTED_BY_USER') return false;
-            return true;
-        }
-
-        function waitForAnalysisRetry(delayMs) {
-            return new Promise(resolve => setTimeout(resolve, delayMs));
         }
 
         async function requestOpenAIJson(requestBody, timeoutMs, stage) {
@@ -910,7 +863,7 @@
                 throw error;
             }
             apiLog('API構造化応答を受信しました', { stage, status: response.status, requestId, elapsedMs, outputTextLength: text.length });
-            return { parsed, requestId, elapsedMs };
+            return { parsed, payload, requestId, elapsedMs };
         }
 
         function markHierarchyError(error, stage) {
@@ -1141,79 +1094,43 @@
                 const startedAt = performance.now();
                 bubble.analysisStatus = 'loading';
                 if (typeof window.refreshAnalysisView === 'function') window.refreshAnalysisView(bubbleId);
-                for (let attempt = 1; attempt <= OPENAI_ANALYSIS_MAX_ATTEMPTS; attempt++) {
-                    let requestId = null;
-                    try {
-                        const response = await fetchWithTimeout('https://api.openai.com/v1/responses', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${activeOpenAIKey}` },
-                            body: JSON.stringify(buildOpenAIBubbleAnalysisRequest(bubble, group, String(input || ''), { repair: attempt > 1 }))
-                        }, OPENAI_ANALYSIS_TIMEOUT_MS);
-                        requestId = response.headers.get('x-request-id');
-                        if (!response.ok) {
-                            const errorBody = redactApiLog(truncateApiLog(await response.text()));
-                            const error = new Error(`OpenAI API ${response.status}`);
-                            error.status = response.status;
-                            error.requestId = requestId;
-                            error.body = errorBody;
-                            throw error;
-                        }
-                        const payload = await response.json();
-                        const incompleteReason = payload && payload.incomplete_details && payload.incomplete_details.reason;
-                        if (payload && (payload.status === 'incomplete' || incompleteReason)) {
-                            const error = new Error(`OpenAI APIの分析出力が未完了です${incompleteReason ? `（${incompleteReason}）` : ''}`);
-                            error.code = 'API_INCOMPLETE_OUTPUT';
-                            error.reason = incompleteReason || null;
-                            error.requestId = requestId;
-                            throw error;
-                        }
-                        const text = extractResponseText(payload);
-                        if (!text) {
-                            const error = new Error('OpenAI APIの分析出力が空です');
-                            error.code = 'API_EMPTY_OUTPUT';
-                            throw error;
-                        }
-                        let parsed;
-                        try {
-                            parsed = JSON.parse(text);
-                        } catch (parseError) {
-                            const error = new Error(`バブル分析JSON解析に失敗しました: ${parseError.message}`);
-                            error.code = 'API_JSON_PARSE_ERROR';
-                            error.cause = parseError;
-                            throw error;
-                        }
-                        if (!parsed || !parsed.analysis || typeof parsed.analysis !== 'object') {
-                            const error = new Error('バブル分析のanalysisオブジェクトがありません');
-                            error.code = 'API_INVALID_ANALYSIS';
-                            throw error;
-                        }
-                        bubble.analysis = normalizeAnalysis(parsed.analysis);
-                        bubble.sources = normalizeSources(parsed.sources);
-                        bubble.analysisStatus = 'ready';
-                        bubble.analysisCompletionAt = performance.now();
-                        if (typeof window.markBubbleAnalysisComplete === 'function') window.markBubbleAnalysisComplete(bubbleId);
-                        apiLog('バブル分析の遅延生成に成功', { bubbleId, groupId: group.id, attempt, requestId, elapsedMs: Math.round(performance.now() - startedAt) });
-                        if (typeof window.refreshAnalysisView === 'function') window.refreshAnalysisView(bubbleId);
-                        return { analysis: bubble.analysis, sources: bubble.sources };
-                    } catch (error) {
-                        const retryable = isRetryableAnalysisError(error);
-                        apiWarn('バブル分析の生成に失敗しました。再試行を判定します', {
-                            bubbleId, groupId: group.id, attempt, maxAttempts: OPENAI_ANALYSIS_MAX_ATTEMPTS,
-                            retryable, requestId: error.requestId || requestId || null,
-                            code: error.code || null, status: error.status || null,
-                            timeoutMs: error.timeoutMs || null, body: error.body || null,
-                            message: redactApiLog(error.message || '不明なエラー')
-                        });
-                        if (!retryable || attempt >= OPENAI_ANALYSIS_MAX_ATTEMPTS) break;
-                        bubble.analysisStatus = 'loading';
-                        if (typeof window.refreshAnalysisView === 'function') window.refreshAnalysisView(bubbleId);
-                        await waitForAnalysisRetry(OPENAI_ANALYSIS_RETRY_DELAY_MS * attempt);
+                try {
+                    if (!window.BubbleResearch || typeof window.BubbleResearch.runBubbleResearch !== 'function') {
+                        const error = new Error('BubbleResearchモジュールが読み込まれていません');
+                        error.code = 'RESEARCH_MODULE_MISSING';
+                        throw error;
                     }
-                }
-                {
+                    const result = await window.BubbleResearch.runBubbleResearch({
+                        bubble, group, input: String(input || ''), model: OPENAI_MODEL,
+                        analysisSchema: OPENAI_ANALYSIS_SCHEMA,
+                        requestResponse: requestOpenAIJson,
+                        log: apiLog,
+                        warn: apiWarn
+                    });
+                    bubble.detailResearch = result.detailResearch;
+                    bubble.sources = normalizeSources(result.sources);
+                    bubble.analysis = result.analysis ? normalizeAnalysis(result.analysis) : normalizeAnalysis(bubble.analysis);
+                    bubble.analysisStatus = result.status === 'complete' ? 'ready' : 'partial';
+                    bubble.analysisCompletionAt = performance.now();
+                    if (typeof window.markBubbleAnalysisComplete === 'function') window.markBubbleAnalysisComplete(bubbleId);
+                    apiLog('Evidence検証後のバブル分析を生成しました', {
+                        bubbleId, groupId: group.id, status: bubble.analysisStatus,
+                        sourceCount: bubble.sources.length,
+                        claimCount: bubble.detailResearch && Array.isArray(bubble.detailResearch.claims) ? bubble.detailResearch.claims.length : 0,
+                        contradictionCount: bubble.detailResearch && Array.isArray(bubble.detailResearch.contradictions) ? bubble.detailResearch.contradictions.length : 0,
+                        elapsedMs: Math.round(performance.now() - startedAt)
+                    });
+                    if (typeof window.refreshAnalysisView === 'function') window.refreshAnalysisView(bubbleId);
+                    return { analysis: bubble.analysis, sources: bubble.sources, detailResearch: bubble.detailResearch };
+                } catch (error) {
+                    if (error.detailResearch) bubble.detailResearch = error.detailResearch;
                     bubble.analysisStatus = 'error';
                     if (typeof window.refreshAnalysisView === 'function') window.refreshAnalysisView(bubbleId);
                     if (bubbleAnalysisRequests.get(bubbleId) === request) bubbleAnalysisRequests.delete(bubbleId);
+                    apiWarn('Evidence検証パイプラインに失敗しました', {
+                        bubbleId, groupId: group.id, code: error.code || null, status: error.status || null,
+                        message: redactApiLog(error.message || '不明なエラー'), elapsedMs: Math.round(performance.now() - startedAt)
+                    });
                     return null;
                 }
             })();
@@ -1223,5 +1140,5 @@
 
         async function requestBubbleGroupAnalyses(group, input = activeAnalysisInput) {
             if (!group || !Array.isArray(group.bubbles) || !isOpenAIKeyConfigured()) return [];
-            return runWithConcurrency(group.bubbles, 3, bubble => requestBubbleAnalysis(bubble, group, input));
+            return runWithConcurrency(group.bubbles, 2, bubble => requestBubbleAnalysis(bubble, group, input));
         }

@@ -66,7 +66,7 @@ HTML内のインラインJavaScriptを検査します。API呼び出しやブラ
 npm test
 ```
 
-正常な3階層、非入力経路の下位カテゴリ欠落、重複接続、固定DBフォールバックを検査します。API呼び出しは行いません。
+正常な3階層、非入力経路の下位カテゴリ欠落、重複接続、固定DBフォールバックに加え、詳細情報のQuery Fan-out、Evidence重複排除、Claim検証、矛盾・情報源独立性・confidence計算を検査します。API呼び出しは行いません。
 
 ### 視覚・ナビゲーション不変条件チェック
 
@@ -86,6 +86,112 @@ npx serve dist
 
 表示されたURLをブラウザで開き、意見を入力して「宇宙へダイブ」を押します。APIキー未設定、APIエラー、検索結果の不正時は既存の固定データで動作します。
 
+## 情報収集・検証パイプライン
+
+### Before
+
+変更前は、バブルごとにWeb Search付きOpenAI APIを1回呼び、検索、判断、分析文、出典を同じ応答へ委ねていました。
+
+```text
+Bubble
+  → OpenAI API + Web Search
+  → Detail
+```
+
+この方式では、検索方向が1回のモデル判断に依存し、個別のClaimに対する支持・反証や、複数記事が同じ原典に依存しているかを区別できませんでした。
+
+### After（Implemented）
+
+```text
+Bubble
+  → Query Fan-out
+  → 4方向のWeb Search
+  → Evidence Collection / Deduplication
+  → Claim Extraction
+  → Claim Verification
+  → Independent Source Analysis
+  → Contradiction Detection
+  → Confidence Calculation
+  → OpenAI Synthesis
+  → Detail
+```
+
+階層生成は既存方式を維持し、各バブルの遅延詳細生成だけをこのパイプラインへ変更しています。検索結果の整理と検証を終えてから、Web Search toolを持たない最終synthesisへ渡します。最終出力は従来の`analysis`と`sources`を維持し、内部メタデータを`bubble.detailResearch`へ保存します。
+
+### Query Fan-out
+
+バブル名と所属カテゴリから、次の4クエリをOpenAI呼び出し前にローカルで確定します。
+
+- `SUPPORT`: 効果、根拠、実証など、対象を支持・確認する資料
+- `CONTRADICT`: 批判、反証、限界、異なる結果
+- `PRIMARY`: 政府、論文、公式発表、統計、原調査
+- `CONTEXT`: 定義、背景、統計、時系列
+
+4検索は最大2件ずつ並列実行します。各検索は最大3候補、重複除去後のEvidenceは最大8件です。Responses APIの`web_search_call.action.sources`に実在しないモデル出力URLは採用しません。
+
+### Claim Verification
+
+Evidenceから最大8件の検証可能なClaimへ分解し、各sourceがそのClaimを`supporting`、`contradicting`、`uncertain`のどれとして扱うかをEvidenceの抜粋に基づいて整理します。検証応答がEvidenceに存在しないsource IDを返した場合は除外します。
+
+Claimの状態は次のように決定します。
+
+- `mixed`: 異なる独立source groupから支持と反証が1件以上ある
+- `supporting`: 反証がなく、支持する独立source groupが2件以上ある
+- `contradicting`: 支持がなく、反証する独立source groupが2件以上ある
+- `uncertain`: 上記の根拠数を満たさない
+
+### Independent Source
+
+canonical URL、正規化した抜粋のcontent hash、同一domain、original / parent / cited source URLを使って依存関係をまとめます。同じ原典を引用する記事や同じ内容の転載を、単純に複数の独立証拠として数えません。引用関係を取得できない場合は`independenceEstimated: true`として、推定であることを保持します。
+
+### Confidence
+
+`confidence`は「そのClaimが正しい確率」ではありません。今回収集したEvidenceが、Claimの検証状態をどの程度説明できるかを示すEvidence充実度スコアです。
+
+- 独立source数: 35%
+- 複数sourceによる照合: 25%
+- 一次資料の存在: 15%
+- 4検索意図の網羅: 15%
+- 抜粋・日付・source typeのメタデータ品質: 10%
+
+失敗した検索意図ごとに減点し、情報源の独立性をすべて推定している場合も減点します。`uncertain`のconfidenceは最大0.49です。計算に使った各要素は`verification.factors`へ保存されるため、固定値やモデルの自己申告には依存しません。
+
+### Contradiction Detection
+
+同一Claimに対する支持と反証が異なる独立source groupから確認された場合、`detailResearch.contradictions`へ両方のsource IDを保持します。最終synthesisには矛盾を消さず、「情報源によって見解が分かれている」ことを必要な分析セクションへ反映するよう制約しています。
+
+### Perspective
+
+`detailResearch.perspective`は、収集した独立source groupをsupport、neutral、contradictへ集計します。この値は世論や社会全体の割合ではなく、今回の検索で取得できたEvidence内の観点分布です。
+
+### コスト・レイテンシ
+
+- 1バブルあたり最大4検索 + Claim検証1回 + synthesis 1回
+- 検索は45秒、検証とsynthesisは各60秒
+- timeout、network error、408、409、429、5xxだけを各段階1回再試行
+- バブル群内の同時調査は最大2バブル
+- 同一調査は15分、最大50件のページメモリキャッシュと進行中Promiseを共有
+
+一部検索に失敗しても取得済みEvidenceで処理を続け、confidenceを減点して`partial`とします。synthesisに失敗してもEvidenceと検証メタデータは保持します。Evidenceが0件の場合は既定分析を表示し、調査状態を`error`にします。
+
+### Limitations
+
+- Web検索結果や検索先ページ自体に誤りが含まれる可能性があります。
+- 引用・転載関係を取得できない場合があり、情報源の独立性を完全には判定できません。
+- Claim抽出、source stance、矛盾分類にはLLMによる誤りがあり得ます。
+- confidenceは真実性の保証や正しさの確率ではありません。
+- 検索時点や検索エンジンの状態によって結果が変わります。
+- paywall、robots、動的ページなどにより本文抜粋や日付を取得できない場合があります。
+- ブラウザからOpenAI APIを直接呼ぶプロトタイプであり、共有キーを使う本番構成には適しません。
+
+### Future Improvements
+
+- APIキーをブラウザへ渡さないバックエンドプロキシ
+- 共有キャッシュと利用量制御
+- public suffixに基づく組織domain判定と、より精密な引用グラフ
+- 評価用データセットによるClaim分類・confidence係数の継続検証
+- 検証Claimと矛盾の詳細を閲覧できる専用UI
+
 ## APIとデータの挙動
 
 - OpenAI Responses APIの`web_search`ツールで公開Web情報を検索します。
@@ -101,8 +207,8 @@ npx serve dist
 - バブル未選択時もOrbitControlsのズームを使用できます。ズームインでバブルの近接距離へ入った場合、またはバブルをクリックした場合だけ、そのバブルの個別画面へ遷移します。ドラッグやズームアウトでは個別画面へ遷移しません。rootを含む全カテゴリでカメラズームは有効です。
 - カテゴリ移動はナビゲーションスタックで管理し、`parentId`・`childId`が続く限り3階層を超えて任意の深さへ移動できます。
 - 各バブル群は2〜5個を生成し、階層生成の出力を軽量化します。正常化後はバブル同士が重ならないよう位置を分離します。
-- バブル群へ遷移すると、そのバブル群の各バブルについて割合、形成史、構成層、反対派からの批判、検索ソースの生成を開始します。APIが均一なsizeを返した場合は、バブル名・説明から再現可能な推定重みを作り、占有率が一律にならないよう合計100%へ正規化します。分析要求は一時的なHTTPエラー、空応答、JSON不正、タイムアウトを最大3回再試行し、詳細解析画面には生成中・完了・失敗の状態を表示します。
-- root・central・leafの各段階は最大2回、1回あたり最大90秒待機します。分析生成もバブルごとに最大60秒待機し、最大3回試行します。Web Searchの検索コンテキストは`medium`、推論負荷は`low`に設定しています。
+- バブル群へ遷移すると、その群の各バブルについてEvidence収集・Claim検証・統合分析を開始します。APIが均一なsizeを返した場合は、バブル名・説明から再現可能な推定重みを作り、占有率が一律にならないよう合計100%へ正規化します。詳細解析画面には生成中・完了・部分完了・失敗の状態を表示します。
+- root・central・leafの各段階は最大2回、1回あたり最大90秒待機します。詳細調査の検索は45秒、Claim検証とsynthesisは各60秒待機し、一時的な失敗だけを1回再試行します。Web Searchの検索コンテキストは`medium`、推論負荷は`low`に設定しています。
 - 各段階のStructured Outputsが未完了、JSON解析に失敗、または親ID・親バブルID・level・バブル数が不正の場合は、その段階だけを再試行します。下位カテゴリが揃わない場合はテンプレート補完せず、API生成全体を固定DBへフォールバックします。
 - バブル数超過や不正な階層は`API_INVALID_BUBBLE_COUNT`または`API_INVALID_UNIVERSE`として記録します。生成中は各段階の親コンテキストを正規の接続キーとして厳密に照合し、親バブル欠落・共有・level不一致は該当するrootバブルまたはcentralバブルの段階だけを再生成します。
 - API応答の各groupは`level`（`root`・`central`・`leaf`）と`parentBubbleId`を持ちます。宣言された`parentId`・`childId`が誤っていても、対応する親バブルが一意に解決できる場合は実在するIDへ修正してから検証します。

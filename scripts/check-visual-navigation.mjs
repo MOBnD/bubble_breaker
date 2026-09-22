@@ -4,7 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const [scene, animation, events, audio, indexHtml, styles, buildScript, apiSource] = await Promise.all([
+const [scene, animation, events, audio, indexHtml, styles, buildScript, apiSource, researchSource] = await Promise.all([
     readFile(path.join(root, 'src', 'js', 'scene.js'), 'utf8'),
     readFile(path.join(root, 'src', 'js', 'animation.js'), 'utf8'),
     readFile(path.join(root, 'src', 'js', 'events.js'), 'utf8'),
@@ -12,7 +12,8 @@ const [scene, animation, events, audio, indexHtml, styles, buildScript, apiSourc
     readFile(path.join(root, 'src', 'index.html'), 'utf8'),
     readFile(path.join(root, 'src', 'styles.css'), 'utf8'),
     readFile(path.join(root, 'scripts', 'build.mjs'), 'utf8'),
-    readFile(path.join(root, 'src', 'js', 'api.js'), 'utf8')
+    readFile(path.join(root, 'src', 'js', 'api.js'), 'utf8'),
+    readFile(path.join(root, 'src', 'js', 'research.js'), 'utf8')
 ]);
 
 const shapeMatch = scene.match(/const GALAXY_SHAPE_NAMES\s*=\s*\[([^\]]+)\]/);
@@ -62,6 +63,9 @@ assert.doesNotMatch(scene, /const horizon = new THREE\.Mesh/, 'the enclosing wir
 assert.match(scene, /function updateAutomaticBubbleApproach\(\)/, 'automatic bubble proximity handling should exist');
 assert.match(scene, /function updateAnalysisGenerationStatus\(\)/, 'analysis generation status should be visible');
 assert.match(scene, /stateName === 'loading'/, 'loading analysis should be represented in the UI');
+assert.match(scene, /stateName === 'partial'/, 'partial research results should be represented in the UI');
+assert.match(indexHtml, /src="\.\/js\/research\.js"/, 'the evidence research module should load before the API layer');
+assert.match(apiSource, /window\.BubbleResearch\.runBubbleResearch/, 'bubble analysis should use the evidence research pipeline');
 assert.match(styles, /\.command-console\s*\{[\s\S]*?max-height: calc\(100vh - 96px\)/, 'Cosmic Control should be limited to the viewport height');
 assert.match(styles, /\.command-console\s*\{[\s\S]*?overflow-y: auto/, 'Cosmic Control should scroll vertically');
 assert.match(styles, /\.command-console\s*\{[\s\S]*?overscroll-behavior: contain/, 'Cosmic Control scrolling should not chain to the scene');
@@ -81,9 +85,8 @@ assert.match(scene, /'evaluation': '反対派からの批判'/, 'evaluation deta
 assert.match(indexHtml, /反対派からの批判/, 'analysis card should be labelled as opposition criticism');
 assert.match(indexHtml, /反対派の主な批判/, 'analysis card should expose the main criticism label');
 assert.doesNotMatch(indexHtml, /内部からの視点\(自認\)|外部からの視点\(印象\)/, 'analysis card should not use the old inside/outside evaluation labels');
-assert.match(apiSource, /evaluationは「内と外からの評価」ではなく/, 'analysis generation should request opposition criticism');
-assert.match(apiSource, /反対派の主な批判/, 'analysis generation should define the opposition summary');
-assert.match(apiSource, /藁人形論法/, 'analysis generation should avoid fabricated strawman criticism');
+assert.match(researchSource, /evaluationは反対派・異なる立場/, 'analysis synthesis should request opposition criticism');
+assert.match(researchSource, /藁人形論法/, 'analysis synthesis should avoid fabricated strawman criticism');
 assert.match(apiSource, /このバブルに対する反対派の批判/, 'fallback analysis should describe opposition criticism');
 assert.match(scene, /function createAnalysisProbeVisual\(/, 'analysis loading should use a surface probe');
 assert.match(scene, /window\.markBubbleAnalysisComplete = function/, 'analysis completion should notify the bubble scene');

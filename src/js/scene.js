@@ -2062,13 +2062,15 @@
             const stateName = state.bubbleData && state.bubbleData.analysisStatus;
             const loading = stateName === 'loading';
             const failed = stateName === 'error';
-            const message = loading ? '分析生成中…' : (failed ? '分析生成に失敗しました。再試行できます' : '');
+            const partial = stateName === 'partial';
+            const message = loading ? '分析生成中…' : (failed ? '分析生成に失敗しました。再試行できます' : (partial ? '一部の検索・検証結果から表示しています' : ''));
             [status, detailStatus].forEach(element => {
                 if (!element) return;
                 element.innerText = message;
                 element.classList.toggle('hidden', !message);
                 element.classList.toggle('text-red-200', failed);
-                element.classList.toggle('text-cyan-200', !failed);
+                element.classList.toggle('text-cyan-200', !failed && !partial);
+                element.classList.toggle('text-amber-200', partial);
             });
             const evaluation = state.bubbleData && state.bubbleData.analysis
                 ? state.bubbleData.analysis.evaluation || DEFAULT_ANALYSIS.evaluation

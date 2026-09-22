@@ -13,6 +13,7 @@ BubbleBreakerは、入力された意見を起点に、Web Searchで調査した
 - `src/index.html`: CDN、画面DOM、ローカルスクリプトの読み込み順を定義するHTMLシェル
 - `src/styles.css`: 画面レイヤー、パネル、ラベル、遷移、スクロールバーのスタイル
 - `src/js/data.js`: 固定DB、固定フォールバック、現在使用する `activeDB`
+- `src/js/research.js`: Query Fan-out、Evidence正規化、Claim検証、情報源独立性、矛盾、confidence、最終synthesis
 - `src/js/api.js`: OpenAIの階層生成、応答の解析・正規化・検証、バブル分析
 - `src/js/state.js`: 画面状態、探索モード、ダイブ状態、API入力状態
 - `src/js/audio.js`: 効果音、BGM、音量、トラック遷移
@@ -54,7 +55,7 @@ root   親カテゴリ
        └ leaf  下位カテゴリ
 ```
 
-各カテゴリは、`id`、`title`、`type`、`parentId`、`parentBubbleId`、`desc`、`bubbles` を持ちます。各バブルは、`id`、`name`、`size`、`color`、`htmlColor`、`pos`、`childId`、`desc`、`analysis`、`sources` などを持ちます。
+各カテゴリは、`id`、`title`、`type`、`parentId`、`parentBubbleId`、`desc`、`bubbles` を持ちます。各バブルは、`id`、`name`、`size`、`color`、`htmlColor`、`pos`、`childId`、`desc`、`analysis`、`sources` などを持ちます。詳細調査後は`detailResearch`を追加し、実行クエリ、正規化したEvidence、Claim、検証状態、矛盾、情報源独立性、観点分布、制限事項をページメモリ内に保持します。
 
 - rootの `parentId` と `parentBubbleId` は `null`
 - centralの `parentId` はrootのID
@@ -80,9 +81,15 @@ API生成に失敗した場合は、テンプレートで不足カテゴリを�
 4. クライアント側で各段階のlevel、parentId、parentBubbleId、childId、対応数、バブル数を検証してから全体を正規化する。
 5. 失敗した段階だけを再試行し、最終的に不完全ならテンプレート補完をせず固定DBへフォールバックする。
 
-入力確定後はダイブ演出とAPI処理を並行します。`loadGroup` でバブル群へ入った時点で、その群の全バブルについて分析要求を開始します。分析要求はバブル単位で重複排除され、最大同時実行数を制限します。分析失敗時もカテゴリ探索は継続し、既定分析を表示できます。
+入力確定後はダイブ演出とAPI処理を並行します。`loadGroup` でバブル群へ入った時点で、その群の全バブルについて詳細調査を開始します。要求はバブル単位で重複排除し、同時に最大2バブルを処理します。
 
-分析は概要、形成史、構成層・情報源、反対派からの批判を持ちます。各項目は要約、インサイト、メトリクスを含み、利用可能なWeb出典を保持します。反対派からの批判は、対象バブルと異なる立場・利害関係者が問題視する点を、公開情報に基づいて整理します。
+詳細調査では、バブル名と所属カテゴリからSUPPORT、CONTRADICT、PRIMARY、CONTEXTの4クエリをローカルで確定し、Responses APIのWeb Searchを最大2件並列で実行します。Structured Outputが返したURLは`web_search_call.action.sources`と照合し、未参照URLを除外します。canonical URLとcontent hashで重複を除去し、最大8 Evidenceへまとめます。
+
+Evidenceから最大8 Claimを抽出し、各sourceをsupporting、contradicting、uncertainへ分類します。支持と反証が異なる独立source groupに存在するClaimはmixedとし、矛盾を両方のsource参照とともに保持します。同一domain、同一content hash、original / parent / cited source関係は同じ独立groupとして扱い、判定材料がない場合は推定フラグを付けます。
+
+confidenceは真実である確率ではなく、独立source数、複数source照合、一次資料、検索意図網羅、メタデータ品質から計算するEvidence充実度です。検索失敗と推定独立性は減点し、uncertainは0.49以下に制限します。最終synthesisはWeb Search toolを持たず、検証済みEvidenceだけから既存の概要、形成史、構成層・情報源、反対派からの批判を生成します。
+
+一部検索に失敗した場合は残ったEvidenceを利用してpartialとし、synthesisに失敗してもEvidenceを保持します。Evidenceが0件の場合はerrorとして既定分析を表示します。キャッシュは15分・最大50件のページメモリだけに保持し、APIキー、Evidence、検索結果をlocalStorageへ保存しません。
 
 ## 6. Three.js空間
 

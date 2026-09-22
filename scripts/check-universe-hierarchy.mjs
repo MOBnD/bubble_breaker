@@ -30,7 +30,7 @@ const context = {
     fetch
 };
 vm.createContext(context);
-vm.runInContext(`${dataSource}\n${apiSource}\nglobalThis.__bubbleBreakerTest = { normalizeGeneratedUniverse, normalizeFallbackUniverse, normalizeBubblePercentages, compactHierarchyBubbleName, buildOpenAIRootRequest, buildOpenAICentralGroupRequest, buildOpenAILeafGroupRequest, buildOpenAIBubbleAnalysisRequest, requestBubbleAnalysis, requestBubbleGroupAnalyses };`, context);
+vm.runInContext(`${dataSource}\n${apiSource}\nglobalThis.__bubbleBreakerTest = { normalizeGeneratedUniverse, normalizeFallbackUniverse, normalizeBubblePercentages, compactHierarchyBubbleName, buildOpenAIRootRequest, buildOpenAICentralGroupRequest, buildOpenAILeafGroupRequest, requestBubbleAnalysis, requestBubbleGroupAnalyses };`, context);
 
 const bubble = (id, childId = null) => ({
     id, name: id, size: 1, color: 0x4488ff, htmlColor: '#4488ff',
@@ -73,59 +73,55 @@ assert.match(nonEntryCentralRequest.input[1].content[0].text, /entryBubbleIdは�
 const leafRequest = context.__bubbleBreakerTest.buildOpenAILeafGroupRequest('テスト意見', { id: 'central_test', title: '中央カテゴリ' }, bubble('parent_a'));
 assert.equal(leafRequest.text.format.name, 'bubble_universe_leaf_group', 'leaf schema should be used');
 assert.match(leafRequest.input[1].content[0].text, /parent_a/);
-const analysisRequest = context.__bubbleBreakerTest.buildOpenAIBubbleAnalysisRequest(bubble('analysis_target'), { title: 'テストカテゴリ' }, 'テスト意見');
-assert.equal(analysisRequest.reasoning.effort, 'low', 'analysis generation should use low reasoning effort');
-assert.equal(analysisRequest.tools[0].search_context_size, 'medium', 'analysis generation should keep medium web search context');
-assert.equal(analysisRequest.text.format.name, 'bubble_analysis', 'analysis schema should be used');
-
-let analysisFetchCount = 0;
+let analysisResearchCount = 0;
 const analysisContext = {
     ...context,
-    window: { __OPENAI_API_KEY__: 'test-key', __OPENAI_MODEL__: 'test' },
-    fetch: async () => {
-        analysisFetchCount += 1;
-        return {
-            ok: true,
-            status: 200,
-            headers: { get() { return 'analysis-request'; } },
-            async json() { return { output_text: JSON.stringify({ analysis: {}, sources: [] }) }; }
-        };
-    }
+    window: { __OPENAI_API_KEY__: 'test-key', __OPENAI_MODEL__: 'test' }
 };
 vm.createContext(analysisContext);
 vm.runInContext(`${dataSource}\n${apiSource}\nglobalThis.__bubbleBreakerTest = { requestBubbleAnalysis, requestBubbleGroupAnalyses };`, analysisContext);
+analysisContext.window.BubbleResearch = {
+    async runBubbleResearch() {
+        analysisResearchCount += 1;
+        await Promise.resolve();
+        return {
+            status: 'complete', analysis: {}, sources: [],
+            detailResearch: { status: 'complete', claims: [], contradictions: [], sources: [], queries: [], limitations: [] }
+        };
+    }
+};
 const analysisBubble = bubble('lazy_analysis_target');
 const analysisGroup = { id: 'analysis_group', title: '分析カテゴリ' };
 await Promise.all([
     analysisContext.__bubbleBreakerTest.requestBubbleAnalysis(analysisBubble, analysisGroup, 'テスト意見'),
     analysisContext.__bubbleBreakerTest.requestBubbleAnalysis(analysisBubble, analysisGroup, 'テスト意見')
 ]);
-assert.equal(analysisFetchCount, 1, 'the same bubble should not trigger duplicate analysis requests');
+assert.equal(analysisResearchCount, 1, 'the same bubble should not trigger duplicate research pipelines');
 assert.equal(analysisBubble.analysisStatus, 'ready', 'lazy analysis should update the bubble status');
+assert.equal(analysisBubble.detailResearch.status, 'complete', 'verified research metadata should stay attached to the bubble');
 const groupAnalysisBubbles = [bubble('group_analysis_a'), bubble('group_analysis_b'), bubble('group_analysis_c')];
 await analysisContext.__bubbleBreakerTest.requestBubbleGroupAnalyses({ id: 'group_analysis', title: '分析対象群', bubbles: groupAnalysisBubbles }, 'テスト意見');
-assert.equal(analysisFetchCount, 4, 'entering a bubble group should start analysis for every bubble');
+assert.equal(analysisResearchCount, 4, 'entering a bubble group should start research for every bubble');
 assert.ok(groupAnalysisBubbles.every(item => item.analysisStatus === 'ready'), 'all group bubble analyses should complete');
-let analysisRetryFetchCount = 0;
-const analysisRetryContext = {
+const partialAnalysisContext = {
     ...context,
-    window: { __OPENAI_API_KEY__: 'test-key', __OPENAI_MODEL__: 'test' },
-    fetch: async () => {
-        analysisRetryFetchCount += 1;
-        if (analysisRetryFetchCount === 1) {
-            return { ok: false, status: 503, headers: { get() { return 'analysis-retry-request'; } }, async text() { return '{"error":"temporary"}'; } };
-        }
-        return { ok: true, status: 200, headers: { get() { return 'analysis-retry-success'; } }, async json() {
-            return { output: [{ type: 'message', content: [{ type: 'output_text', text: JSON.stringify({ analysis: {}, sources: [] }) }] }] };
-        } };
+    window: { __OPENAI_API_KEY__: 'test-key', __OPENAI_MODEL__: 'test' }
+};
+vm.createContext(partialAnalysisContext);
+vm.runInContext(`${dataSource}\n${apiSource}\nglobalThis.__bubbleBreakerTest = { requestBubbleAnalysis };`, partialAnalysisContext);
+partialAnalysisContext.window.BubbleResearch = {
+    async runBubbleResearch() {
+        return {
+            status: 'partial', analysis: null,
+            sources: [{ sourceId: 'source-1', title: 'Evidence', url: 'https://example.com/evidence', sourceType: 'NEWS' }],
+            detailResearch: { status: 'partial', claims: [], contradictions: [], sources: [], queries: [], limitations: ['一部失敗'] }
+        };
     }
 };
-vm.createContext(analysisRetryContext);
-vm.runInContext(`${dataSource}\n${apiSource}\nglobalThis.__bubbleBreakerTest = { requestBubbleAnalysis };`, analysisRetryContext);
-const retryBubble = bubble('retry_analysis_target');
-await analysisRetryContext.__bubbleBreakerTest.requestBubbleAnalysis(retryBubble, analysisGroup, 'テスト意見');
-assert.equal(analysisRetryFetchCount, 2, 'a failed analysis should be retried');
-assert.equal(retryBubble.analysisStatus, 'ready', 'a successful retry should restore ready status');
+const partialBubble = bubble('partial_analysis_target');
+await partialAnalysisContext.__bubbleBreakerTest.requestBubbleAnalysis(partialBubble, analysisGroup, 'テスト意見');
+assert.equal(partialBubble.analysisStatus, 'partial', 'partial Evidence should remain usable without reporting full success');
+assert.equal(partialBubble.sources.length, 1, 'partial Evidence sources should remain attached to the bubble');
 const valid = normalize({ groups, entryGroupId: 'central1', entryBubbleId: 'entry' });
 assert.equal(Object.keys(valid.db).length, 7, 'valid three-level hierarchy should be accepted');
 const topologyGroups = structuredClone(groups).filter(group => group.level !== 'leaf');
