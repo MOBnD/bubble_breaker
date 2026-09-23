@@ -43,8 +43,8 @@
                 <div class="bubble-visual-control">
                     <span class="bubble-visual-label">BUBBLE FORM / VISUAL MODE</span>
                     <div class="bubble-visual-options" role="group" aria-label="バブル表示デザイン">
-                        <button type="button" data-bubble-visual-mode="classic" aria-pressed="true">標準</button>
-                        <button type="button" data-bubble-visual-mode="network" aria-pressed="false">装飾あり</button>
+                        <button type="button" data-bubble-visual-mode="network" aria-pressed="true">装飾あり</button>
+                        <button type="button" data-bubble-visual-mode="classic" aria-pressed="false">装飾なし</button>
                         <button type="button" data-bubble-visual-mode="deepSea" aria-pressed="false">深海</button>
                         <button type="button" data-bubble-visual-mode="data" aria-pressed="false">データ空間</button>
                     </div>
@@ -55,6 +55,13 @@
                         <option value="data">データ空間</option>
                     </select>
                 </label>
+                <div class="view-mode-control">
+                    <span class="bubble-visual-label">EXPLORATION VIEW</span>
+                    <div class="view-mode-options" role="group" aria-label="探索表示モード">
+                        <button type="button" data-view-mode="3d" aria-pressed="true">3D</button>
+                        <button type="button" data-view-mode="2d" aria-pressed="false">2D</button>
+                    </div>
+                </div>
                 <label class="theme-select-row">BGMの選択
                     <select id="bgm-type" class="bg-black/60 rounded px-1 py-0.5">
                         <option value="none">なし</option>
@@ -70,9 +77,9 @@
         
         <!-- ヘッダー -->
         <div class="brand-hud absolute top-6 left-6 flex flex-col gap-1 z-50 pointer-events-none">
-            <h1 class="text-2xl font-bold tracking-widest text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-purple-500">
-                BubbleBreaker
-            </h1>
+            <button id="btn-open-about" class="brand-title-button pointer-events-auto" type="button" aria-haspopup="dialog" aria-controls="about-overlay">
+                <span class="text-2xl font-bold tracking-widest text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-purple-500">BubbleBreaker</span>
+            </button>
             <p class="text-xs text-gray-400">君の世界は、編集されている / NAVIGATE THE BUBBLE WEB</p>
             <div id="toast" class="mt-2 glass-panel px-4 py-2 rounded-lg text-xs text-blue-200 opacity-0 transition-opacity duration-500">
                 メッセージ
@@ -111,6 +118,108 @@
             </div>
         </div>
 
+        <section id="about-overlay" class="about-overlay" role="dialog" aria-modal="true" aria-labelledby="about-title" hidden>
+            <div class="about-stars" aria-hidden="true"></div>
+            <button id="btn-close-about" class="about-close" type="button" aria-label="サービス紹介を閉じる">← 探索へ戻る</button>
+            <div class="about-scroll">
+                <header class="about-header">
+                    <span class="about-kicker">BUBBLE BREAKER / SERVICE GUIDE</span>
+                    <h2 id="about-title">フィルターバブルを脱し、<br>本来のインターネットを自由に旅する</h2>
+                    <p>ひとつの意見から、比較・反対・背景・意外な接続まで。情報を「答え」ではなく、根拠のある宇宙として探索するサービスです。</p>
+                </header>
+                <section class="about-hero">
+                    <div>
+                        <span class="about-section-number">00 / MISSION</span>
+                        <h3>検索結果の列を、探索できる宇宙へ。</h3>
+                        <p>Bubble Breakerは、入力した意見を起点に三階層のバブル群を形成します。バブルを潜り、戻り、根拠を読み比べることで、自分の現在地と、まだ見えていなかった隣の世界を同じ地図の上で確かめられます。</p>
+                    </div>
+                    <div class="about-orbit" aria-hidden="true"><span></span><i></i><b></b></div>
+                </section>
+
+                <section class="about-section">
+                    <div class="about-section-heading">
+                        <span class="about-section-number">01 / THE PROBLEM</span>
+                        <h3>フィルターバブルは、見えない境界線。</h3>
+                        <p>検索履歴や推薦は便利である一方、似た関心・似た立場を繰り返し提示しやすくします。問題は「誤った情報だけを見る」ことではなく、比較できたはずの情報が視界に入らず、世界の全体像を小さく捉えてしまうことです。</p>
+                    </div>
+                    <div class="about-loop" aria-label="情報の偏りが強まる循環">
+                        <span>過去の選択</span><i>→</i><span>似た推薦</span><i>→</i><span>似た情報を閲覧</span><i>→</i><span>関心が固定</span><i>↺</i>
+                    </div>
+                </section>
+
+                <section class="about-compare">
+                    <article>
+                        <span>CONVENTIONAL FEED</span>
+                        <h3>近い答えへ収束する</h3>
+                        <div class="about-mini-map is-linear"><b>入力</b><i></i><b>最適化された結果</b><i></i><b>似た次の結果</b></div>
+                        <p>順位づけされた一本の列では、採用されなかった観点や、情報同士の関係を把握しにくくなります。</p>
+                    </article>
+                    <article>
+                        <span>BUBBLE BREAKER</span>
+                        <h3>複数の方向へ分岐する</h3>
+                        <div class="about-mini-map is-network"><b>入力</b><i></i><b>比較</b><b>反対</b><b>背景</b><b>接続</b></div>
+                        <p>近い情報だけでなく、異なる立場と背景を同じ空間に置き、どこへ進むかをユーザー自身が選べます。</p>
+                    </article>
+                </section>
+
+                <section class="about-section about-pipeline-section">
+                    <div class="about-section-heading">
+                        <span class="about-section-number">02 / HOW IT COLLECTS</span>
+                        <h3>生成する前に、探す方向を決める。</h3>
+                        <p>OpenAIの内部知識だけで詳細を作らず、先に検索経路と情報源を設計し、収集したEvidenceの範囲で整理・説明します。</p>
+                    </div>
+                    <div class="about-pipeline" aria-label="Bubble Breakerの情報収集フロー">
+                        <div class="about-flow-node is-origin"><small>START</small><strong>ユーザーの意見</strong></div>
+                        <div class="about-flow-arrow">↓</div>
+                        <div class="about-flow-node"><small>ANALYZE</small><strong>意見と現在地を分析</strong><span>テーマ・関連構造・階層を計画</span></div>
+                        <div class="about-flow-arrow">↓</div>
+                        <div class="about-flow-node"><small>DISCOVER</small><strong>関連テーマをWeb Search</strong><span>ルート → 中央 → 葉の三段階で探索</span></div>
+                        <div class="about-flow-arrow">↓</div>
+                        <div class="about-flow-split">
+                            <span>支持 SUPPORT</span><span>反証 CONTRADICT</span><span>一次 PRIMARY</span><span>背景 CONTEXT</span>
+                        </div>
+                        <div class="about-flow-arrow">↓ 複数検索</div>
+                        <div class="about-flow-node"><small>EVIDENCE</small><strong>収集・正規化・重複除去</strong><span>URL、出典、日時、抜粋、検索意図を保持</span></div>
+                        <div class="about-flow-arrow">↓</div>
+                        <div class="about-flow-node"><small>VERIFY</small><strong>Claimを比較・検証</strong><span>支持／矛盾／不確実、独立情報源、confidenceを分析</span></div>
+                        <div class="about-flow-arrow">↓</div>
+                        <div class="about-flow-node"><small>SYNTHESIZE</small><strong>Evidenceに基づきOpenAIが統合</strong><span>根拠外の事実を検索済みとして補完しない</span></div>
+                        <div class="about-flow-arrow">↓</div>
+                        <div class="about-flow-node is-result"><small>EXPLORE</small><strong>三階層のBubble Universe</strong><span>説明・関係・出典を辿って自由に探索</span></div>
+                    </div>
+                </section>
+
+                <section class="about-section">
+                    <div class="about-section-heading">
+                        <span class="about-section-number">03 / HOW BUBBLES FORM</span>
+                        <h3>単語ではなく、関係がバブルになる。</h3>
+                        <p>直接の対象だけでなく、比較対象、対立、文化・歴史、上位概念と下位概念を、入力との関連性を保ったまま配置します。</p>
+                    </div>
+                    <div class="about-hierarchy" aria-label="三階層バブル構造">
+                        <div><small>ROOT</small><strong>大きな情報環境</strong><span>社会・文化・制度などの全体像</span></div>
+                        <i>contains</i>
+                        <div><small>CENTRAL</small><strong>意味のまとまり</strong><span>比較・論争・文脈・主要テーマ</span></div>
+                        <i>contains</i>
+                        <div><small>LEAF</small><strong>具体的な論点</strong><span>個別の対象・事例・立場</span></div>
+                    </div>
+                </section>
+
+                <section class="about-grid">
+                    <article><span>04 / CONNECTION</span><h3>なぜつながるかを残す</h3><p>近い、隣接、遠い、意外な接続を区別し、完全なランダムではなく、Evidenceから後で説明できるつながりを提示します。</p></article>
+                    <article><span>05 / TRANSPARENCY</span><h3>説明と根拠を分離する</h3><p>詳細では出典、主張の支持・矛盾、独立性、不確実性を保持します。confidenceは真実の確率ではなく、今回のEvidenceでの裏付け強度です。</p></article>
+                    <article><span>06 / NAVIGATION</span><h3>潜る、俯瞰する、戻る</h3><p>親バブルの内側に下位世界が存在する三階層構造を、同じ宇宙の中で行き来します。酔いを抑える正面固定の2D表示も選べます。</p></article>
+                    <article><span>07 / MEMORY</span><h3>探索を持ち帰る</h3><p>三階層のバブル群と生成済み詳細をローカル保存し、意見入力画面から過去の探索宇宙を復元できます。</p></article>
+                </section>
+
+                <section class="about-outcome">
+                    <span class="about-section-number">08 / WHAT CHANGES</span>
+                    <h3>「与えられた答えを読む」から、<br>「情報環境を自分で旅する」へ。</h3>
+                    <p>Bubble Breakerは正解を一つに決める道具ではありません。自分の視界に何が入り、何が欠け、どの根拠がどの主張を支えているかを確かめながら、次の一歩を自分で選ぶための探索装置です。</p>
+                    <strong>BREAK THE FEED. EXPLORE THE WEB.</strong>
+                </section>
+            </div>
+        </section>
+
         <!-- ② バブル群画面 -->
         <div id="screen-group" class="exploration-screen screen-container screen-hidden flex justify-end z-40">
             <div id="panel-group" class="exploration-panel glass-panel rounded-xl relative pointer-events-auto">
@@ -144,6 +253,7 @@
                     <button id="btn-open-input" type="button" class="group-input-navigation-button">← 意見入力・保存履歴へ</button>
                 </div>
             </div>
+            <button class="exploration-panel-reopen pointer-events-auto" data-reopen-panel="panel-group" type="button" aria-controls="panel-group">観測パネルを開く</button>
         </div>
 
         <!-- ③ 個別バブル画面 -->
@@ -179,24 +289,6 @@
                         </div>
                         <div id="single-group-list" class="group-composition-fallback" aria-live="polite"></div>
                     </div>
-                    <div class="panel-section single-position-card">
-                        <div class="text-xs text-blue-300 font-semibold mb-2">立ち位置解析</div>
-                        <div class="text-sm text-gray-300">あなたが観測しているこの意見は、カテゴリ全体の</div>
-                        <div class="text-4xl font-bold text-white my-2"><span id="single-percent" class="text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-green-400">--</span><span class="text-lg ml-1">%</span><span id="single-estimated" class="hidden text-xs ml-2 text-yellow-300 align-middle">推定</span></div>
-                        <div class="text-sm text-gray-300">を占めるバブルの中にいます。</div>
-                    </div>
-                    <div class="panel-section panel-meter-card bg-black/40 rounded-lg p-4 border border-gray-700">
-                        <div class="text-xs text-gray-400 mb-2 flex justify-between">
-                            <span>偏り度メーター</span>
-                            <span class="text-red-400 font-bold">High</span>
-                        </div>
-                        <div class="w-full bg-gray-800 rounded-full h-3 mb-1 overflow-hidden relative">
-                            <div id="bias-meter" class="meter-gradient h-full w-4/5 rounded-full relative">
-                                <div class="absolute right-0 top-1/2 transform translate-x-1/2 -translate-y-1/2 w-4 h-4 bg-white rounded-full shadow-[0_0_10px_white]"></div>
-                            </div>
-                        </div>
-                        <p class="text-[10px] text-gray-500 mt-2">フィルターバブルに陥っている可能性が高い領域です。</p>
-                    </div>
                     <div class="panel-section panel-actions flex flex-col gap-3 mt-4">
                         <button id="btn-analyze" class="w-full bg-blue-600/80 hover:bg-blue-500 text-white font-bold py-3 px-4 rounded-lg transition-colors border border-blue-400/50 shadow-[0_0_15px_rgba(59,130,246,0.3)] cursor-pointer">
                             このバブルを詳しく解析する 🔍
@@ -213,6 +305,7 @@
                     <button id="btn-open-input-single" type="button" class="group-input-navigation-button">← 意見入力・保存履歴へ</button>
                 </div>
             </div>
+            <button class="exploration-panel-reopen pointer-events-auto" data-reopen-panel="panel-single" type="button" aria-controls="panel-single">観測パネルを開く</button>
         </div>
 
         <!-- ④ 個別バブル解析画面 -->

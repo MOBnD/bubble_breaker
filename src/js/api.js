@@ -423,6 +423,22 @@
             bubbles.forEach(bubble => { bubble.pos = bubble.pos.map(value => Math.max(-90, Math.min(90, value))); });
         }
 
+        function createLayoutRandom(group) {
+            const source = `${group && group.id || ''}|${group && group.type || ''}|${(group && group.bubbles || []).map(item => item.id).join('|')}`;
+            let seed = 2166136261;
+            for (let index = 0; index < source.length; index++) {
+                seed ^= source.charCodeAt(index);
+                seed = Math.imul(seed, 16777619);
+            }
+            return function nextLayoutRandom() {
+                seed += 0x6D2B79F5;
+                let value = seed;
+                value = Math.imul(value ^ value >>> 15, value | 1);
+                value ^= value + Math.imul(value ^ value >>> 7, value | 61);
+                return ((value ^ value >>> 14) >>> 0) / 4294967296;
+            };
+        }
+
         function arrangeBubblePositions(group) {
             const bubbles = group && Array.isArray(group.bubbles) ? group.bubbles : [];
             if (bubbles.length < 2) return;
@@ -430,45 +446,68 @@
             const type = OPENAI_GROUP_TYPES.includes(group.type) ? group.type : '分散型';
             const lockedIds = [];
             const count = ordered.length;
-            const placeRing = (items, radius, angleOffset = 0, yScale = 0.72) => {
+            const random = createLayoutRandom(group);
+            const randomBetween = (minimum, maximum) => minimum + (maximum - minimum) * random();
+            const angleSeed = randomBetween(0, Math.PI * 2);
+            const placeRing = (items, radius, angleOffset = 0, yScale = 0.72, depth = 5) => {
                 items.forEach((bubble, index) => {
-                    const angle = angleOffset + Math.PI * 2 * index / Math.max(1, items.length);
-                    bubble.pos = [Math.cos(angle) * radius, Math.sin(angle) * radius * yScale, Math.sin(angle * 1.7) * 3];
+                    const angle = angleSeed + angleOffset + Math.PI * 2 * index / Math.max(1, items.length) + randomBetween(-0.16, 0.16);
+                    const localRadius = radius * randomBetween(0.9, 1.11);
+                    bubble.pos = [Math.cos(angle) * localRadius, Math.sin(angle) * localRadius * yScale, Math.sin(angle * 1.7) * depth + randomBetween(-2.4, 2.4)];
                 });
             };
             if (type === '一極集中型') {
                 ordered[0].pos = [0, 0, 0];
                 lockedIds.push(ordered[0].id);
-                placeRing(ordered.slice(1), 22, Math.PI * 0.25);
+                placeRing(ordered.slice(1), 17, Math.PI * 0.25, 0.66, 4);
             } else if (type === '双極対立型') {
-                ordered[0].pos = [-20, 0, 0];
-                if (ordered[1]) ordered[1].pos = [20, 0, 0];
-                placeRing(ordered.slice(2), 16, Math.PI * 0.5, 0.9);
+                ordered[0].pos = [-27, randomBetween(-2, 2), -2];
+                if (ordered[1]) ordered[1].pos = [27, randomBetween(-2, 2), 2];
+                ordered.slice(2).forEach((bubble, index) => {
+                    const side = index % 2 === 0 ? -1 : 1;
+                    const centerX = side * 27;
+                    const angle = angleSeed + index * 1.7 + randomBetween(-0.2, 0.2);
+                    bubble.pos = [centerX + Math.cos(angle) * randomBetween(8, 14), Math.sin(angle) * randomBetween(7, 12), randomBetween(-7, 7)];
+                });
             } else if (type === '多極型') {
-                const poleCount = Math.min(3, count);
-                placeRing(ordered.slice(0, poleCount), 17, Math.PI * 0.5, 0.78);
-                placeRing(ordered.slice(poleCount), 28, 0.1, 0.7);
+                const poleCount = Math.min(count, count >= 7 ? 4 : 3);
+                const poleCenters = Array.from({ length: poleCount }, (_, index) => {
+                    const angle = angleSeed + Math.PI * 2 * index / poleCount;
+                    return [Math.cos(angle) * 21, Math.sin(angle) * 15, (index % 2 ? 1 : -1) * 6];
+                });
+                ordered.forEach((bubble, index) => {
+                    const pole = poleCenters[index % poleCount];
+                    const satelliteIndex = Math.floor(index / poleCount);
+                    const spread = satelliteIndex === 0 ? 0 : randomBetween(6, 11);
+                    const angle = angleSeed + index * 1.37;
+                    bubble.pos = [pole[0] + Math.cos(angle) * spread, pole[1] + Math.sin(angle) * spread, pole[2] + randomBetween(-4, 4)];
+                });
             } else if (type === '階層型') {
                 ordered.forEach((bubble, index) => {
-                    const row = Math.floor(index / 2);
-                    const side = index % 2 === 0 ? -1 : 1;
-                    bubble.pos = [side * (row === 0 ? 0 : 12 + row * 2), 18 - row * 12, row * 3 - 3];
+                    if (index === 0) return;
+                    const row = Math.ceil(index / 2);
+                    const side = index % 2 === 0 ? 1 : -1;
+                    bubble.pos = [side * (11 + row * 4 + randomBetween(-1.5, 1.5)), 25 - row * 14, row * 4 + randomBetween(-3, 3)];
                 });
-                ordered[0].pos = [0, 20, 0];
+                ordered[0].pos = [0, 28, 0];
                 lockedIds.push(ordered[0].id);
             } else if (type === '連鎖型') {
                 ordered.forEach((bubble, index) => {
                     const centered = index - (count - 1) / 2;
-                    bubble.pos = [centered * 12, Math.sin(index * 1.25) * 7, Math.cos(index * 1.1) * 5];
+                    bubble.pos = [centered * randomBetween(13.5, 16), Math.sin(index * 1.18 + angleSeed) * 10, Math.cos(index * 0.92 + angleSeed) * 9];
                 });
             } else {
-                placeRing(ordered, 20, Math.PI * 0.37, 0.78);
+                ordered.forEach((bubble, index) => {
+                    const goldenAngle = index * Math.PI * (3 - Math.sqrt(5)) + angleSeed;
+                    const radius = 13 + Math.sqrt(index + 1) * 10 + randomBetween(-3, 4);
+                    bubble.pos = [Math.cos(goldenAngle) * radius, Math.sin(goldenAngle) * radius * randomBetween(0.64, 0.9), randomBetween(-14, 14)];
+                });
             }
             separateBubblePositions(bubbles, { lockedIds });
             lockedIds.forEach(id => {
                 const bubble = bubbles.find(item => item.id === id);
                 if (bubble && type === '一極集中型') bubble.pos = [0, 0, 0];
-                if (bubble && type === '階層型') bubble.pos = [0, 20, 0];
+                if (bubble && type === '階層型') bubble.pos = [0, 28, 0];
             });
         }
 

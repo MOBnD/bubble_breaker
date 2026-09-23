@@ -10,7 +10,7 @@
         scene.fog = new THREE.FogExp2(0x10182d, 0.0003);
 
         // カメラ（視点）の設定
-        const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 140000);
+        const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.01, 140000);
         
         // レンダラー（描画エンジン）の設定
         const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
@@ -28,7 +28,7 @@
         controls.dampingFactor = 0.05;
         // ホイールは階層移動だけでなく、全カテゴリ共通のカメラズームにも使う。
         controls.enableZoom = true;
-        controls.minDistance = 0.5;
+        controls.minDistance = 0.03;
         controls.maxDistance = 52000;
 
         // 照明の設定
@@ -546,19 +546,12 @@
             }[backgroundTheme];
             scene.background.set(colors.clear);
             scene.fog.color.set(colors.fog);
-            scene.userData.themeFogDensity = colors.density;
-            scene.fog.density = scene.userData.explorationBackgroundClear ? 0 : colors.density;
+            scene.fog.density = colors.density;
             renderer.setClearColor(colors.clear, 1);
             setThemeObjectsVisible(backgroundTheme);
             if (ngc3324Dome) ngc3324Dome.visible = backgroundTheme === 'space' && window.__bubbleBreakerNGC3324Visible !== false;
             return backgroundTheme;
         };
-        window.setExplorationBackgroundClarity = function(active) {
-            scene.userData.explorationBackgroundClear = Boolean(active);
-            scene.fog.density = active ? 0 : (scene.userData.themeFogDensity || 0);
-            return scene.userData.explorationBackgroundClear;
-        };
-
         function softenNGC3324Seam(texture) {
             const source = texture.image;
             if (!source || !source.width || !source.height) return texture;
@@ -720,7 +713,8 @@
                 cosmicRandom(index * 6.1 + entry.respawnCount * 7.7) - 0.5
             ).normalize();
             entry.streak.position.copy(origin);
-            entry.streak.lookAt(origin.clone().add(direction));
+            // 尾はローカル+Zへ伸びるため、+Zを進行方向の反対へ向ける。
+            entry.streak.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), direction.clone().negate());
             entry.direction.copy(direction);
             entry.velocity.copy(direction).multiplyScalar(2.2 + cosmicRandom(index + entry.respawnCount * 2.7) * 2.4);
             entry.life = 2.8 + cosmicRandom(index + entry.respawnCount * 3.9) * 3.2;
@@ -831,8 +825,9 @@
         let currentBubbles = []; // 現在画面に表示されているバブルの配列を保存
         let targetCameraPos = new THREE.Vector3(0, 0, 25);     // カメラが移動する目標地点
         let targetControlTarget = new THREE.Vector3(0, 0, 0);  // カメラが向くべき注視点の目標地点
+        const BUBBLE_GROUP_WORLD_SCALE = 1.75;
         let groupWorldOffset = new THREE.Vector3(0, 0, 0);
-        let groupWorldScale = 1;
+        let groupWorldScale = BUBBLE_GROUP_WORLD_SCALE;
         let navigationStack = [];
         let transitionState = null;
         let groupOverviewState = null;
@@ -843,10 +838,64 @@
         let groupEntryCameraDistance = 25;
         let singleViewDirection = new THREE.Vector3(0, 0, 1);
         const configuredFieldOfView = 60;
+        const flatFieldOfView = 22;
+        const flatViewDirection = new THREE.Vector3(0, 0, 1);
+        let explorationViewMode = localStorage.getItem('bubblebreaker.viewMode') === '2d' ? '2d' : '3d';
+        let viewModeCameraTransition = null;
+        let last3DViewDirection = new THREE.Vector3(0, 0, 1);
         const warpSpeedFactor = 1;
         const warpStopCount = 3;
         camera.fov = configuredFieldOfView;
         camera.updateProjectionMatrix();
+
+        function getExplorationFieldOfView() {
+            return explorationViewMode === '2d' ? flatFieldOfView : configuredFieldOfView;
+        }
+
+        function getExplorationViewDirection(candidate = null) {
+            if (explorationViewMode === '2d') return flatViewDirection.clone();
+            const direction = candidate ? candidate.clone() : camera.position.clone().sub(controls.target);
+            if (direction.lengthSq() < 0.01 || !Number.isFinite(direction.x)) direction.copy(last3DViewDirection);
+            return direction.normalize();
+        }
+
+        function applyExplorationViewControls() {
+            const isFlat = explorationViewMode === '2d';
+            controls.enableRotate = !isFlat;
+            controls.enablePan = true;
+            controls.screenSpacePanning = isFlat;
+        }
+
+        window.setExplorationViewMode = function(mode = '3d', animate = true) {
+            const nextMode = mode === '2d' ? '2d' : '3d';
+            const currentTarget = controls.target.clone();
+            const currentDirection = camera.position.clone().sub(currentTarget);
+            const currentDistance = Math.max(0.05, currentDirection.length());
+            if (explorationViewMode === '3d' && currentDirection.lengthSq() > 0.01) last3DViewDirection.copy(currentDirection).normalize();
+            const startFov = camera.fov;
+            explorationViewMode = nextMode;
+            const endFov = getExplorationFieldOfView();
+            const endDirection = getExplorationViewDirection(last3DViewDirection);
+            const compensatedDistance = Math.max(0.05, currentDistance * Math.tan(THREE.MathUtils.degToRad(startFov / 2)) / Math.tan(THREE.MathUtils.degToRad(endFov / 2)));
+            const endPosition = currentTarget.clone().add(endDirection.multiplyScalar(compensatedDistance));
+            applyExplorationViewControls();
+            if (animate && (state.screen === 'GROUP' || state.screen === 'SINGLE')) {
+                viewModeCameraTransition = {
+                    startedAt: performance.now(), duration: 450,
+                    startPosition: camera.position.clone(), endPosition,
+                    target: currentTarget, startFov, endFov
+                };
+                controls.enabled = false;
+            } else {
+                camera.position.copy(endPosition);
+                camera.fov = endFov;
+                camera.updateProjectionMatrix();
+                controls.target.copy(currentTarget);
+                camera.lookAt(currentTarget);
+            }
+            return explorationViewMode;
+        };
+        window.setExplorationViewMode(explorationViewMode, false);
         window.markBubbleAnalysisComplete = function(bubbleId) {
             const bubble = activeDB && Object.values(activeDB).flatMap(group => group.bubbles || []).find(item => String(item.id) === String(bubbleId));
             if (bubble) bubble.analysisCompletionAt = performance.now();
@@ -855,23 +904,23 @@
                 visibleBubble.mesh.userData.analysisProbe.userData.analysisProbeAnimation.completionStartedAt = performance.now();
             }
         };
-        const BUBBLE_VISUAL_MODE_NAMES = ['classic', 'network', 'deepSea', 'data'];
+        const BUBBLE_VISUAL_MODE_NAMES = ['network', 'classic', 'deepSea', 'data'];
         const storedSceneBubbleVisualMode = localStorage.getItem('bubblebreaker.bubbleVisualMode');
-        let bubbleVisualMode = BUBBLE_VISUAL_MODE_NAMES.includes(storedSceneBubbleVisualMode) ? storedSceneBubbleVisualMode : 'classic';
+        let bubbleVisualMode = BUBBLE_VISUAL_MODE_NAMES.includes(storedSceneBubbleVisualMode) ? storedSceneBubbleVisualMode : 'network';
 
         function getGroupOverviewTarget(directionOverride = null) {
             if (!currentBubbles.length) return null;
             const bounds = new THREE.Box3();
             currentBubbles.forEach(bubble => {
                 if (!bubble.mesh.visible) return;
-                const radius = Math.max(0.5, bubble.mesh.userData.finalScale || bubble.mesh.scale.x);
-                const position = bubble.mesh.userData.transitionFinalPosition || bubble.mesh.position;
+                const radius = Math.max(0.01, bubble.mesh.userData.finalScale || bubble.mesh.scale.x);
+                const position = bubble.mesh.position;
                 bounds.expandByPoint(position.clone().addScalar(radius));
                 bounds.expandByPoint(position.clone().addScalar(-radius));
             });
             if (bounds.isEmpty()) return null;
             const sphere = bounds.getBoundingSphere(new THREE.Sphere());
-            const verticalHalfFov = THREE.MathUtils.degToRad(camera.fov * 0.5);
+            const verticalHalfFov = THREE.MathUtils.degToRad(getExplorationFieldOfView() * 0.5);
             const horizontalHalfFov = Math.atan(Math.tan(verticalHalfFov) * Math.max(0.1, camera.aspect));
             const requiredDistance = Math.max(
                 sphere.radius / Math.max(0.08, Math.tan(verticalHalfFov)),
@@ -880,11 +929,10 @@
             const direction = directionOverride
                 ? directionOverride.clone()
                 : camera.position.clone().sub(controls.target);
-            if (direction.lengthSq() < 0.01 || !Number.isFinite(direction.x)) direction.set(0, 0, 1);
-            direction.normalize();
+            direction.copy(getExplorationViewDirection(direction));
             return {
                 center: sphere.center,
-                cameraPosition: sphere.center.clone().add(direction.multiplyScalar(Math.max(12, requiredDistance))),
+                cameraPosition: sphere.center.clone().add(direction.multiplyScalar(Math.max(0.05, requiredDistance))),
                 radius: sphere.radius
             };
         }
@@ -924,6 +972,13 @@
             groupCameraInteractionArmed = true;
         };
 
+        function getSingleBubbleViewingDistance(radius) {
+            const verticalFov = THREE.MathUtils.degToRad(getExplorationFieldOfView());
+            const horizontalFov = 2 * Math.atan(Math.tan(verticalFov / 2) * Math.max(0.5, camera.aspect));
+            const limitingFov = Math.min(verticalFov, horizontalFov);
+            return Math.max(0.05, radius / Math.sin(limitingFov / 2) * 1.34 + radius * 0.34);
+        }
+
         function getNearestApproachingBubble() {
             if (state.screen !== 'GROUP' || state.bubbleId || !groupCameraInteractionArmed || transitionState || groupOverviewState || isZoomingIntoGroup) return null;
             let nearest = null;
@@ -931,13 +986,13 @@
             const viewDirection = controls.target.clone().sub(camera.position).normalize();
             currentBubbles.forEach(bubble => {
                 if (!bubble.mesh.visible) return;
-                const radius = Math.max(0.5, bubble.mesh.scale.x);
+                const radius = Math.max(0.01, bubble.mesh.scale.x);
                 const toBubble = bubble.mesh.position.clone().sub(camera.position);
                 const distance = toBubble.length();
-                if (distance <= 0.01 || viewDirection.dot(toBubble.normalize()) < 0.2) return;
-                const nearEnough = distance <= radius * 1.65 + 2.5;
-                const movedIntoGroup = distance <= Math.max(4, groupEntryCameraDistance * 0.86);
-                if (nearEnough && movedIntoGroup && distance < nearestDistance) {
+                if (distance <= 0.01 || viewDirection.dot(toBubble.normalize()) < 0.82) return;
+                const singleViewDistance = getSingleBubbleViewingDistance(radius);
+                const reachedSingleApparentSize = distance <= singleViewDistance * 1.05;
+                if (reachedSingleApparentSize && distance < nearestDistance) {
                     nearest = bubble;
                     nearestDistance = distance;
                 }
@@ -1418,8 +1473,8 @@
             return visual;
         }
 
-        window.setBubbleVisualMode = function(mode = 'classic') {
-            bubbleVisualMode = BUBBLE_VISUAL_MODE_NAMES.includes(mode) ? mode : 'classic';
+        window.setBubbleVisualMode = function(mode = 'network') {
+            bubbleVisualMode = BUBBLE_VISUAL_MODE_NAMES.includes(mode) ? mode : 'network';
             const bubbles = [...currentBubbles];
             if (transitionState) bubbles.push(...(transitionState.outgoing || []));
             bubbles.forEach(bubble => {
@@ -1432,32 +1487,41 @@
         function createChildBubblePreview(bubbleData) {
             const childGroup = bubbleData && bubbleData.childId ? activeDB[bubbleData.childId] : null;
             if (!childGroup || !Array.isArray(childGroup.bubbles) || !childGroup.bubbles.length) return null;
+            arrangeBubblePositions(childGroup);
             const preview = new THREE.Group();
             preview.name = 'child-bubble-preview';
             preview.raycast = () => {};
             const validChildren = childGroup.bubbles.filter(isRenderableBubbleData).slice(0, 8);
+            if (!validChildren.length) return null;
             const maximumDistance = Math.max(1, ...validChildren.map(child => {
                 const position = Array.isArray(child.pos) ? child.pos : [0, 0, 0];
                 return Math.hypot(Number(position[0]) || 0, Number(position[1]) || 0, Number(position[2]) || 0);
             }));
-            validChildren.forEach((child, index) => {
+            const previewChildren = validChildren.slice();
+            while (previewChildren.length < 5) previewChildren.push(validChildren[previewChildren.length % validChildren.length]);
+            previewChildren.forEach((child, index) => {
                 const source = Array.isArray(child.pos) ? child.pos : [Math.cos(index) * 10, Math.sin(index) * 10, 0];
                 const position = new THREE.Vector3(...source).multiplyScalar(0.48 / maximumDistance);
+                if (index >= validChildren.length) {
+                    position.add(new THREE.Vector3(Math.cos(index * 2.4), Math.sin(index * 2.4), Math.sin(index) * 0.5).multiplyScalar(0.18 + (index - validChildren.length) * 0.08));
+                }
                 const color = new THREE.Color(child.htmlColor || child.color || 0x9beeff);
-                const radius = Math.min(0.12, 0.055 + Math.sqrt(Math.max(1, Number(child.size) || 1)) * 0.008);
+                const radius = Math.min(0.14, 0.065 + Math.sqrt(Math.max(1, Number(child.size) || 1)) * 0.009);
                 const miniature = new THREE.Mesh(
-                    new THREE.SphereGeometry(radius, 12, 10),
+                    new THREE.SphereGeometry(radius, 16, 12),
                     new THREE.MeshBasicMaterial({
                         color,
                         transparent: true,
-                        opacity: 0.34,
+                        opacity: index >= validChildren.length ? 0.2 : 0.42,
                         depthWrite: false,
                         blending: THREE.AdditiveBlending,
                         fog: false
                     })
                 );
                 miniature.position.copy(position);
-                miniature.userData.childBubbleId = child.id;
+                miniature.userData.childBubbleId = index < validChildren.length ? child.id : null;
+                miniature.userData.sourceChildBubbleId = child.id;
+                miniature.userData.isPreviewEcho = index >= validChildren.length;
                 preview.add(miniature);
             });
             const boundary = new THREE.Mesh(
@@ -1492,22 +1556,10 @@
                 })
             );
             shell.position.copy(position);
-            shell.scale.setScalar(Math.max(1, radius));
-            shell.userData.baseScale = Math.max(1, radius);
+            shell.scale.setScalar(Math.max(0.01, radius));
+            shell.userData.baseScale = Math.max(0.01, radius);
             scene.add(shell);
             return shell;
-        }
-
-        function arrangeTransitionPreview(bubbles, center, radius, startKey, finalKey) {
-            if (!bubbles.length) return;
-            const maximumDistance = Math.max(1, ...bubbles.map(bubble => bubble.mesh.position.distanceTo(center)));
-            bubbles.forEach(bubble => {
-                const finalPosition = bubble.mesh.position.clone();
-                const previewPosition = center.clone().add(finalPosition.clone().sub(center).multiplyScalar((radius * 0.58) / maximumDistance));
-                bubble.mesh.userData[startKey] = previewPosition;
-                bubble.mesh.userData[finalKey] = finalPosition;
-                if (startKey === 'transitionStartPosition') bubble.mesh.position.copy(previewPosition);
-            });
         }
 
         // バブルの3Dモデル(Mesh)を作る関数
@@ -1539,6 +1591,60 @@
             if (mesh.userData.childPreview) mesh.add(mesh.userData.childPreview);
             if (bubbleData) ensureBubbleVisual(mesh, bubbleData, level, isFocus);
             return mesh;
+        }
+
+        function getTypeBubbleScale(group, bubbleData) {
+            if (!group || !bubbleData || !Array.isArray(group.bubbles)) return 1;
+            const rank = group.bubbles.slice().sort((a, b) => Number(b.size || 0) - Number(a.size || 0)).findIndex(item => item.id === bubbleData.id);
+            if (group.type === '一極集中型') return rank === 0 ? 1.42 : 0.9 + (rank % 3) * 0.05;
+            if (group.type === '双極対立型') return rank < 2 ? 1.24 : 0.88 + (rank % 2) * 0.08;
+            if (group.type === '多極型') return rank < Math.min(4, group.bubbles.length) ? 1.14 : 0.91;
+            if (group.type === '階層型') return rank === 0 ? 1.32 : Math.max(0.82, 1.05 - rank * 0.045);
+            if (group.type === '連鎖型') return 0.92 + (rank % 3) * 0.08;
+            return 0.9 + (hashBubbleValue(bubbleData.id) % 17) / 100;
+        }
+
+        function getBubbleLocalRadius(group, bubbleData) {
+            return Math.max(1.15, Math.pow(Math.max(1, Number(bubbleData && bubbleData.size) || 1), 0.62)) * getTypeBubbleScale(group, bubbleData);
+        }
+
+        function getGroupLocalExtent(group) {
+            if (!group || !Array.isArray(group.bubbles)) return 1;
+            arrangeBubblePositions(group);
+            return Math.max(1, ...group.bubbles.filter(isRenderableBubbleData).map(bubble => {
+                const position = Array.isArray(bubble.pos) ? bubble.pos : [0, 0, 0];
+                return Math.hypot(Number(position[0]) || 0, Number(position[1]) || 0, Number(position[2]) || 0) + getBubbleLocalRadius(group, bubble);
+            }));
+        }
+
+        function getNestedGroupWorldScale(group, parentBubbleWorldRadius) {
+            return Math.max(0.012, (Math.max(0.1, parentBubbleWorldRadius) * 0.56) / getGroupLocalExtent(group));
+        }
+
+        function buildNavigationEntries(path) {
+            let offset = new THREE.Vector3(0, 0, 0);
+            let scale = BUBBLE_GROUP_WORLD_SCALE;
+            return path.map((groupId, index) => {
+                const group = activeDB[groupId];
+                let anchorBubble = null;
+                if (index > 0) {
+                    const parent = activeDB[path[index - 1]];
+                    arrangeBubblePositions(parent);
+                    anchorBubble = parent && parent.bubbles.find(bubble => bubble.childId === groupId);
+                    if (anchorBubble) {
+                        offset = offset.clone().add(new THREE.Vector3(...anchorBubble.pos).multiplyScalar(scale));
+                        scale = getNestedGroupWorldScale(group, getBubbleLocalRadius(parent, anchorBubble) * scale);
+                    }
+                }
+                return {
+                    groupId,
+                    parentGroupId: group.parentId || null,
+                    anchorBubbleId: anchorBubble ? anchorBubble.id : null,
+                    worldPosition: offset.clone(),
+                    worldScale: scale,
+                    depth: index
+                };
+            });
         }
 
         // ==========================================
@@ -1621,28 +1727,7 @@
             if (activeDB && activeDB[lastGroupId] && !path.includes(lastGroupId)) path.push(lastGroupId);
             if (path.length === 0) return [];
 
-            let offset = new THREE.Vector3(0, 0, 0);
-            let scale = 1;
-            navigationStack = path.map((groupId, index) => {
-                const group = activeDB[groupId];
-                let anchorBubble = null;
-                if (index > 0) {
-                    const parent = activeDB[path[index - 1]];
-                    anchorBubble = parent && parent.bubbles.find(bubble => bubble.childId === groupId);
-                    if (anchorBubble && Array.isArray(anchorBubble.pos)) {
-                        offset = offset.clone().add(new THREE.Vector3(...anchorBubble.pos).multiplyScalar(scale));
-                        scale = Math.max(0.42, scale * 0.9);
-                    }
-                }
-                return {
-                    groupId,
-                    parentGroupId: group.parentId || null,
-                    anchorBubbleId: anchorBubble ? anchorBubble.id : null,
-                    worldPosition: offset.clone(),
-                    worldScale: scale,
-                    depth: index
-                };
-            });
+            navigationStack = buildNavigationEntries(path);
             const current = navigationStack[navigationStack.length - 1];
             groupWorldOffset.copy(current.worldPosition);
             groupWorldScale = current.worldScale;
@@ -1912,6 +1997,7 @@
                 showToast('表示できる構成要素がないため、この階層を開けません');
                 return;
             }
+            arrangeBubblePositions(data);
             stopZoomSound();
             // 連続入力で遷移が重なった場合も、前のincoming/outgoingを必ず破棄する。
             // これにより見えないラベルなしバブルがシーンに残らない。
@@ -1930,9 +2016,9 @@
             const previousGroupId = state.groupId;
             const previousScreen = state.screen;
             const previousBubbleData = state.bubbleData;
-            const preservedViewDirection = previousScreen === 'SINGLE'
+            const preservedViewDirection = getExplorationViewDirection(previousScreen === 'SINGLE'
                 ? singleViewDirection.clone().normalize()
-                : camera.position.clone().sub(controls.target).normalize();
+                : camera.position.clone().sub(controls.target).normalize());
             if (!Number.isFinite(preservedViewDirection.x) || preservedViewDirection.lengthSq() < 0.01) preservedViewDirection.set(0, 0, 1);
             const previousOffset = groupWorldOffset.clone();
             const previousScale = groupWorldScale;
@@ -1941,7 +2027,7 @@
             let transitionType = 'instant';
             if (isAfterDive) {
                 nextOffset.set(0, 0, 0);
-                nextScale = 1;
+                nextScale = BUBBLE_GROUP_WORLD_SCALE;
                 navigationStack = [{ groupId, parentGroupId: data.parentId || null, anchorBubbleId: null, worldPosition: nextOffset.clone(), worldScale: nextScale, depth: 0 }];
                 transitionType = 'dive';
             } else if (previousScreen === 'SINGLE' && groupId === previousGroupId) {
@@ -1949,7 +2035,12 @@
             } else if (previousScreen === 'SINGLE' && state.bubbleData && state.bubbleData.childId === groupId) {
                 const anchorPosition = new THREE.Vector3(...state.bubbleData.pos).multiplyScalar(previousScale);
                 nextOffset.copy(previousOffset).add(anchorPosition);
-                nextScale = Math.max(0.42, previousScale * 0.9);
+                const parentGroup = activeDB[previousGroupId];
+                const parentBubbleMesh = currentBubbles.find(bubble => bubble.data.id === state.bubbleData.id);
+                const parentWorldRadius = parentBubbleMesh
+                    ? (parentBubbleMesh.mesh.userData.finalScale || parentBubbleMesh.mesh.scale.x)
+                    : getBubbleLocalRadius(parentGroup, state.bubbleData) * previousScale;
+                nextScale = getNestedGroupWorldScale(data, parentWorldRadius);
                 navigationStack.push({ groupId, parentGroupId: data.parentId || previousGroupId, anchorBubbleId: state.bubbleData.id, worldPosition: nextOffset.clone(), worldScale: nextScale, depth: navigationStack.length });
                 transitionType = 'zoomIn';
             } else if (previousScreen === 'GROUP' && state.groupData && state.groupData.parentId === groupId) {
@@ -1960,9 +2051,11 @@
                     nextScale = parentEntry.worldScale;
                     navigationStack = navigationStack.slice(0, parentEntryIndex + 1);
                 } else {
-                    const parentBubble = data.bubbles.find(bubble => bubble.childId === previousGroupId);
-                    if (parentBubble) nextOffset.copy(previousOffset).sub(new THREE.Vector3(...parentBubble.pos).multiplyScalar(previousScale));
-                    navigationStack = [{ groupId, parentGroupId: data.parentId || null, anchorBubbleId: parentBubble ? parentBubble.id : null, worldPosition: nextOffset.clone(), worldScale: nextScale, depth: 0 }];
+                    const hierarchyPath = getGroupHierarchyPath(groupId).map(group => group.id);
+                    navigationStack = buildNavigationEntries(hierarchyPath);
+                    const rebuilt = navigationStack[navigationStack.length - 1];
+                    nextOffset.copy(rebuilt.worldPosition);
+                    nextScale = rebuilt.worldScale;
                 }
                 transitionType = 'zoomOut';
             }
@@ -1986,16 +2079,14 @@
             // 新しいバブル群を生成して配置
             // 固定DBとAPIデータのどちらでも、球体の半径を考慮して重なりを解消する。
             ensureDistinctBubbleColors(data.bubbles);
-            arrangeBubblePositions(data);
             data.bubbles.forEach(bData => {
                 const worldPosition = new THREE.Vector3(...bData.pos).multiplyScalar(nextScale).add(nextOffset);
                 const isFocus = isFocusPathBubble(data, bData);
                 const mesh = createBubbleMesh(bData.size, bData.color, worldPosition.toArray(), bData, data.level, isFocus);
-                mesh.scale.multiplyScalar(nextScale);
+                mesh.scale.multiplyScalar(nextScale * getTypeBubbleScale(data, bData));
                 const finalRadius = mesh.scale.x;
                 mesh.userData.finalScale = finalRadius;
                 if (transitionType !== 'instant') {
-                    mesh.scale.setScalar(finalRadius * 0.12);
                     mesh.material.opacity = 0.02;
                 }
                 scene.add(mesh);
@@ -2024,7 +2115,6 @@
                     if (parentBubble) {
                         const center = parentBubble.mesh.position.clone();
                         const radius = parentBubble.mesh.userData.finalScale || parentBubble.mesh.scale.x;
-                        arrangeTransitionPreview(currentBubbles, center, radius, 'transitionStartPosition', 'transitionFinalPosition');
                         shell = createHierarchyTransitionShell(center, radius, parentBubble.data.color);
                     }
                 } else if (transitionType === 'zoomOut') {
@@ -2032,7 +2122,6 @@
                     if (containingBubble) {
                         const center = containingBubble.mesh.position.clone();
                         const radius = containingBubble.mesh.userData.finalScale || containingBubble.mesh.scale.x;
-                        arrangeTransitionPreview(outgoingBubbles, center, radius, 'transitionEndPosition', 'transitionStartPosition');
                         shell = createHierarchyTransitionShell(center, radius, containingBubble.data.color);
                     }
                 }
@@ -2040,8 +2129,9 @@
                     outgoing: outgoingBubbles,
                     incoming: currentBubbles,
                     shell,
+                    anchorBubbleId: previousBubbleData && previousBubbleData.id,
                     startedAt: performance.now(),
-                    duration: transitionType === 'dive' ? 1800 : 1500,
+                    duration: transitionType === 'zoomIn' ? 1800 : transitionType === 'zoomOut' ? 1600 : 1800,
                     type: transitionType
                 };
             }
@@ -2070,6 +2160,25 @@
                 ? overviewTarget.cameraPosition
                 : nextOffset.clone().add(preservedViewDirection.clone().multiplyScalar(32));
             const viewingDistance = desiredCameraPosition.distanceTo(groupCenter);
+            camera.fov = getExplorationFieldOfView();
+            camera.updateProjectionMatrix();
+            applyExplorationViewControls();
+            if (transitionState) {
+                transitionState.cameraStart = camera.position.clone();
+                transitionState.controlStart = controls.target.clone();
+                transitionState.cameraEnd = desiredCameraPosition.clone();
+                transitionState.controlEnd = groupCenter.clone();
+                if (transitionState.type === 'zoomIn' && transitionState.shell) {
+                    const limitingFov = Math.min(
+                        THREE.MathUtils.degToRad(camera.fov),
+                        2 * Math.atan(Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2) * Math.max(0.5, camera.aspect))
+                    );
+                    const shellCenter = transitionState.shell.position.clone();
+                    const shellRadius = transitionState.shell.userData.baseScale || transitionState.shell.scale.x;
+                    transitionState.diveCamera = shellCenter.clone().add(preservedViewDirection.clone().multiplyScalar(Math.max(0.05, shellRadius / Math.sin(limitingFov / 2) * 0.9)));
+                    transitionState.diveTarget = shellCenter;
+                }
+            }
             if (isAfterDive) {
                 // 銀河団の中心から中央カテゴリへ滑らかに接近する。
                 controls.enabled = false;
@@ -2109,16 +2218,13 @@
             const targetPos = bObj.mesh.position.clone();
             const currentDirection = camera.position.clone().sub(controls.target);
             if (currentDirection.lengthSq() > 0.01 && Number.isFinite(currentDirection.x)) {
-                singleViewDirection.copy(currentDirection.normalize());
+                singleViewDirection.copy(getExplorationViewDirection(currentDirection));
             }
-            const viewDirection = singleViewDirection.clone().normalize();
+            const viewDirection = getExplorationViewDirection(singleViewDirection);
             controls.enabled = false; // マウスによる視点操作を一時無効化
             // 現在の視線方向を維持したまま対象バブルへ寄る。固定の正面方向は使わない。
             targetControlTarget.copy(targetPos);
-            const verticalFov = THREE.MathUtils.degToRad(camera.fov);
-            const horizontalFov = 2 * Math.atan(Math.tan(verticalFov / 2) * Math.max(0.5, camera.aspect));
-            const limitingFov = Math.min(verticalFov, horizontalFov);
-            const viewingDistance = Math.max(12, radius / Math.sin(limitingFov / 2) * 1.34 + 2);
+            const viewingDistance = getSingleBubbleViewingDistance(radius);
             targetCameraPos.copy(targetPos).add(viewDirection.multiplyScalar(viewingDistance));
 
             // UIパネルの情報を更新
@@ -2127,18 +2233,12 @@
             document.getElementById('single-panel-title').innerText = bubbleData.name;
             document.getElementById('single-panel-desc').innerText = bubbleData.desc || `${bubbleData.name}に関する意見や評価が集まるバブルです。`;
             document.getElementById('single-group-type').innerText = state.groupData.type;
-            document.getElementById('single-percent').innerText = bubbleData.size;
-            document.getElementById('single-estimated').classList.toggle('hidden', bubbleData.isEstimated !== true);
-            
             // さらにズームできる子階層がある場合はボタンを表示
             const hasChild = !!bubbleData.childId;
             document.getElementById('btn-zoomin-single').style.display = hasChild ? 'block' : 'none';
             document.getElementById('btn-zoomin-single').innerText = hasChild && activeDB[bubbleData.childId]
                 ? `↑ ${activeDB[bubbleData.childId].title}へ (上スクロール)` : '';
 
-            // 偏り度メーターのバー幅を計算（占有率sizeをもとに適当な割合を算出）
-            const biasWidth = Math.min(100, Math.max(20, bubbleData.size * 1.5));
-            document.getElementById('bias-meter').style.width = `${biasWidth}%`;
             renderGroupBreadcrumb(state.groupId, 'single-breadcrumb', bubbleData);
             renderGroupComposition(state.groupData.bubbles, {
                 chartId: 'single-composition-chart',
@@ -2278,6 +2378,30 @@
             appendDetailSourceLinks(container, section.sourceIds, sourceMap, '概要の参照ソース');
         }
 
+        function getTimelineEventYear(event) {
+            const sortKeyText = String(event && event.sortKey || '');
+            const sortKeyYear = Number(sortKeyText.slice(0, 4));
+            if (Number.isInteger(sortKeyYear) && sortKeyYear >= 1 && sortKeyYear <= 9999) return sortKeyYear;
+            const labelMatch = String(event && event.dateLabel || '').match(/(?:^|\D)(\d{4})(?:年|\D|$)/);
+            return labelMatch ? Number(labelMatch[1]) : null;
+        }
+
+        function createTimelineYearScale(events) {
+            const eventYears = events.map(getTimelineEventYear).filter(Number.isFinite);
+            if (!eventYears.length) return { start: 0, end: Math.max(1, events.length - 1), interval: 1, ticks: [], hasYears: false };
+            const minimum = Math.min(...eventYears);
+            const maximum = Math.max(...eventYears);
+            const rawSpan = Math.max(1, maximum - minimum);
+            const intervalOptions = [1, 2, 5, 10, 20, 50, 100, 200];
+            const interval = intervalOptions.find(value => rawSpan / value <= 6) || 500;
+            let start = Math.floor(minimum / interval) * interval;
+            let end = Math.ceil(maximum / interval) * interval;
+            if (start === end) { start -= interval; end += interval; }
+            const ticks = [];
+            for (let year = start; year <= end; year += interval) ticks.push(year);
+            return { start, end, interval, ticks, hasYears: true };
+        }
+
         function renderHistoryDetail(container, section, sourceMap, imageMap) {
             container.appendChild(createDetailElement('p', 'detail-summary', section.summary));
             if (!section.events.length) {
@@ -2287,16 +2411,52 @@
             }
             const timeline = createDetailElement('div', 'detail-timeline');
             timeline.setAttribute('aria-label', 'バブル形成の時系列');
-            timeline.style.setProperty('--detail-timeline-width', `${Math.max(260, section.events.length * 308 - 40)}px`);
-            section.events.forEach(event => {
-                const card = createDetailElement('article', 'detail-timeline-event');
+            timeline.tabIndex = 0;
+            const scale = createTimelineYearScale(section.events);
+            const trackWidth = Math.max(920, section.events.length * 330, scale.ticks.length * 190);
+            const horizontalPadding = 120;
+            const track = createDetailElement('div', 'detail-timeline-track');
+            track.style.width = `${trackWidth}px`;
+            const axis = createDetailElement('div', 'detail-timeline-axis');
+            if (scale.hasYears) {
+                scale.ticks.forEach(year => {
+                    const ratio = (year - scale.start) / Math.max(1, scale.end - scale.start);
+                    const tick = createDetailElement('div', 'detail-timeline-tick');
+                    tick.style.left = `${horizontalPadding + ratio * (trackWidth - horizontalPadding * 2)}px`;
+                    tick.appendChild(createDetailElement('span', 'detail-timeline-tick-mark'));
+                    tick.appendChild(createDetailElement('time', 'detail-timeline-tick-label', `${year}年`));
+                    axis.appendChild(tick);
+                });
+            }
+            track.appendChild(axis);
+            const lastLanePosition = [-Infinity, -Infinity];
+            section.events.forEach((event, index) => {
+                const year = getTimelineEventYear(event);
+                const baseRatio = scale.hasYears && Number.isFinite(year)
+                    ? (year - scale.start) / Math.max(1, scale.end - scale.start)
+                    : (index + 0.5) / Math.max(1, section.events.length);
+                const lane = index % 2;
+                const naturalX = horizontalPadding + Math.max(0, Math.min(1, baseRatio)) * (trackWidth - horizontalPadding * 2);
+                const eventX = Math.max(naturalX, lastLanePosition[lane] + 305);
+                lastLanePosition[lane] = eventX;
+                const card = createDetailElement('article', `detail-timeline-event ${lane === 0 ? 'is-above' : 'is-below'}`);
+                card.style.left = `${Math.min(trackWidth - horizontalPadding, eventX)}px`;
                 card.appendChild(createDetailElement('time', 'detail-timeline-date', event.dateLabel));
                 card.appendChild(createDetailElement('h3', 'detail-timeline-title', event.title));
                 card.appendChild(createDetailElement('p', 'detail-timeline-description', event.description));
                 appendDetailImages(card, event.imageIds, imageMap);
                 appendDetailSourceLinks(card, event.sourceIds, sourceMap, '出来事の根拠');
-                timeline.appendChild(card);
+                track.appendChild(card);
             });
+            timeline.appendChild(track);
+            timeline.addEventListener('wheel', event => {
+                if (timeline.scrollWidth <= timeline.clientWidth) return;
+                const movement = Math.abs(event.deltaY) >= Math.abs(event.deltaX) ? event.deltaY : event.deltaX;
+                if (!movement) return;
+                event.preventDefault();
+                event.stopPropagation();
+                timeline.scrollLeft += movement;
+            }, { passive: false });
             container.appendChild(timeline);
         }
 

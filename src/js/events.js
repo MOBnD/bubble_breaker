@@ -151,6 +151,37 @@
         document.getElementById('btn-analyze').addEventListener('click', () => loadAnalysis());
         document.getElementById('analysis-center-title').addEventListener('click', () => loadSingle(state.bubbleData));
         document.getElementById('btn-back-detail').addEventListener('click', () => switchScreen('ANALYSIS'));
+        const aboutOverlay = document.getElementById('about-overlay');
+        const aboutOpenButton = document.getElementById('btn-open-about');
+        const aboutCloseButton = document.getElementById('btn-close-about');
+        let aboutPreviousFocus = null;
+        function setAboutOpen(open) {
+            if (!aboutOverlay) return;
+            if (open) {
+                aboutPreviousFocus = document.activeElement;
+                aboutOverlay.hidden = false;
+                aboutOverlay.scrollTop = 0;
+                requestAnimationFrame(() => aboutOverlay.classList.add('is-open'));
+                document.body.classList.add('about-open');
+                aboutCloseButton?.focus();
+            } else {
+                aboutOverlay.classList.remove('is-open');
+                document.body.classList.remove('about-open');
+                window.setTimeout(() => { aboutOverlay.hidden = true; }, 220);
+                if (aboutPreviousFocus && typeof aboutPreviousFocus.focus === 'function') aboutPreviousFocus.focus();
+            }
+        }
+        aboutOpenButton?.addEventListener('click', () => setAboutOpen(true));
+        aboutCloseButton?.addEventListener('click', () => setAboutOpen(false));
+        aboutOverlay?.addEventListener('click', event => {
+            if (event.target === aboutOverlay) setAboutOpen(false);
+        });
+        window.addEventListener('keydown', event => {
+            if (event.key === 'Escape' && aboutOverlay && !aboutOverlay.hidden) {
+                event.preventDefault();
+                setAboutOpen(false);
+            }
+        });
         document.getElementById('btn-sound-toggle').addEventListener('click', () => {
             soundEnabled = !soundEnabled;
             localStorage.setItem('bubblebreaker.sound', soundEnabled ? 'on' : 'off');
@@ -159,14 +190,21 @@
         });
         document.getElementById('btn-sound-toggle').innerText = soundEnabled ? '🔊 効果音ON' : '🔇 効果音OFF';
         const collapsiblePanelButtons = [...document.querySelectorAll('[data-collapse-panel]')];
+        const explorationPanelIds = new Set(['panel-group', 'panel-single']);
         function setPanelCollapsed(panelId, collapsed, persist = true) {
             const panel = document.getElementById(panelId);
             const button = document.querySelector(`[data-collapse-panel="${panelId}"]`);
             if (!panel || !button) return false;
-            panel.classList.toggle('panel-is-collapsed', collapsed);
+            const closesWholePanel = explorationPanelIds.has(panelId);
+            panel.classList.toggle(closesWholePanel ? 'panel-is-closed' : 'panel-is-collapsed', collapsed);
             button.setAttribute('aria-expanded', String(!collapsed));
-            button.textContent = collapsed ? '+' : '−';
-            button.title = collapsed ? 'パネルを展開' : 'パネルを畳む';
+            button.textContent = '−';
+            button.title = closesWholePanel ? 'パネルを閉じる' : (collapsed ? 'パネルを展開' : 'パネルを畳む');
+            const reopenButton = document.querySelector(`[data-reopen-panel="${panelId}"]`);
+            if (reopenButton) {
+                reopenButton.setAttribute('aria-expanded', String(!collapsed));
+                reopenButton.tabIndex = collapsed ? 0 : -1;
+            }
             if (persist) localStorage.setItem(`bubblebreaker.${panelId}.collapsed`, collapsed ? 'on' : 'off');
             return collapsed;
         }
@@ -174,8 +212,12 @@
             button.addEventListener('click', () => {
                 const panel = document.getElementById(button.dataset.collapsePanel);
                 if (!panel) return;
-                setPanelCollapsed(button.dataset.collapsePanel, !panel.classList.contains('panel-is-collapsed'));
+                const closedClass = explorationPanelIds.has(button.dataset.collapsePanel) ? 'panel-is-closed' : 'panel-is-collapsed';
+                setPanelCollapsed(button.dataset.collapsePanel, !panel.classList.contains(closedClass));
             });
+        });
+        document.querySelectorAll('[data-reopen-panel]').forEach(button => {
+            button.addEventListener('click', () => setPanelCollapsed(button.dataset.reopenPanel, false));
         });
         collapsiblePanelButtons.forEach(button => {
             const panelId = button.dataset.collapsePanel;
@@ -185,6 +227,7 @@
         const ngc3324Toggle = document.getElementById('ngc3324-toggle');
         const warpHazeToggle = document.getElementById('warp-haze-toggle');
         const bubbleVisualModeButtons = [...document.querySelectorAll('[data-bubble-visual-mode]')];
+        const viewModeButtons = [...document.querySelectorAll('[data-view-mode]')];
         const backgroundThemeControl = document.getElementById('background-theme');
         const bgmTypeControl = document.getElementById('bgm-type');
         const movementKeys = window.__bubbleBreakerMovementKeys || new Set();
@@ -193,6 +236,7 @@
             return Boolean(target && (target.matches('input, textarea, select, button, [contenteditable="true"]') || target.isContentEditable));
         }
         window.addEventListener('keydown', event => {
+            if (document.body.classList.contains('about-open')) return;
             if (isTextEditingTarget(event.target)) return;
             window.__bubbleBreakerShiftDown = event.shiftKey || event.key === 'Shift';
             const key = event.key.toLowerCase();
@@ -221,16 +265,16 @@
             if (!inputScreen) return;
             inputScreen.classList.toggle('warp-haze-active', Boolean(isDiving && warpHazeEnabled));
         }
-        const bubbleVisualModeOptions = ['classic', 'network', 'deepSea', 'data'];
+        const bubbleVisualModeOptions = ['network', 'classic', 'deepSea', 'data'];
         let storedBubbleVisualMode = localStorage.getItem('bubblebreaker.bubbleVisualMode');
-        if (localStorage.getItem('bubblebreaker.bubbleVisualModeVersion') !== '2') {
-            storedBubbleVisualMode = 'classic';
-            localStorage.setItem('bubblebreaker.bubbleVisualMode', 'classic');
-            localStorage.setItem('bubblebreaker.bubbleVisualModeVersion', '2');
+        if (localStorage.getItem('bubblebreaker.bubbleVisualModeVersion') !== '3') {
+            storedBubbleVisualMode = 'network';
+            localStorage.setItem('bubblebreaker.bubbleVisualMode', 'network');
+            localStorage.setItem('bubblebreaker.bubbleVisualModeVersion', '3');
         }
         let selectedBubbleVisualMode = typeof setBubbleVisualMode === 'function'
-            ? setBubbleVisualMode(bubbleVisualModeOptions.includes(storedBubbleVisualMode) ? storedBubbleVisualMode : 'classic')
-            : 'classic';
+            ? setBubbleVisualMode(bubbleVisualModeOptions.includes(storedBubbleVisualMode) ? storedBubbleVisualMode : 'network')
+            : 'network';
         bubbleVisualModeButtons.forEach(button => {
             const isSelected = button.dataset.bubbleVisualMode === selectedBubbleVisualMode;
             button.setAttribute('aria-pressed', String(isSelected));
@@ -282,15 +326,37 @@
             button.addEventListener('click', () => {
                 selectedBubbleVisualMode = typeof setBubbleVisualMode === 'function'
                     ? setBubbleVisualMode(button.dataset.bubbleVisualMode)
-                    : 'classic';
+                    : 'network';
                 localStorage.setItem('bubblebreaker.bubbleVisualMode', selectedBubbleVisualMode);
                 bubbleVisualModeButtons.forEach(option => {
                     const isSelected = option.dataset.bubbleVisualMode === selectedBubbleVisualMode;
                     option.setAttribute('aria-pressed', String(isSelected));
                     option.classList.toggle('is-selected', isSelected);
                 });
-                const visualLabel = selectedBubbleVisualMode === 'classic' ? '標準のガラス球体' : selectedBubbleVisualMode === 'network' ? '装飾あり' : selectedBubbleVisualMode === 'deepSea' ? '深海テーマ' : 'データ空間テーマ';
+                const visualLabel = selectedBubbleVisualMode === 'network' ? '装飾あり' : selectedBubbleVisualMode === 'classic' ? '装飾なし' : selectedBubbleVisualMode === 'deepSea' ? '深海テーマ' : 'データ空間テーマ';
                 showToast(`${visualLabel}を表示しました`);
+            });
+        });
+        const storedViewMode = localStorage.getItem('bubblebreaker.viewMode') === '2d' ? '2d' : '3d';
+        let selectedViewMode = typeof setExplorationViewMode === 'function'
+            ? setExplorationViewMode(storedViewMode, false)
+            : storedViewMode;
+        function updateViewModeButtons() {
+            viewModeButtons.forEach(button => {
+                const selected = button.dataset.viewMode === selectedViewMode;
+                button.setAttribute('aria-pressed', String(selected));
+                button.classList.toggle('is-selected', selected);
+            });
+        }
+        updateViewModeButtons();
+        viewModeButtons.forEach(button => {
+            button.addEventListener('click', () => {
+                selectedViewMode = typeof setExplorationViewMode === 'function'
+                    ? setExplorationViewMode(button.dataset.viewMode, true)
+                    : button.dataset.viewMode;
+                localStorage.setItem('bubblebreaker.viewMode', selectedViewMode);
+                updateViewModeButtons();
+                showToast(selectedViewMode === '2d' ? '正面固定の2D表示へ切り替えました' : '奥行きのある3D表示へ切り替えました');
             });
         });
         backgroundThemeControl.addEventListener('change', () => {
@@ -369,6 +435,7 @@
         }
 
         window.addEventListener('wheel', (e) => {
+            if (e.target.closest('.detail-timeline')) return;
             // スクロール可能なUI領域（右側のリストなど）を操作している場合は、階層移動を発生させない
             const cosmicControl = e.target.closest('#panel-bgm');
             if (cosmicControl) {

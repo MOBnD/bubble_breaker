@@ -760,38 +760,51 @@
         function updateGroupTransition() {
             if (!transitionState) return;
             const progress = Math.min(1, (performance.now() - transitionState.startedAt) / transitionState.duration);
-            const eased = progress * progress * (3 - 2 * progress);
-            const cameraStep = transitionState.type === 'zoomOut' ? 0.04 : 0.08;
-            camera.position.lerp(targetCameraPos, cameraStep);
-            controls.target.lerp(targetControlTarget, cameraStep);
+            const smooth = value => {
+                const clamped = Math.max(0, Math.min(1, value));
+                return clamped * clamped * (3 - 2 * clamped);
+            };
+            const eased = smooth(progress);
+            const zoomingIn = transitionState.type === 'zoomIn' && transitionState.diveCamera;
+            const zoomingOut = transitionState.type === 'zoomOut';
+            const approach = zoomingIn ? smooth(progress / 0.46) : eased;
+            const reveal = zoomingIn ? smooth((progress - 0.46) / 0.54) : eased;
+            const parentReveal = zoomingOut ? smooth((progress - 0.22) / 0.78) : eased;
+            if (zoomingIn) {
+                if (progress <= 0.46) {
+                    camera.position.lerpVectors(transitionState.cameraStart, transitionState.diveCamera, approach);
+                    controls.target.lerpVectors(transitionState.controlStart, transitionState.diveTarget, approach);
+                } else {
+                    camera.position.lerpVectors(transitionState.diveCamera, transitionState.cameraEnd, reveal);
+                    controls.target.lerpVectors(transitionState.diveTarget, transitionState.controlEnd, reveal);
+                }
+            } else if (transitionState.cameraStart && transitionState.cameraEnd) {
+                camera.position.lerpVectors(transitionState.cameraStart, transitionState.cameraEnd, eased);
+                controls.target.lerpVectors(transitionState.controlStart, transitionState.controlEnd, eased);
+            } else {
+                camera.position.lerp(targetCameraPos, 0.08);
+                controls.target.lerp(targetControlTarget, 0.08);
+            }
             camera.lookAt(controls.target);
             transitionState.incoming.forEach(bubble => {
-                const finalScale = bubble.mesh.userData.finalScale || bubble.mesh.scale.x;
-                bubble.mesh.scale.setScalar(finalScale * (0.12 + eased * 0.88));
-                bubble.mesh.material.opacity = 0.02 + eased * 0.93;
-                const startPosition = bubble.mesh.userData.transitionStartPosition;
-                const finalPosition = bubble.mesh.userData.transitionFinalPosition;
-                if (startPosition && finalPosition) bubble.mesh.position.lerpVectors(startPosition, finalPosition, eased);
+                if (zoomingIn) {
+                    bubble.mesh.material.opacity = 0.04 + reveal * 0.91;
+                } else {
+                    bubble.mesh.material.opacity = 0.02 + parentReveal * 0.93;
+                }
             });
             transitionState.outgoing.forEach(bubble => {
-                const startPosition = bubble.mesh.userData.transitionStartPosition;
-                const endPosition = bubble.mesh.userData.transitionEndPosition;
-                if (transitionState.type === 'zoomOut' && startPosition && endPosition) {
-                    bubble.mesh.position.lerpVectors(startPosition, endPosition, eased);
-                    const initialScale = bubble.mesh.userData.finalScale || bubble.mesh.scale.x;
-                    bubble.mesh.scale.setScalar(initialScale * (1 - eased * 0.82));
+                if (zoomingIn) {
+                    const isAnchor = bubble.data && bubble.data.id === transitionState.anchorBubbleId;
+                    bubble.mesh.material.opacity = isAnchor ? 0.95 * (1 - reveal) : 0.82 * (1 - approach);
+                } else {
+                    bubble.mesh.material.opacity = 0.9 * (1 - Math.max(0, (eased - 0.58) / 0.42));
                 }
-                bubble.mesh.material.opacity = 0.72 - eased * (transitionState.type === 'zoomOut' ? 0.62 : 0.56);
                 bubble.mesh.visible = true;
             });
             if (transitionState.shell) {
-                const baseScale = transitionState.shell.userData.baseScale || transitionState.shell.scale.x;
-                const shellScale = transitionState.type === 'zoomIn'
-                    ? baseScale * (1 + eased * 0.5)
-                    : baseScale * (0.72 + eased * 0.28);
-                transitionState.shell.scale.setScalar(shellScale);
-                transitionState.shell.material.opacity = transitionState.type === 'zoomIn'
-                    ? 0.2 * (1 - eased)
+                transitionState.shell.material.opacity = zoomingIn
+                    ? 0.22 * (1 - reveal)
                     : 0.05 + Math.sin(eased * Math.PI) * 0.22;
             }
             if (progress >= 1) {
@@ -804,6 +817,26 @@
                 stopZoomSound();
                 isZoomingIntoGroup = false;
                 controls.enabled = true;
+                applyExplorationViewControls();
+            }
+        }
+
+        function updateViewModeCameraTransition() {
+            if (!viewModeCameraTransition) return;
+            const progress = Math.min(1, (performance.now() - viewModeCameraTransition.startedAt) / viewModeCameraTransition.duration);
+            const eased = progress * progress * (3 - 2 * progress);
+            camera.position.lerpVectors(viewModeCameraTransition.startPosition, viewModeCameraTransition.endPosition, eased);
+            controls.target.copy(viewModeCameraTransition.target);
+            camera.fov = THREE.MathUtils.lerp(viewModeCameraTransition.startFov, viewModeCameraTransition.endFov, eased);
+            camera.updateProjectionMatrix();
+            camera.lookAt(controls.target);
+            if (progress >= 1) {
+                camera.position.copy(viewModeCameraTransition.endPosition);
+                camera.fov = viewModeCameraTransition.endFov;
+                camera.updateProjectionMatrix();
+                viewModeCameraTransition = null;
+                controls.enabled = true;
+                applyExplorationViewControls();
             }
         }
 
@@ -856,7 +889,15 @@
                 });
                 const cometAngle = entry.phase + time * 0.12;
                 entry.comet.position.set(Math.cos(cometAngle) * entry.scale * 1.75, Math.sin(cometAngle * 1.4) * entry.scale * 0.24, Math.sin(cometAngle) * entry.scale * 1.75);
-                entry.comet.rotation.y = cometAngle + Math.PI;
+                const cometVelocity = entry.comet.userData.orbitVelocity || new THREE.Vector3();
+                cometVelocity.set(
+                    -Math.sin(cometAngle) * entry.scale * 1.75,
+                    Math.cos(cometAngle * 1.4) * 1.4 * entry.scale * 0.24,
+                    Math.cos(cometAngle) * entry.scale * 1.75
+                ).normalize();
+                entry.comet.userData.orbitVelocity = cometVelocity;
+                // 彗星の尾はローカル-X。+Xを軌道接線へ向ければ、尾は常に進行方向の反対になる。
+                entry.comet.quaternion.setFromUnitVectors(new THREE.Vector3(1, 0, 0), cometVelocity);
             });
             if (ngc3324Dome) {
                 ngc3324Dome.rotation.y += 0.000006;
@@ -880,18 +921,18 @@
         }
 
         function updateKeyboardNavigation(deltaSeconds) {
-            if (!controls.enabled || loadingAnimation || transitionState || groupOverviewState || isZoomingIntoGroup) return;
+            if (!controls.enabled || loadingAnimation || transitionState || groupOverviewState || viewModeCameraTransition || isZoomingIntoGroup) return;
             if (state.screen !== 'GROUP' && state.screen !== 'SINGLE') return;
             const movementKeys = window.__bubbleBreakerMovementKeys;
             if (!movementKeys || !movementKeys.size) return;
+            const worldUp = new THREE.Vector3(0, 1, 0);
+            const movement = new THREE.Vector3();
             const forward = controls.target.clone().sub(camera.position);
             if (forward.lengthSq() < 0.001) return;
             forward.normalize();
-            const worldUp = new THREE.Vector3(0, 1, 0);
             const right = new THREE.Vector3().crossVectors(forward, worldUp).normalize();
-            const movement = new THREE.Vector3();
-            if (movementKeys.has('w')) movement.add(forward);
-            if (movementKeys.has('s')) movement.sub(forward);
+            if (movementKeys.has('w')) movement.add(explorationViewMode === '2d' ? worldUp : forward);
+            if (movementKeys.has('s')) movement.sub(explorationViewMode === '2d' ? worldUp : forward);
             if (movementKeys.has('d')) movement.add(right);
             if (movementKeys.has('a')) movement.sub(right);
             if (movement.lengthSq() < 0.001) return;
@@ -922,6 +963,8 @@
                 updateGroupOverview();
             } else if (universeRevealState) {
                 updateUniverseReveal();
+            } else if (viewModeCameraTransition) {
+                updateViewModeCameraTransition();
             } else if (isDiving) {
                 // 【ダイブアニメーション中】
                 // 経過時間(0~4秒)から進捗率(0~1)を計算
@@ -958,7 +1001,7 @@
                 updateKeyboardNavigation(deltaSeconds);
                 controls.update();
                 if (state.screen === 'SINGLE') {
-                    const direction = camera.position.clone().sub(controls.target).normalize();
+                    const direction = getExplorationViewDirection(camera.position.clone().sub(controls.target));
                     if (direction.lengthSq() > 0.01) singleViewDirection.copy(direction);
                 }
             } else {

@@ -30,7 +30,7 @@ const context = {
     fetch
 };
 vm.createContext(context);
-vm.runInContext(`${dataSource}\n${apiSource}\nglobalThis.__bubbleBreakerTest = { normalizeGeneratedUniverse, normalizeFallbackUniverse, normalizeBubblePercentages, normalizeAnalysis, compactHierarchyBubbleName, buildOpenAIRootRequest, buildOpenAICentralGroupRequest, buildOpenAILeafGroupRequest, requestBubbleAnalysis, requestBubbleGroupAnalyses };`, context);
+vm.runInContext(`${dataSource}\n${apiSource}\nglobalThis.__bubbleBreakerTest = { normalizeGeneratedUniverse, normalizeFallbackUniverse, normalizeBubblePercentages, normalizeAnalysis, compactHierarchyBubbleName, buildOpenAIRootRequest, buildOpenAICentralGroupRequest, buildOpenAILeafGroupRequest, requestBubbleAnalysis, requestBubbleGroupAnalyses, arrangeBubblePositions };`, context);
 
 const bubble = (id, childId = null) => ({
     id, name: id, size: 1, color: 0x4488ff, htmlColor: '#4488ff',
@@ -55,6 +55,19 @@ const variedPercentages = context.__bubbleBreakerTest.normalizeBubblePercentages
 ]);
 assert.equal(Number(variedPercentages.reduce((sum, item) => sum + item.size, 0).toFixed(2)), 100, 'occupancy percentages should total 100');
 assert.ok(new Set(variedPercentages.map(item => item.size)).size > 1, 'flat API sizes should become varied inferred percentages');
+const layoutBubbles = [32, 24, 18, 12, 8, 6].map((size, index) => ({ ...bubble(`layout_${index}`), size }));
+const createLayout = (id, type) => {
+    const group = { id, type, bubbles: JSON.parse(JSON.stringify(layoutBubbles)) };
+    context.__bubbleBreakerTest.arrangeBubblePositions(group);
+    return JSON.parse(JSON.stringify(group.bubbles.map(item => item.pos)));
+};
+const seededLayout = createLayout('stable-layout', '双極対立型');
+assert.deepEqual(createLayout('stable-layout', '双極対立型'), seededLayout, 'the same group data should reproduce the same seeded layout');
+assert.notDeepEqual(createLayout('another-layout', '双極対立型'), seededLayout, 'different groups of the same type should vary');
+const bipolarSpan = Math.max(...seededLayout.map(pos => pos[0])) - Math.min(...seededLayout.map(pos => pos[0]));
+const concentrated = createLayout('concentrated-layout', '一極集中型');
+const concentratedSpan = Math.max(...concentrated.map(pos => pos[0])) - Math.min(...concentrated.map(pos => pos[0]));
+assert.ok(bipolarSpan > concentratedSpan, 'bipolar groups should be more widely separated than concentrated groups');
 const takenokoFallback = context.__bubbleBreakerTest.normalizeFallbackUniverse('たけのこの里が好き');
 const takenokoFallbackNames = Object.values(takenokoFallback.db).flatMap(group => group.bubbles.map(item => item.name));
 assert.ok(takenokoFallbackNames.includes('たけのこの里'), 'takenoko fallback should retain the direct subject');

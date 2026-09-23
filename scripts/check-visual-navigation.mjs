@@ -89,6 +89,10 @@ assert.doesNotMatch(indexHtml, /内部からの視点\(自認\)|外部からの�
 assert.doesNotMatch(indexHtml, /AIによる分析インサイト|detail-insight|detail-chart-a|detail-chart-b/, 'generic AI insight and placeholder charts should be removed');
 assert.match(scene, /function renderHistoryDetail\(/, 'history detail should have a dedicated timeline renderer');
 assert.match(styles, /\.detail-timeline\s*\{[^}]*overflow-x: auto/, 'history timeline should scroll horizontally');
+assert.match(styles, /\.detail-timeline-axis\s*\{[^}]*top: 50%/, 'history axis should run through the vertical center');
+assert.match(scene, /is-above[^\n]*is-below/, 'history events should alternate above and below the central axis');
+assert.match(scene, /timeline\.addEventListener\('wheel'[\s\S]*?timeline\.scrollLeft \+= movement/, 'mouse wheel input should scroll the timeline horizontally');
+assert.match(scene, /detail-timeline-tick-label/, 'history timeline should render year interval labels');
 assert.match(scene, /function renderDemographicDetail\(/, 'source composition should have a dedicated pie renderer');
 assert.match(scene, /conic-gradient/, 'source composition should render a pie chart');
 assert.match(scene, /createPerspectivePanel\('反対派の意見'/, 'opposition should render on the comparison left side');
@@ -107,7 +111,9 @@ assert.match(scene, /group-composition-label-button/, 'composition labels should
 assert.match(scene, /slice\.addEventListener\('keydown', activate\)/, 'pie slices should support keyboard activation');
 assert.match(scene, /selectBubble\(bubble\)/, 'pie labels should reuse the existing bubble zoom path');
 assert.match(styles, /\.group-composition-chart \{[^}]*width: 100%/, 'composition chart should scale within the panel');
-assert.match(styles, /\.exploration-panel\.panel-is-collapsed > \.panel-collapsible-content/, 'collapsed right panels should hide their content');
+assert.match(styles, /\.exploration-panel\.panel-is-closed/, 'closed right panels should hide the entire panel');
+assert.match(indexHtml, /data-reopen-panel="panel-group"/, 'the group panel should expose a reopen handle');
+assert.match(indexHtml, /data-reopen-panel="panel-single"/, 'the single panel should expose a reopen handle');
 assert.doesNotMatch(indexHtml, /detail-sidebar/, 'detail windows should no longer use a right sidebar');
 assert.match(indexHtml, /detail-toolbar/, 'detail controls should move into a top toolbar');
 assert.match(styles, /--hud-edge:/, 'right-side panels should share one edge offset');
@@ -206,15 +212,21 @@ assert.match(indexHtml, /class="[^"]*cosmic-ui/, 'the interface should expose th
 assert.match(indexHtml, /class="[^"]*portal-panel/, 'the input screen should use the network entry panel');
 assert.match(indexHtml, /class="[^"]*exploration-panel/, 'category screens should use the exploration panel theme hook');
 assert.match(indexHtml, /data-bubble-visual-mode="network"/, 'network bubble visual mode should be selectable');
-assert.match(indexHtml, /data-bubble-visual-mode="classic"[^>]*aria-pressed="true"[^>]*>標準/, 'the historical glass bubble should be the default');
+assert.match(indexHtml, /data-bubble-visual-mode="network"[^>]*aria-pressed="true"[^>]*>装飾あり/, 'the main network decoration should be the default');
 assert.doesNotMatch(indexHtml, /data-bubble-visual-mode="cosmic"/, 'cosmic bubble mode should be removed');
 assert.match(indexHtml, /data-bubble-visual-mode="deepSea"/, 'deep sea bubble visual mode should be selectable');
 assert.match(indexHtml, /data-bubble-visual-mode="data"/, 'data space bubble visual mode should be selectable');
 assert.match(indexHtml, /data-bubble-visual-mode="network"[^>]*>装飾あり/, 'network mode should be labelled as decorated');
-assert.doesNotMatch(indexHtml, />装飾なし</, 'undecorated option label should be removed');
+assert.match(indexHtml, /data-bubble-visual-mode="classic"[^>]*>装飾なし/, 'the undecorated glass mode should remain optional');
 assert.doesNotMatch(indexHtml, />宇宙テーマ</, 'cosmic option label should be removed');
 assert.match(indexHtml, /data-bubble-visual-mode="deepSea"[^>]*>深海/, 'deep sea mode should be labelled');
 assert.match(indexHtml, /data-bubble-visual-mode="data"[^>]*>データ空間/, 'data space mode should be labelled');
+assert.match(indexHtml, /data-view-mode="3d"[^>]*aria-pressed="true"/, '3D exploration should be the default');
+assert.match(indexHtml, /data-view-mode="2d"/, 'a flat camera exploration mode should be selectable');
+assert.match(events, /localStorage\.setItem\('bubblebreaker\.viewMode'/, 'the selected exploration view should persist');
+assert.match(scene, /const flatFieldOfView = 22;/, '2D mode should reduce perspective with a narrow field of view');
+assert.match(scene, /controls\.enableRotate = !isFlat;/, '2D mode should lock camera rotation');
+assert.match(animation, /explorationViewMode === '2d' \? worldUp : forward/, '2D keyboard movement should remain in the screen plane');
 assert.match(indexHtml, /id="btn-sound-toggle"/, 'sound toggle should remain available');
 const cosmicControlStart = indexHtml.indexOf('id="panel-bgm"');
 const cosmicControlEnd = indexHtml.indexOf('<audio id="bgm-audio"');
@@ -252,7 +264,8 @@ for (const theme of ['space', 'data']) {
 }
 assert.doesNotMatch(indexHtml.match(/id="background-theme"[\s\S]*?<\/select>/)?.[0] || '', /value="deepSea"/, 'deep sea background should be removed');
 assert.match(events, /bubblebreaker\.bubbleVisualMode/, 'bubble visual mode should persist in localStorage');
-assert.match(events, /bubbleVisualModeOptions = \['classic', 'network', 'deepSea', 'data'\]/, 'the restored classic mode and alternate themes should be accepted');
+assert.match(events, /bubbleVisualModeOptions = \['network', 'classic', 'deepSea', 'data'\]/, 'the main network mode should be the default while alternate themes remain available');
+assert.match(events, /bubbleVisualModeVersion'\) !== '3'/, 'existing classic-default users should receive the one-time main visual migration');
 assert.match(events, /data-collapse-panel/, 'panel collapse events should be wired');
 assert.match(events, /bubblebreaker\.\$\{panelId\}\.collapsed/, 'panel collapse state should persist for every panel');
 assert.match(events, /'bubblebreaker\.titleVisible'/, 'obsolete title visibility storage should be cleaned up');
@@ -264,7 +277,8 @@ assert.match(scene, /function createNetworkBubbleVisual\(/, 'network bubble deco
 assert.doesNotMatch(scene, /function createCosmicBubbleVisual\(/, 'removed cosmic bubble decorations should not be generated');
 assert.match(scene, /function createDeepSeaBubbleVisual\(/, 'deep sea bubble decorations should be generated');
 assert.match(scene, /function createDataBubbleVisual\(/, 'data space bubble decorations should be generated');
-assert.match(scene, /BUBBLE_VISUAL_MODE_NAMES = \['classic', 'network', 'deepSea', 'data'\]/, 'the restored classic mode should be supported');
+assert.match(scene, /BUBBLE_VISUAL_MODE_NAMES = \['network', 'classic', 'deepSea', 'data'\]/, 'the main network mode should be the scene default');
+assert.match(scene, /setBubbleVisualMode = function\(mode = 'network'\)/, 'bubble visuals should fall back to the main network decoration');
 assert.match(scene, /deepSeaAnimation/, 'deep sea bubble decorations should expose animation metadata');
 assert.match(scene, /dataAnimation/, 'data space bubble decorations should expose animation metadata');
 assert.doesNotMatch(scene, /function createDeepSeaBackgroundTheme\(/, 'removed deep sea background structures should not be generated');
@@ -306,13 +320,33 @@ assert.match(indexHtml, /id="btn-open-input-single"/, 'single view should expose
 assert.match(scene, /group-composition-segment-value/, 'pie percentages should render inside their segments');
 assert.match(scene, /activeBubbleId/, 'single view should highlight its current composition segment');
 assert.match(scene, /function createChildBubblePreview\(/, 'parent bubbles should preview child bubble groups');
+assert.match(scene, /while \(previewChildren\.length < 5\)/, 'each parent preview should show at least five child spheres');
 assert.match(scene, /function createHierarchyTransitionShell\(/, 'hierarchy transitions should reveal the containing bubble boundary');
-assert.match(animation, /transitionStartPosition/, 'child bubbles should expand from preview positions');
-assert.match(animation, /transitionEndPosition/, 'child bubbles should collapse into their parent on zoom out');
-assert.match(styles, /#ui-layer\.exploration-background-clear::before \{ opacity: 0; \}/, 'exploration screens should remove the full-screen haze overlay');
-assert.match(scene, /setExplorationBackgroundClarity/, 'exploration screens should disable scene fog without replacing the background');
+assert.match(scene, /function getNestedGroupWorldScale\(/, 'child groups should have a stable physical scale inside their parent bubble');
+assert.match(scene, /function buildNavigationEntries\(/, 'saved navigation paths should rebuild the same nested world positions');
+const groupTransitionSource = animation.match(/function updateGroupTransition\([\s\S]*?function updateViewModeCameraTransition/)?.[0] || '';
+assert.doesNotMatch(groupTransitionSource, /bubble\.mesh\.(?:scale|position)/, 'category transitions must not resize or relocate bubble objects');
+assert.match(groupTransitionSource, /camera\.position\.lerpVectors/, 'category transitions should be expressed through camera movement');
+assert.doesNotMatch(styles, /exploration-background-clear/, 'exploration screens should retain the main background overlay');
+assert.doesNotMatch(scene, /setExplorationBackgroundClarity|explorationBackgroundClear/, 'exploration screens should retain the main fog path');
+assert.match(scene, /scene\.fog\.density = colors\.density/, 'background fog density should use the main implementation');
 assert.doesNotMatch(scene, /radius \* 1\.5 \+ 2/, 'single bubble framing should not use the legacy over-close distance');
 assert.match(scene, /radius \/ Math\.sin\(limitingFov \/ 2\)/, 'single bubble distance should derive from radius and camera FOV');
+assert.match(scene, /getSingleBubbleViewingDistance\(radius\)/, 'group approach and single view should share one framing distance');
+assert.match(scene, /reachedSingleApparentSize/, 'single view should open when the target reaches its final apparent size');
+assert.doesNotMatch(indexHtml, /立ち位置解析|偏り度メーター|id="bias-meter"|id="single-percent"/, 'removed single-panel analysis widgets should not remain');
+assert.match(indexHtml, /id="about-overlay"/, 'the title should open a full-screen service introduction');
+assert.match(indexHtml, /フィルターバブルを脱し、[\s\S]*本来のインターネットを自由に旅する/, 'the introduction should use the requested main title');
+assert.match(indexHtml, /SUPPORT[\s\S]*CONTRADICT[\s\S]*PRIMARY[\s\S]*CONTEXT/, 'the introduction should diagram the four evidence search paths');
+assert.match(indexHtml, /Evidence[\s\S]*Claim[\s\S]*OpenAI[\s\S]*Bubble Universe/, 'the introduction should explain the implemented evidence-based exploration flow');
+assert.match(styles, /\.about-overlay\s*\{[\s\S]*?overflow-y: auto/, 'the complete introduction page should scroll vertically');
+assert.match(styles, /\.about-close\s*\{[^}]*position: fixed/, 'the return-to-exploration button should remain fixed');
+assert.match(events, /function setAboutOpen\(open\)/, 'the service introduction should preserve and restore the current exploration');
+assert.match(scene, /const BUBBLE_GROUP_WORLD_SCALE = 1\.75/, 'bubble groups should have a larger world-space scale');
+assert.match(animation, /progress \/ 0\.46/, 'descending transitions should approach the parent before revealing children');
+assert.match(animation, /parentReveal/, 'ascending transitions should reveal the fixed parent world around the child group');
+assert.match(scene, /setFromUnitVectors\(new THREE\.Vector3\(0, 0, 1\), direction\.clone\(\)\.negate\(\)\)/, 'shooting-star tails should oppose their velocity');
+assert.match(animation, /orbitVelocity/, 'comet orientation should derive from its orbital velocity');
 
 const [api, data] = await Promise.all([
     readFile(path.join(root, 'src', 'js', 'api.js'), 'utf8'),
@@ -322,7 +356,10 @@ for (const groupType of ['分散型', '一極集中型', '多極型', '双極対
     assert.match(api, new RegExp(groupType), `API should support group type ${groupType}`);
 }
 assert.match(api, /function arrangeBubblePositions\(group\)/, 'group layout should be type-aware');
+assert.match(api, /function createLayoutRandom\(group\)/, 'group layout variation should use a stable data-derived seed');
+assert.doesNotMatch(api.match(/function createLayoutRandom[\s\S]*?function arrangeBubblePositions/)?.[0] || '', /Math\.random/, 'layout variation should remain reproducible');
 assert.match(api, /ordered\[0\]\.pos = \[0, 0, 0\]/, 'one-pole groups should center the largest bubble');
+assert.match(scene, /function getTypeBubbleScale\(group, bubbleData\)/, 'group types should also differ in visual bubble scale');
 assert.match(scene, /arrangeBubblePositions\(data\)/, 'scene generation should use type-aware layout');
 assert.match(data, /type:\s*["']双極対立型["']/, 'fixed data should exercise bipolar layout');
 assert.match(data, /type:\s*["']階層型["']/, 'fixed data should exercise hierarchy layout');

@@ -2,9 +2,6 @@
         // .screen-active クラスを付け外しすることで、フェードイン・フェードアウトを実現
         function switchScreen(screenName) {
             if (screenName !== 'GROUP' && screenName !== 'SINGLE') playSound('ui');
-            const explorationIsActive = screenName === 'GROUP' || screenName === 'SINGLE';
-            document.getElementById('ui-layer')?.classList.toggle('exploration-background-clear', explorationIsActive);
-            if (typeof window.setExplorationBackgroundClarity === 'function') window.setExplorationBackgroundClarity(explorationIsActive);
             document.querySelectorAll('.screen-container').forEach(el => {
                 el.classList.remove('screen-active');
                 el.classList.add('screen-hidden');
