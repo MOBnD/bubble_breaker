@@ -546,11 +546,17 @@
             }[backgroundTheme];
             scene.background.set(colors.clear);
             scene.fog.color.set(colors.fog);
-            scene.fog.density = colors.density;
+            scene.userData.themeFogDensity = colors.density;
+            scene.fog.density = scene.userData.explorationBackgroundClear ? 0 : colors.density;
             renderer.setClearColor(colors.clear, 1);
             setThemeObjectsVisible(backgroundTheme);
             if (ngc3324Dome) ngc3324Dome.visible = backgroundTheme === 'space' && window.__bubbleBreakerNGC3324Visible !== false;
             return backgroundTheme;
+        };
+        window.setExplorationBackgroundClarity = function(active) {
+            scene.userData.explorationBackgroundClear = Boolean(active);
+            scene.fog.density = active ? 0 : (scene.userData.themeFogDensity || 0);
+            return scene.userData.explorationBackgroundClear;
         };
 
         function softenNGC3324Seam(texture) {
@@ -836,7 +842,6 @@
         let groupCameraInteractionArmed = false;
         let groupEntryCameraDistance = 25;
         let singleViewDirection = new THREE.Vector3(0, 0, 1);
-        let explorerSelectedBubbleId = null;
         const configuredFieldOfView = 60;
         const warpSpeedFactor = 1;
         const warpStopCount = 3;
@@ -850,19 +855,19 @@
                 visibleBubble.mesh.userData.analysisProbe.userData.analysisProbeAnimation.completionStartedAt = performance.now();
             }
         };
-        const BUBBLE_VISUAL_MODE_NAMES = ['network', 'deepSea', 'data'];
+        const BUBBLE_VISUAL_MODE_NAMES = ['classic', 'network', 'deepSea', 'data'];
         const storedSceneBubbleVisualMode = localStorage.getItem('bubblebreaker.bubbleVisualMode');
-        let bubbleVisualMode = BUBBLE_VISUAL_MODE_NAMES.includes(storedSceneBubbleVisualMode) ? storedSceneBubbleVisualMode : 'network';
-        if (['classic', 'cosmic'].includes(storedSceneBubbleVisualMode)) localStorage.setItem('bubblebreaker.bubbleVisualMode', 'network');
+        let bubbleVisualMode = BUBBLE_VISUAL_MODE_NAMES.includes(storedSceneBubbleVisualMode) ? storedSceneBubbleVisualMode : 'classic';
 
-        function getGroupOverviewTarget() {
+        function getGroupOverviewTarget(directionOverride = null) {
             if (!currentBubbles.length) return null;
             const bounds = new THREE.Box3();
             currentBubbles.forEach(bubble => {
                 if (!bubble.mesh.visible) return;
-                const radius = Math.max(0.5, bubble.mesh.scale.x);
-                bounds.expandByPoint(bubble.mesh.position.clone().addScalar(radius));
-                bounds.expandByPoint(bubble.mesh.position.clone().addScalar(-radius));
+                const radius = Math.max(0.5, bubble.mesh.userData.finalScale || bubble.mesh.scale.x);
+                const position = bubble.mesh.userData.transitionFinalPosition || bubble.mesh.position;
+                bounds.expandByPoint(position.clone().addScalar(radius));
+                bounds.expandByPoint(position.clone().addScalar(-radius));
             });
             if (bounds.isEmpty()) return null;
             const sphere = bounds.getBoundingSphere(new THREE.Sphere());
@@ -872,7 +877,9 @@
                 sphere.radius / Math.max(0.08, Math.tan(verticalHalfFov)),
                 sphere.radius / Math.max(0.08, Math.tan(horizontalHalfFov))
             ) * 1.28;
-            const direction = camera.position.clone().sub(controls.target);
+            const direction = directionOverride
+                ? directionOverride.clone()
+                : camera.position.clone().sub(controls.target);
             if (direction.lengthSq() < 0.01 || !Number.isFinite(direction.x)) direction.set(0, 0, 1);
             direction.normalize();
             return {
@@ -1398,7 +1405,9 @@
 
         function ensureBubbleVisual(mesh, bubbleData, level, isFocus = false) {
             if (!mesh || !bubbleData) return null;
-            const visual = bubbleVisualMode === 'deepSea'
+            const visual = bubbleVisualMode === 'classic'
+                ? null
+                : bubbleVisualMode === 'deepSea'
                 ? ensureDeepSeaBubbleVisual(mesh, bubbleData, level, isFocus)
                 : bubbleVisualMode === 'data'
                     ? ensureDataBubbleVisual(mesh, bubbleData, level, isFocus)
@@ -1409,8 +1418,8 @@
             return visual;
         }
 
-        window.setBubbleVisualMode = function(mode = 'network') {
-            bubbleVisualMode = BUBBLE_VISUAL_MODE_NAMES.includes(mode) ? mode : 'network';
+        window.setBubbleVisualMode = function(mode = 'classic') {
+            bubbleVisualMode = BUBBLE_VISUAL_MODE_NAMES.includes(mode) ? mode : 'classic';
             const bubbles = [...currentBubbles];
             if (transitionState) bubbles.push(...(transitionState.outgoing || []));
             bubbles.forEach(bubble => {
@@ -1419,6 +1428,87 @@
             });
             return bubbleVisualMode;
         };
+
+        function createChildBubblePreview(bubbleData) {
+            const childGroup = bubbleData && bubbleData.childId ? activeDB[bubbleData.childId] : null;
+            if (!childGroup || !Array.isArray(childGroup.bubbles) || !childGroup.bubbles.length) return null;
+            const preview = new THREE.Group();
+            preview.name = 'child-bubble-preview';
+            preview.raycast = () => {};
+            const validChildren = childGroup.bubbles.filter(isRenderableBubbleData).slice(0, 8);
+            const maximumDistance = Math.max(1, ...validChildren.map(child => {
+                const position = Array.isArray(child.pos) ? child.pos : [0, 0, 0];
+                return Math.hypot(Number(position[0]) || 0, Number(position[1]) || 0, Number(position[2]) || 0);
+            }));
+            validChildren.forEach((child, index) => {
+                const source = Array.isArray(child.pos) ? child.pos : [Math.cos(index) * 10, Math.sin(index) * 10, 0];
+                const position = new THREE.Vector3(...source).multiplyScalar(0.48 / maximumDistance);
+                const color = new THREE.Color(child.htmlColor || child.color || 0x9beeff);
+                const radius = Math.min(0.12, 0.055 + Math.sqrt(Math.max(1, Number(child.size) || 1)) * 0.008);
+                const miniature = new THREE.Mesh(
+                    new THREE.SphereGeometry(radius, 12, 10),
+                    new THREE.MeshBasicMaterial({
+                        color,
+                        transparent: true,
+                        opacity: 0.34,
+                        depthWrite: false,
+                        blending: THREE.AdditiveBlending,
+                        fog: false
+                    })
+                );
+                miniature.position.copy(position);
+                miniature.userData.childBubbleId = child.id;
+                preview.add(miniature);
+            });
+            const boundary = new THREE.Mesh(
+                new THREE.SphereGeometry(0.66, 20, 14),
+                new THREE.MeshBasicMaterial({
+                    color: 0xbfefff,
+                    transparent: true,
+                    opacity: 0.075,
+                    wireframe: true,
+                    depthWrite: false,
+                    blending: THREE.AdditiveBlending,
+                    fog: false
+                })
+            );
+            preview.add(boundary);
+            preview.userData.childGroupId = childGroup.id;
+            return preview;
+        }
+
+        function createHierarchyTransitionShell(position, radius, color = 0x9beeff) {
+            const shell = new THREE.Mesh(
+                new THREE.SphereGeometry(1, 32, 22),
+                new THREE.MeshBasicMaterial({
+                    color,
+                    transparent: true,
+                    opacity: 0.16,
+                    side: THREE.DoubleSide,
+                    wireframe: true,
+                    depthWrite: false,
+                    blending: THREE.AdditiveBlending,
+                    fog: false
+                })
+            );
+            shell.position.copy(position);
+            shell.scale.setScalar(Math.max(1, radius));
+            shell.userData.baseScale = Math.max(1, radius);
+            scene.add(shell);
+            return shell;
+        }
+
+        function arrangeTransitionPreview(bubbles, center, radius, startKey, finalKey) {
+            if (!bubbles.length) return;
+            const maximumDistance = Math.max(1, ...bubbles.map(bubble => bubble.mesh.position.distanceTo(center)));
+            bubbles.forEach(bubble => {
+                const finalPosition = bubble.mesh.position.clone();
+                const previewPosition = center.clone().add(finalPosition.clone().sub(center).multiplyScalar((radius * 0.58) / maximumDistance));
+                bubble.mesh.userData[startKey] = previewPosition;
+                bubble.mesh.userData[finalKey] = finalPosition;
+                if (startKey === 'transitionStartPosition') bubble.mesh.position.copy(previewPosition);
+            });
+        }
 
         // バブルの3Dモデル(Mesh)を作る関数
         function createBubbleMesh(size, colorHex, position, bubbleData = null, level = 'central', isFocus = false) {
@@ -1445,6 +1535,8 @@
             mesh.userData.dataVisual = null;
             mesh.userData.analysisProbe = createAnalysisProbeVisual(isFocus);
             mesh.add(mesh.userData.analysisProbe);
+            mesh.userData.childPreview = createChildBubblePreview(bubbleData);
+            if (mesh.userData.childPreview) mesh.add(mesh.userData.childPreview);
             if (bubbleData) ensureBubbleVisual(mesh, bubbleData, level, isFocus);
             return mesh;
         }
@@ -1480,6 +1572,11 @@
         function disposeBubble(bubble) {
             if (!bubble) return;
             scene.remove(bubble.mesh);
+            if (bubble.mesh.userData && bubble.mesh.userData.childPreview) {
+                disposeObjectTree(bubble.mesh.userData.childPreview);
+                bubble.mesh.remove(bubble.mesh.userData.childPreview);
+                bubble.mesh.userData.childPreview = null;
+            }
             ['networkVisual', 'deepSeaVisual', 'dataVisual', 'analysisProbe'].forEach(key => {
                 if (!bubble.mesh.userData || !bubble.mesh.userData[key]) return;
                 disposeObjectTree(bubble.mesh.userData[key]);
@@ -1504,22 +1601,7 @@
             if (typeof requestBubbleAnalysis === 'function' && state.groupData) {
                 void requestBubbleAnalysis(bubbleData, state.groupData);
             }
-            if (explorerMode && bubbleData.childId && activeDB[bubbleData.childId]) {
-                explorerSelectedBubbleId = bubbleData.id;
-                loadGroup(bubbleData.childId);
-            }
-            else if (!explorerMode) loadSingle(bubbleData);
-        }
-
-        function getExplorerZoomTarget() {
-            if (!state.groupData || !Array.isArray(state.groupData.bubbles)) return null;
-            const selected = state.groupData.bubbles.find(bubble => bubble.id === explorerSelectedBubbleId && bubble.childId && activeDB[bubble.childId]);
-            if (selected) return selected;
-            const focus = state.groupData.bubbles.find(bubble => isFocusPathBubble(state.groupData, bubble) && bubble.childId && activeDB[bubble.childId]);
-            if (focus) return focus;
-            return state.groupData.bubbles
-                .filter(bubble => bubble.childId && activeDB[bubble.childId])
-                .sort((a, b) => (Number(b.size) || 0) - (Number(a.size) || 0))[0] || null;
+            loadSingle(bubbleData);
         }
 
         window.getBubbleNavigationPath = function() {
@@ -1587,8 +1669,8 @@
             return path;
         }
 
-        function renderGroupBreadcrumb(groupId) {
-            const container = document.getElementById('group-breadcrumb');
+        function renderGroupBreadcrumb(groupId, containerId = 'group-breadcrumb', currentBubble = null) {
+            const container = document.getElementById(containerId);
             if (!container) return;
             container.replaceChildren();
             const path = getGroupHierarchyPath(groupId);
@@ -1611,6 +1693,19 @@
                 }
                 container.appendChild(button);
             });
+            if (currentBubble) {
+                const separator = document.createElement('span');
+                separator.className = 'group-breadcrumb-separator';
+                separator.textContent = '→';
+                container.appendChild(separator);
+                const current = document.createElement('button');
+                current.type = 'button';
+                current.textContent = currentBubble.name;
+                current.title = currentBubble.name;
+                current.disabled = true;
+                current.setAttribute('aria-current', 'page');
+                container.appendChild(current);
+            }
         }
 
         window.navigateToBreadcrumbGroup = function(groupId) {
@@ -1665,9 +1760,10 @@
             }
         }
 
-        function renderGroupComposition(bubbles) {
-            const chart = document.getElementById('group-composition-chart');
-            const fallback = document.getElementById('group-list');
+        function renderGroupComposition(bubbles, options = {}) {
+            const chart = document.getElementById(options.chartId || 'group-composition-chart');
+            const fallback = document.getElementById(options.fallbackId || 'group-list');
+            const activeBubbleId = options.activeBubbleId ? String(options.activeBubbleId) : null;
             if (!chart || !fallback) return;
             const composition = createGroupComposition(bubbles);
             chart.replaceChildren();
@@ -1680,7 +1776,7 @@
             }
 
             fallback.hidden = true;
-            chart.setAttribute('aria-label', `${state.groupData?.name || '現在のバブル群'}の構成要素と占有率`);
+            chart.setAttribute('aria-label', `${state.groupData?.title || '現在のバブル群'}の構成要素と占有率`);
             chart.appendChild(createGroupChartElement('title', {}, '構成要素を選択すると対応するバブルへズームします'));
             const centerX = 180;
             const centerY = 125;
@@ -1713,8 +1809,9 @@
             labels.forEach(item => {
                 const { bubble, value } = item;
                 const isFocus = isFocusPathBubble(state.groupData, bubble);
+                const isCurrent = activeBubbleId === String(bubble.id);
                 const slice = createGroupChartElement('circle', {
-                    class: `group-composition-slice${isFocus ? ' is-focus' : ''}`,
+                    class: `group-composition-slice${isFocus ? ' is-focus' : ''}${isCurrent ? ' is-current' : ''}`,
                     cx: centerX,
                     cy: centerY,
                     r: radius,
@@ -1735,6 +1832,15 @@
                 slice.addEventListener('click', activate);
                 slice.addEventListener('keydown', activate);
                 chart.appendChild(slice);
+                const percentageRadius = value < 8 ? (Math.round(item.cursor) % 2 ? 43 : 62) : radius;
+                chart.appendChild(createGroupChartElement('text', {
+                    class: 'group-composition-segment-value',
+                    x: centerX + Math.cos(item.angle) * percentageRadius,
+                    y: centerY + Math.sin(item.angle) * percentageRadius + 3,
+                    'text-anchor': 'middle',
+                    'aria-hidden': 'true',
+                    style: value < 5 ? 'font-size:7px' : value < 9 ? 'font-size:8px' : ''
+                }, `${value.toLocaleString('ja-JP')}%`));
 
                 const startX = centerX + Math.cos(item.angle) * outerRadius;
                 const startY = centerY + Math.sin(item.angle) * outerRadius;
@@ -1752,7 +1858,7 @@
 
                 const labelX = rightSide ? 252 : 4;
                 const label = createGroupChartElement('g', {
-                    class: `group-composition-label-button${isFocus ? ' is-focus' : ''}`,
+                    class: `group-composition-label-button${isFocus ? ' is-focus' : ''}${isCurrent ? ' is-current' : ''}`,
                     role: 'button',
                     tabindex: 0,
                     'aria-label': `${bubble.name}へズーム`
@@ -1780,7 +1886,7 @@
                     x: labelX + 52,
                     y: item.labelY + 11,
                     'text-anchor': 'middle'
-                }, `${value.toLocaleString('ja-JP')}%${isFocus ? '・入力意見' : ''}`));
+                }, `${value.toLocaleString('ja-JP')}%${isCurrent ? '・現在' : isFocus ? '・入力意見' : ''}`));
                 chart.appendChild(label);
             });
 
@@ -1812,6 +1918,10 @@
             if (transitionState) {
                 const activeMeshes = new Set(currentBubbles.map(bubble => bubble.mesh));
                 transitionState.outgoing.forEach(bubble => { if (!activeMeshes.has(bubble.mesh)) disposeBubble(bubble); });
+                if (transitionState.shell) {
+                    scene.remove(transitionState.shell);
+                    disposeObjectTree(transitionState.shell);
+                }
                 transitionState = null;
             }
             groupZoomOutReady = false;
@@ -1819,6 +1929,7 @@
             groupCameraInteractionArmed = false;
             const previousGroupId = state.groupId;
             const previousScreen = state.screen;
+            const previousBubbleData = state.bubbleData;
             const preservedViewDirection = previousScreen === 'SINGLE'
                 ? singleViewDirection.clone().normalize()
                 : camera.position.clone().sub(controls.target).normalize();
@@ -1841,15 +1952,6 @@
                 nextScale = Math.max(0.42, previousScale * 0.9);
                 navigationStack.push({ groupId, parentGroupId: data.parentId || previousGroupId, anchorBubbleId: state.bubbleData.id, worldPosition: nextOffset.clone(), worldScale: nextScale, depth: navigationStack.length });
                 transitionType = 'zoomIn';
-            } else if (explorerMode && previousScreen === 'GROUP' && state.groupData) {
-                const anchorBubble = state.groupData.bubbles.find(bubble => bubble.childId === groupId);
-                if (anchorBubble) {
-                    const anchorPosition = new THREE.Vector3(...anchorBubble.pos).multiplyScalar(previousScale);
-                    nextOffset.copy(previousOffset).add(anchorPosition);
-                    nextScale = Math.max(0.42, previousScale * 0.9);
-                    navigationStack.push({ groupId, parentGroupId: data.parentId || previousGroupId, anchorBubbleId: anchorBubble.id, worldPosition: nextOffset.clone(), worldScale: nextScale, depth: navigationStack.length });
-                    transitionType = 'zoomIn';
-                }
             } else if (previousScreen === 'GROUP' && state.groupData && state.groupData.parentId === groupId) {
                 const parentEntryIndex = navigationStack.findIndex(entry => entry.groupId === groupId);
                 const parentEntry = parentEntryIndex >= 0 ? navigationStack[parentEntryIndex] : null;
@@ -1876,8 +1978,6 @@
             if (typeof requestBubbleGroupAnalyses === 'function') {
                 void requestBubbleGroupAnalyses(data);
             }
-            explorerSelectedBubbleId = null;
-
             // 古いバブル（3DモデルとHTMLラベル）を画面から削除
             const outgoingBubbles = currentBubbles;
             currentBubbles = [];
@@ -1918,7 +2018,32 @@
             if (transitionType === 'instant') {
                 outgoingBubbles.forEach(disposeBubble);
             } else {
-                transitionState = { outgoing: outgoingBubbles, incoming: currentBubbles, startedAt: performance.now(), duration: transitionType === 'dive' ? 1800 : 1350, type: transitionType };
+                let shell = null;
+                if (transitionType === 'zoomIn' && previousBubbleData) {
+                    const parentBubble = outgoingBubbles.find(bubble => bubble.data.id === previousBubbleData.id);
+                    if (parentBubble) {
+                        const center = parentBubble.mesh.position.clone();
+                        const radius = parentBubble.mesh.userData.finalScale || parentBubble.mesh.scale.x;
+                        arrangeTransitionPreview(currentBubbles, center, radius, 'transitionStartPosition', 'transitionFinalPosition');
+                        shell = createHierarchyTransitionShell(center, radius, parentBubble.data.color);
+                    }
+                } else if (transitionType === 'zoomOut') {
+                    const containingBubble = currentBubbles.find(bubble => bubble.data.childId === previousGroupId);
+                    if (containingBubble) {
+                        const center = containingBubble.mesh.position.clone();
+                        const radius = containingBubble.mesh.userData.finalScale || containingBubble.mesh.scale.x;
+                        arrangeTransitionPreview(outgoingBubbles, center, radius, 'transitionEndPosition', 'transitionStartPosition');
+                        shell = createHierarchyTransitionShell(center, radius, containingBubble.data.color);
+                    }
+                }
+                transitionState = {
+                    outgoing: outgoingBubbles,
+                    incoming: currentBubbles,
+                    shell,
+                    startedAt: performance.now(),
+                    duration: transitionType === 'dive' ? 1800 : 1500,
+                    type: transitionType
+                };
             }
 
             // UIパネルの情報を更新
@@ -1938,25 +2063,30 @@
             // 右側のリスト（構成要素と占有率）を生成
             renderGroupComposition(data.bubbles);
 
-            // カメラ位置の設定（ダイブ後か、通常の移動かで動きを変える）
+            // 現在の構成要素全体が画角に収まる距離を実測し、階層の深さに依存した過剰ズームを避ける。
+            const overviewTarget = getGroupOverviewTarget(preservedViewDirection);
+            const groupCenter = overviewTarget ? overviewTarget.center : nextOffset;
+            const desiredCameraPosition = overviewTarget
+                ? overviewTarget.cameraPosition
+                : nextOffset.clone().add(preservedViewDirection.clone().multiplyScalar(32));
+            const viewingDistance = desiredCameraPosition.distanceTo(groupCenter);
             if (isAfterDive) {
                 // 銀河団の中心から中央カテゴリへ滑らかに接近する。
                 controls.enabled = false;
-                camera.position.copy(nextOffset).add(new THREE.Vector3(0, 0, 70 * nextScale));
-                targetCameraPos.copy(nextOffset).add(new THREE.Vector3(0, 0, 25 * nextScale));
+                camera.position.copy(groupCenter).add(preservedViewDirection.clone().multiplyScalar(Math.max(70, viewingDistance * 2.8)));
+                targetCameraPos.copy(desiredCameraPosition);
                 isZoomingIntoGroup = true;
-                groupEntryCameraDistance = 25 * nextScale;
+                groupEntryCameraDistance = viewingDistance;
             } else {
                 controls.enabled = transitionType === 'instant';
-                const viewingDistance = 25 * nextScale;
-                if (transitionType === 'instant') camera.position.copy(nextOffset).add(preservedViewDirection.clone().multiplyScalar(viewingDistance));
-                targetCameraPos.copy(nextOffset).add(preservedViewDirection.clone().multiplyScalar(viewingDistance));
+                if (transitionType === 'instant') camera.position.copy(desiredCameraPosition);
+                targetCameraPos.copy(desiredCameraPosition);
                 groupEntryCameraDistance = viewingDistance;
                 if (transitionType === 'instant') stopZoomSound();
             }
             // 個別バブルから戻るときも、正面へリセットせず元の視線方向を維持する。
-            controls.target.copy(nextOffset);
-            targetControlTarget.copy(nextOffset);
+            controls.target.copy(groupCenter);
+            targetControlTarget.copy(groupCenter);
             controls.update();
             
             // 画面UIをバブル群画面(GROUP)に切り替え
@@ -1985,11 +2115,18 @@
             controls.enabled = false; // マウスによる視点操作を一時無効化
             // 現在の視線方向を維持したまま対象バブルへ寄る。固定の正面方向は使わない。
             targetControlTarget.copy(targetPos);
-            targetCameraPos.copy(targetPos).add(viewDirection.multiplyScalar(radius * 1.5 + 2));
+            const verticalFov = THREE.MathUtils.degToRad(camera.fov);
+            const horizontalFov = 2 * Math.atan(Math.tan(verticalFov / 2) * Math.max(0.5, camera.aspect));
+            const limitingFov = Math.min(verticalFov, horizontalFov);
+            const viewingDistance = Math.max(12, radius / Math.sin(limitingFov / 2) * 1.34 + 2);
+            targetCameraPos.copy(targetPos).add(viewDirection.multiplyScalar(viewingDistance));
 
             // UIパネルの情報を更新
             document.getElementById('single-title').innerText = bubbleData.name;
             document.getElementById('single-desc').innerText = bubbleData.desc || `${bubbleData.name}に関する意見や評価が集まるバブルです。`;
+            document.getElementById('single-panel-title').innerText = bubbleData.name;
+            document.getElementById('single-panel-desc').innerText = bubbleData.desc || `${bubbleData.name}に関する意見や評価が集まるバブルです。`;
+            document.getElementById('single-group-type').innerText = state.groupData.type;
             document.getElementById('single-percent').innerText = bubbleData.size;
             document.getElementById('single-estimated').classList.toggle('hidden', bubbleData.isEstimated !== true);
             
@@ -2002,6 +2139,12 @@
             // 偏り度メーターのバー幅を計算（占有率sizeをもとに適当な割合を算出）
             const biasWidth = Math.min(100, Math.max(20, bubbleData.size * 1.5));
             document.getElementById('bias-meter').style.width = `${biasWidth}%`;
+            renderGroupBreadcrumb(state.groupId, 'single-breadcrumb', bubbleData);
+            renderGroupComposition(state.groupData.bubbles, {
+                chartId: 'single-composition-chart',
+                fallbackId: 'single-group-list',
+                activeBubbleId: bubbleData.id
+            });
 
             switchScreen('SINGLE');
             showToast(`個別バブル「${bubbleData.name}」にズームしました`);

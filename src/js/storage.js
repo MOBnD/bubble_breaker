@@ -415,9 +415,11 @@
 
         window.initializeBubbleSessionUI = function() {
             const inputButton = document.getElementById('btn-open-input');
+            const singleInputButton = document.getElementById('btn-open-input-single');
             const returnButton = document.getElementById('btn-return-current-exploration');
             const inputScreen = document.getElementById('screen-input');
             if (inputButton) inputButton.addEventListener('click', window.openBubbleInputScreen);
+            if (singleInputButton) singleInputButton.addEventListener('click', window.openBubbleInputScreen);
             if (returnButton) returnButton.addEventListener('click', () => {
                 if (state.groupId && activeDB[state.groupId]) loadGroup(state.groupId);
             });

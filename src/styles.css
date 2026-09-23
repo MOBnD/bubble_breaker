@@ -132,7 +132,9 @@
                 radial-gradient(circle at 50% 50%, transparent 0 28%, rgba(49, 115, 212, 0.07) 62%, transparent 100%);
             background-size: 48px 48px, 48px 48px, 100% 100%;
             mask-image: linear-gradient(to bottom, rgba(0,0,0,0.92), transparent 92%);
+            transition: opacity 240ms ease;
         }
+        #ui-layer.exploration-background-clear::before { opacity: 0; }
 
         .glass-panel {
             position: relative;
@@ -323,7 +325,7 @@
             font-weight: 800;
             letter-spacing: 0.12em;
         }
-        .bubble-visual-options { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; }
+        .bubble-visual-options { display: grid; grid-template-columns: repeat(2, 1fr); gap: 4px; }
         .bubble-visual-options button {
             min-height: 30px;
             padding: 3px 5px;
@@ -341,35 +343,6 @@
             background: rgba(72, 229, 255, 0.16);
             box-shadow: 0 0 14px rgba(72, 229, 255, 0.14);
         }
-        .visibility-control {
-            display: grid;
-            grid-template-columns: repeat(2, 1fr);
-            gap: 4px;
-        }
-        .visibility-control button {
-            min-height: 28px;
-            padding: 3px 5px;
-            color: var(--ui-muted);
-            border: 1px solid rgba(136, 175, 216, 0.22);
-            border-radius: 6px;
-            background: rgba(7, 20, 43, 0.76);
-            font-size: 10px;
-            cursor: pointer;
-            transition: color 160ms ease, border-color 160ms ease, background 160ms ease;
-        }
-        .visibility-control button:hover, .visibility-control button[aria-pressed="true"] {
-            color: #fff;
-            border-color: var(--ui-cyan);
-            background: rgba(72, 229, 255, 0.16);
-        }
-        .keyboard-help {
-            color: var(--ui-dim);
-            font-size: 9px;
-            line-height: 1.5;
-            text-align: center;
-        }
-        .ui-title-hidden { display: none !important; }
-        .ui-all-hidden { display: none !important; }
         .theme-select-row { flex-direction: column; align-items: stretch !important; gap: 4px !important; }
         .theme-select-row select { width: 100%; }
         .exploration-panel { min-height: 0; transition: width 220ms ease, max-height 220ms ease, padding 220ms ease; }
@@ -480,7 +453,8 @@
             border-color: rgba(72, 229, 255, 0.34);
             background: linear-gradient(160deg, rgba(9, 24, 52, 0.9), rgba(5, 12, 29, 0.92));
         }
-        #panel-group {
+        #panel-group,
+        #panel-single {
             display: flex;
             flex-direction: column;
             gap: 10px;
@@ -490,8 +464,11 @@
             padding: 14px;
             overflow: hidden;
         }
-        #panel-group > .panel-header { flex: 0 0 auto; }
-        #panel-group-content { min-height: 0; max-height: none; padding-right: 3px; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
+        #panel-group > .panel-header,
+        #panel-single > .panel-header { flex: 0 0 auto; }
+        #panel-group-content,
+        #panel-single-content { min-height: 0; max-height: none; padding-right: 3px; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
+        .single-position-card { padding: 12px; border: 1px solid rgba(72, 229, 255, 0.18); border-radius: 10px; background: rgba(2, 9, 24, 0.6); }
         .exploration-panel h2 { color: var(--ui-ink); letter-spacing: -0.03em; }
         .exploration-panel .text-blue-300 { color: var(--ui-cyan) !important; }
         .exploration-panel .text-gray-300, .exploration-panel .text-gray-400 { color: var(--ui-muted) !important; }
@@ -510,12 +487,25 @@
         .group-composition-slice { fill: none; stroke-width: 34; cursor: pointer; transition: opacity 150ms ease, stroke-width 150ms ease, filter 150ms ease; }
         .group-composition-slice:hover, .group-composition-slice:focus-visible { stroke-width: 39; filter: brightness(1.2) drop-shadow(0 0 4px currentColor); outline: none; }
         .group-composition-slice.is-focus { filter: drop-shadow(0 0 5px #fde047); }
+        .group-composition-slice.is-current { stroke-width: 40; filter: brightness(1.24) drop-shadow(0 0 7px #fff4a3); }
+        .group-composition-segment-value {
+            fill: #f8fbff;
+            font-size: 9px;
+            font-weight: 900;
+            paint-order: stroke;
+            stroke: rgba(2, 7, 18, 0.92);
+            stroke-width: 2.5px;
+            stroke-linejoin: round;
+            pointer-events: none;
+        }
         .group-composition-leader { fill: none; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; pointer-events: none; opacity: 0.84; }
         .group-composition-endpoint { pointer-events: none; }
         .group-composition-label-button { cursor: pointer; outline: none; }
         .group-composition-label-button rect { fill: rgba(6, 18, 41, 0.94); stroke: rgba(125, 160, 211, 0.28); stroke-width: 1; transition: fill 150ms ease, stroke 150ms ease; }
         .group-composition-label-button:hover rect, .group-composition-label-button:focus-visible rect { fill: rgba(72, 229, 255, 0.16); stroke: rgba(72, 229, 255, 0.8); }
         .group-composition-label-button.is-focus rect { stroke: rgba(253, 224, 71, 0.85); }
+        .group-composition-label-button.is-current rect { fill: rgba(253, 224, 71, 0.14); stroke: #fff1a8; stroke-width: 1.8; }
+        .group-composition-label-button.is-current .group-composition-label-name { fill: #fff5bd; }
         .group-composition-label-name { fill: #e8f4ff; font-size: 10px; font-weight: 700; pointer-events: none; }
         .group-composition-label-value { fill: #9fb4cf; font-size: 8px; font-variant-numeric: tabular-nums; pointer-events: none; }
         .group-composition-center { fill: #071226; stroke: rgba(72, 229, 255, 0.18); }
@@ -622,7 +612,7 @@
             .detail-timeline-event { flex-basis: min(82vw, 290px); }
             .exploration-screen { padding: 92px 14px 14px !important; }
             .exploration-panel { width: min(100%, 420px) !important; }
-            #panel-group { max-width: 100%; max-height: calc(100dvh - 106px); padding: 12px; }
+            #panel-group, #panel-single { max-width: 100%; max-height: calc(100dvh - 106px); padding: 12px; }
             .group-composition-chart { height: clamp(195px, 31vh, 230px); }
         }
     </style>

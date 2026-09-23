@@ -11,7 +11,6 @@
         };
         let focusEntryGroupId = null;
         let focusEntryBubbleId = null;
-        let explorerMode = localStorage.getItem('bubblebreaker.explorerMode') === 'on';
         
         let isDiving = false;          // ワープアニメーション中かどうかの判定フラグ
         let diveStartTime = 0;         // ワープ開始時の時間（アニメーションの進行度計算用）

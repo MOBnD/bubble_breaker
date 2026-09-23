@@ -769,15 +769,37 @@
                 const finalScale = bubble.mesh.userData.finalScale || bubble.mesh.scale.x;
                 bubble.mesh.scale.setScalar(finalScale * (0.12 + eased * 0.88));
                 bubble.mesh.material.opacity = 0.02 + eased * 0.93;
+                const startPosition = bubble.mesh.userData.transitionStartPosition;
+                const finalPosition = bubble.mesh.userData.transitionFinalPosition;
+                if (startPosition && finalPosition) bubble.mesh.position.lerpVectors(startPosition, finalPosition, eased);
             });
             transitionState.outgoing.forEach(bubble => {
-                // 親（または子）のバブル壁を薄く残したまま通過する。暗転や画面切替を起こさず、
-                // 既存空間の内側が開くフラクタル遷移にする。
-                bubble.mesh.material.opacity = 0.72 - eased * 0.22;
+                const startPosition = bubble.mesh.userData.transitionStartPosition;
+                const endPosition = bubble.mesh.userData.transitionEndPosition;
+                if (transitionState.type === 'zoomOut' && startPosition && endPosition) {
+                    bubble.mesh.position.lerpVectors(startPosition, endPosition, eased);
+                    const initialScale = bubble.mesh.userData.finalScale || bubble.mesh.scale.x;
+                    bubble.mesh.scale.setScalar(initialScale * (1 - eased * 0.82));
+                }
+                bubble.mesh.material.opacity = 0.72 - eased * (transitionState.type === 'zoomOut' ? 0.62 : 0.56);
                 bubble.mesh.visible = true;
             });
+            if (transitionState.shell) {
+                const baseScale = transitionState.shell.userData.baseScale || transitionState.shell.scale.x;
+                const shellScale = transitionState.type === 'zoomIn'
+                    ? baseScale * (1 + eased * 0.5)
+                    : baseScale * (0.72 + eased * 0.28);
+                transitionState.shell.scale.setScalar(shellScale);
+                transitionState.shell.material.opacity = transitionState.type === 'zoomIn'
+                    ? 0.2 * (1 - eased)
+                    : 0.05 + Math.sin(eased * Math.PI) * 0.22;
+            }
             if (progress >= 1) {
                 transitionState.outgoing.forEach(disposeBubble);
+                if (transitionState.shell) {
+                    scene.remove(transitionState.shell);
+                    disposeObjectTree(transitionState.shell);
+                }
                 transitionState = null;
                 stopZoomSound();
                 isZoomingIntoGroup = false;
@@ -959,7 +981,8 @@
             // --- 現在表示されている各バブルごとの更新処理 ---
             currentBubbles.forEach(b => {
                 // 初期Y座標を基準に絶対値で更新し、長時間実行時のdriftを防ぐ
-                b.mesh.position.y = b.baseY + Math.sin(time * 2 + b.baseX) * 0.005;
+                const isHierarchyIncoming = transitionState && transitionState.incoming.includes(b);
+                if (!isHierarchyIncoming) b.mesh.position.y = b.baseY + Math.sin(time * 2 + b.baseX) * 0.005;
 
                 const analysisProbe = b.mesh.userData && b.mesh.userData.analysisProbe;
                 const analysisProbeAnimation = analysisProbe && analysisProbe.userData.analysisProbeAnimation;

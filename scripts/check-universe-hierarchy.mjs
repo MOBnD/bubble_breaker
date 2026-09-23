@@ -55,6 +55,11 @@ const variedPercentages = context.__bubbleBreakerTest.normalizeBubblePercentages
 ]);
 assert.equal(Number(variedPercentages.reduce((sum, item) => sum + item.size, 0).toFixed(2)), 100, 'occupancy percentages should total 100');
 assert.ok(new Set(variedPercentages.map(item => item.size)).size > 1, 'flat API sizes should become varied inferred percentages');
+const takenokoFallback = context.__bubbleBreakerTest.normalizeFallbackUniverse('たけのこの里が好き');
+const takenokoFallbackNames = Object.values(takenokoFallback.db).flatMap(group => group.bubbles.map(item => item.name));
+assert.ok(takenokoFallbackNames.includes('たけのこの里'), 'takenoko fallback should retain the direct subject');
+assert.ok(takenokoFallbackNames.includes('きのこの山'), 'takenoko fallback should retain the meaningful counterpart');
+assert.ok(takenokoFallbackNames.some(name => /きのこ.*たけのこ.*論争/.test(name)), 'takenoko fallback should retain the debate context');
 const legacyAnalysis = context.__bubbleBreakerTest.normalizeAnalysis({
     evaluation: { opposition: { summary: '旧形式', points: ['旧論点'], sourceIds: ['source-1'], imageIds: [] } }
 });
@@ -67,7 +72,13 @@ assert.equal(rootRequest.reasoning.effort, 'low', 'root generation should use lo
 assert.equal(rootRequest.tools[0].search_context_size, 'medium', 'root generation should keep medium web search context');
 assert.equal(rootRequest.text.format.name, 'bubble_universe_root', 'root schema should be used');
 assert.ok(rootRequest.text.format.schema.required.includes('entryRootBubbleId'), 'root schema should require the input branch');
+assert.ok(rootRequest.text.format.schema.required.includes('explorationAxes'), 'root schema should require semantic exploration axes');
 assert.equal(rootRequest.text.format.schema.properties.groups.maxItems, 1, 'root stage should return one group');
+const takenokoRequest = context.__bubbleBreakerTest.buildOpenAIRootRequest('たけのこの里が好き');
+assert.match(takenokoRequest.input[1].content[0].text, /比較・対立対象/);
+assert.match(takenokoRequest.input[1].content[0].text, /議論や論争/);
+assert.match(takenokoRequest.input[1].content[0].text, /文化・歴史的背景/);
+assert.match(takenokoRequest.input[1].content[0].text, /単なる商品分類.*終えてはいけません/);
 const rootContext = { id: 'root', title: '最上位', bubbles: [bubble('r1'), bubble('r2')] };
 const centralRequest = context.__bubbleBreakerTest.buildOpenAICentralGroupRequest('テスト意見', rootContext, rootContext.bubbles[0], { isEntryBranch: true });
 assert.equal(centralRequest.text.format.name, 'bubble_universe_central_group', 'central schema should be used');
@@ -157,7 +168,16 @@ const hierarchyContext = {
         stageLog.push(stage);
         if (stage === 'bubble_universe_root') {
             return { ok: true, status: 200, headers: { get() { return 'topology-request'; } }, async json() {
-                return { output_text: JSON.stringify({ entryRootBubbleId: 'r1', groups: rootResponse }) };
+                return { output_text: JSON.stringify({
+                    entryRootBubbleId: 'r1',
+                    explorationAxes: [
+                        { label: '直接対象', relation: 'direct', reason: '入力そのもの', rootBubbleId: 'r1' },
+                        { label: '比較対象', relation: 'counterpart', reason: '比較される対象', rootBubbleId: 'r1' },
+                        { label: '論争構造', relation: 'debate', reason: '選好をめぐる議論', rootBubbleId: 'r1' },
+                        { label: '文化背景', relation: 'culture', reason: '背景となる文化', rootBubbleId: 'r2' }
+                    ],
+                    groups: rootResponse
+                }) };
             } };
         }
         const prompt = request.input[1].content[0].text;

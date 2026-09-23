@@ -187,58 +187,15 @@
         const bubbleVisualModeButtons = [...document.querySelectorAll('[data-bubble-visual-mode]')];
         const backgroundThemeControl = document.getElementById('background-theme');
         const bgmTypeControl = document.getElementById('bgm-type');
-        const explorerModeControl = document.getElementById('explorer-mode');
-        const titleToggleButton = document.getElementById('btn-toggle-title');
-        const uiToggleButton = document.getElementById('btn-toggle-ui');
         const movementKeys = window.__bubbleBreakerMovementKeys || new Set();
         window.__bubbleBreakerMovementKeys = movementKeys;
         function isTextEditingTarget(target) {
             return Boolean(target && (target.matches('input, textarea, select, button, [contenteditable="true"]') || target.isContentEditable));
         }
-        window.setTitleVisibility = function(visible, persist = true) {
-            const brandHud = document.querySelector('.brand-hud');
-            if (brandHud) brandHud.classList.toggle('ui-title-hidden', !visible);
-            if (titleToggleButton) {
-                titleToggleButton.setAttribute('aria-pressed', String(visible));
-                titleToggleButton.textContent = `タイトル表示 ${visible ? 'ON' : 'OFF'}`;
-            }
-            if (persist) localStorage.setItem('bubblebreaker.titleVisible', visible ? 'on' : 'off');
-            return visible;
-        }
-        window.setUIVisibility = function(visible, persist = true) {
-            const uiLayer = document.getElementById('ui-layer');
-            const labels = document.getElementById('labels-container');
-            if (uiLayer) uiLayer.classList.toggle('ui-all-hidden', !visible);
-            if (labels) labels.classList.toggle('ui-all-hidden', !visible);
-            if (uiToggleButton) {
-                uiToggleButton.setAttribute('aria-pressed', String(visible));
-                uiToggleButton.textContent = `UI表示 ${visible ? 'ON' : 'OFF'}`;
-            }
-            if (persist) localStorage.setItem('bubblebreaker.uiVisible', visible ? 'on' : 'off');
-            return visible;
-        }
-        const titleVisible = localStorage.getItem('bubblebreaker.titleVisible') !== 'off';
-        const uiVisible = localStorage.getItem('bubblebreaker.uiVisible') !== 'off';
-        window.setTitleVisibility(titleVisible, false);
-        window.setUIVisibility(uiVisible, false);
-        window.toggleTitleVisibility = () => window.setTitleVisibility(!document.querySelector('.brand-hud').classList.contains('ui-title-hidden'));
-        window.toggleUIVisibility = () => window.setUIVisibility(!document.getElementById('ui-layer').classList.contains('ui-all-hidden'));
-        if (titleToggleButton) titleToggleButton.addEventListener('click', window.toggleTitleVisibility);
-        if (uiToggleButton) uiToggleButton.addEventListener('click', window.toggleUIVisibility);
         window.addEventListener('keydown', event => {
             if (isTextEditingTarget(event.target)) return;
             window.__bubbleBreakerShiftDown = event.shiftKey || event.key === 'Shift';
             const key = event.key.toLowerCase();
-            if (key === 'h') {
-                event.preventDefault();
-                window.toggleTitleVisibility();
-                return;
-            }
-            if (key === 'u') {
-                event.preventDefault();
-                window.toggleUIVisibility();
-                return;
-            }
             if (['w', 'a', 's', 'd'].includes(key)) {
                 movementKeys.add(key);
                 event.preventDefault();
@@ -264,12 +221,16 @@
             if (!inputScreen) return;
             inputScreen.classList.toggle('warp-haze-active', Boolean(isDiving && warpHazeEnabled));
         }
-        const bubbleVisualModeOptions = ['network', 'deepSea', 'data'];
-        const storedBubbleVisualMode = localStorage.getItem('bubblebreaker.bubbleVisualMode');
-        if (['classic', 'cosmic'].includes(storedBubbleVisualMode)) localStorage.setItem('bubblebreaker.bubbleVisualMode', 'network');
+        const bubbleVisualModeOptions = ['classic', 'network', 'deepSea', 'data'];
+        let storedBubbleVisualMode = localStorage.getItem('bubblebreaker.bubbleVisualMode');
+        if (localStorage.getItem('bubblebreaker.bubbleVisualModeVersion') !== '2') {
+            storedBubbleVisualMode = 'classic';
+            localStorage.setItem('bubblebreaker.bubbleVisualMode', 'classic');
+            localStorage.setItem('bubblebreaker.bubbleVisualModeVersion', '2');
+        }
         let selectedBubbleVisualMode = typeof setBubbleVisualMode === 'function'
-            ? setBubbleVisualMode(bubbleVisualModeOptions.includes(storedBubbleVisualMode) ? storedBubbleVisualMode : 'network')
-            : 'network';
+            ? setBubbleVisualMode(bubbleVisualModeOptions.includes(storedBubbleVisualMode) ? storedBubbleVisualMode : 'classic')
+            : 'classic';
         bubbleVisualModeButtons.forEach(button => {
             const isSelected = button.dataset.bubbleVisualMode === selectedBubbleVisualMode;
             button.setAttribute('aria-pressed', String(isSelected));
@@ -282,7 +243,6 @@
         if (typeof setBackgroundTheme === 'function') selectedBackgroundTheme = setBackgroundTheme(selectedBackgroundTheme);
         backgroundThemeControl.value = selectedBackgroundTheme;
         bgmTypeControl.value = bgmType;
-        explorerModeControl.checked = explorerMode;
         [
             'bubblebreaker.fov',
             'bubblebreaker.warpSpeed',
@@ -294,7 +254,10 @@
             'bubblebreaker.volume',
             'bubblebreaker.bgm',
             'bubblebreaker.bgmAutoNext',
-            'bubblebreaker.bgmTransition'
+            'bubblebreaker.bgmTransition',
+            'bubblebreaker.explorerMode',
+            'bubblebreaker.titleVisible',
+            'bubblebreaker.uiVisible'
         ].forEach(key => localStorage.removeItem(key));
         const bgmAudioElement = document.getElementById('bgm-audio');
         bgmAudioElement.addEventListener('error', () => {
@@ -319,14 +282,14 @@
             button.addEventListener('click', () => {
                 selectedBubbleVisualMode = typeof setBubbleVisualMode === 'function'
                     ? setBubbleVisualMode(button.dataset.bubbleVisualMode)
-                    : 'network';
+                    : 'classic';
                 localStorage.setItem('bubblebreaker.bubbleVisualMode', selectedBubbleVisualMode);
                 bubbleVisualModeButtons.forEach(option => {
                     const isSelected = option.dataset.bubbleVisualMode === selectedBubbleVisualMode;
                     option.setAttribute('aria-pressed', String(isSelected));
                     option.classList.toggle('is-selected', isSelected);
                 });
-                const visualLabel = selectedBubbleVisualMode === 'network' ? '装飾あり' : selectedBubbleVisualMode === 'deepSea' ? '深海テーマ' : 'データ空間テーマ';
+                const visualLabel = selectedBubbleVisualMode === 'classic' ? '標準のガラス球体' : selectedBubbleVisualMode === 'network' ? '装飾あり' : selectedBubbleVisualMode === 'deepSea' ? '深海テーマ' : 'データ空間テーマ';
                 showToast(`${visualLabel}を表示しました`);
             });
         });
@@ -342,12 +305,6 @@
             localStorage.setItem('bubblebreaker.bgmType', bgmType);
             if (bgmType === 'none') stopBackgroundMusic(); else startBackgroundMusic();
         });
-        explorerModeControl.addEventListener('change', () => {
-            explorerMode = explorerModeControl.checked;
-            localStorage.setItem('bubblebreaker.explorerMode', explorerMode ? 'on' : 'off');
-            if (explorerMode && state.screen === 'SINGLE' && state.groupId) loadGroup(state.groupId);
-        });
-
         // --- マウスホイール・ピンチ操作によるズーム/階層移動 ---
         let wheelTimeout; // 連続スクロールの過剰反応を防ぐためのタイマー
 
@@ -374,12 +331,6 @@
             // 上スクロール（奥へ押し込む）＝ズームイン（子階層へ進む）
             if (state.screen === 'SINGLE' && state.bubbleData && state.bubbleData.childId) {
                 loadGroup(state.bubbleData.childId);
-            } else if (state.screen === 'GROUP' && explorerMode) {
-                const targetBubble = getExplorerZoomTarget();
-                if (targetBubble) {
-                    explorerSelectedBubbleId = targetBubble.id;
-                    loadGroup(targetBubble.childId);
-                }
             }
         }
 

@@ -154,10 +154,24 @@
                 desc: { type: 'string' }, bubbles: { type: 'array', minItems: 2, maxItems: OPENAI_STRUCTURE_MAX_BUBBLES, items: OPENAI_STAGE_BUBBLE_SCHEMA }
             }
         };
+        const OPENAI_EXPLORATION_AXIS_SCHEMA = {
+            type: 'object', additionalProperties: false,
+            required: ['label', 'relation', 'reason', 'rootBubbleId'],
+            properties: {
+                label: { type: 'string', minLength: 1 },
+                relation: {
+                    type: 'string',
+                    enum: ['direct', 'counterpart', 'comparison', 'debate', 'history', 'culture', 'broader', 'narrower', 'adjacent']
+                },
+                reason: { type: 'string', minLength: 1 },
+                rootBubbleId: { type: 'string', minLength: 1 }
+            }
+        };
         const OPENAI_ROOT_RESPONSE_SCHEMA = {
-            type: 'object', additionalProperties: false, required: ['entryRootBubbleId', 'groups'],
+            type: 'object', additionalProperties: false, required: ['entryRootBubbleId', 'explorationAxes', 'groups'],
             properties: {
                 entryRootBubbleId: { type: 'string' },
+                explorationAxes: { type: 'array', minItems: 4, maxItems: 9, items: OPENAI_EXPLORATION_AXIS_SCHEMA },
                 groups: { type: 'array', minItems: 1, maxItems: 1, items: OPENAI_ROOT_GROUP_SCHEMA }
             }
         };
@@ -838,15 +852,15 @@
 
         function buildOpenAIRootRequest(input, options = {}) {
             const repairInstruction = options.repair
-                ? '\n- 前回のroot応答を検証できませんでした。rootだけを再生成し、childIdを必ずnullにしてください。'
+                ? '\n- 前回のroot応答を検証できませんでした。rootだけを再生成し、childIdを必ずnullにし、4件以上の有効なexplorationAxesと対応rootBubbleIdを返してください。'
                 : '';
-            const prompt = `ユーザーの意見: ${input}\n\nWeb Searchを使って、入力意見を含むテーマ全体の最上位カテゴリだけを生成してください。\n- groupsはroot 1つだけにし、rootのバブルは2〜${OPENAI_STRUCTURE_MAX_BUBBLES}個の意味的に異なる上位分類にしてください。\n- ${OPENAI_GROUP_TYPE_GUIDANCE}\n- rootバブル名は下位候補を列挙せず、全体を包む短い名称にしてください。原則24文字以内にし、「・」「、」などで3つ以上の候補を並べないでください。\n- 入力意見が意味的に属するrootバブルを1つ選び、その実在するバブルIDをentryRootBubbleIdに設定してください。entryRootBubbleIdは必須で、曖昧でもnullにしてはいけません。\n- levelはroot、parentIdとparentBubbleIdはnull、すべてのchildIdはnullにしてください。中央・下位カテゴリはこの要求では生成しないでください。\n- 入力意見の経路だけを特別扱いせず、あとで各rootバブルを同じ調査深度で展開できる分類軸にしてください。\n- カテゴリ名・バブル名は具体的な意味内容を持たせ、テンプレート名、機械的な接尾辞、代表的な系統などの汎用ラベルは禁止です。\n- 全IDは一意な短いASCII文字列にし、analysis、metrics、sourcesは生成しないでください。JSON Schema以外の文章は出力しないでください。${repairInstruction}`;
+            const prompt = `ユーザーの意見: ${input}\n\nWeb Searchを使って、入力意見から探索価値のある意味的な世界を設計し、その最上位カテゴリだけを生成してください。\n- groupsはroot 1つだけにし、rootのバブルは2〜${OPENAI_STRUCTURE_MAX_BUBBLES}個の意味的に異なる探索領域にしてください。単なる商品分類・辞書的な上位分類だけで終えてはいけません。\n- 入力そのものに加えて、実在する関連対象、比較・対立対象、議論や論争、文化・歴史的背景、上位・下位概念、周辺概念をWeb Searchで確認してください。\n- 好き／嫌い、支持／反対などの意見入力では、よく比較される対象や社会的に共有された論争・選好構造が存在する場合、それを重要な探索領域として含めてください。例示された固有名詞を別テーマへ機械的に流用してはいけません。\n- explorationAxesには、調査で確認した4〜9件の探索軸をrelation・短いlabel・入力とのreason・対応するrootBubbleIdとともに格納してください。少なくとも1件はdirect以外の関係にしてください。\n- ${OPENAI_GROUP_TYPE_GUIDANCE}\n- rootバブル名は下位候補を列挙せず、関係や文脈も包める短い名称にしてください。原則24文字以内にし、「・」「、」などで3つ以上の候補を並べないでください。\n- 入力意見が最も自然に属するrootバブルを1つ選び、その実在するバブルIDをentryRootBubbleIdに設定してください。entryRootBubbleIdは必須で、曖昧でもnullにしてはいけません。\n- levelはroot、parentIdとparentBubbleIdはnull、すべてのchildIdはnullにしてください。中央・下位カテゴリはこの要求では生成しないでください。\n- 分類学的な包含関係だけでなく、比較・対立・論争・背景を束ねる探索カテゴリを許可します。ただし入力との関係を説明できない領域は生成しないでください。\n- カテゴリ名・バブル名は具体的な意味内容を持たせ、テンプレート名、機械的な接尾辞、代表的な系統などの汎用ラベルは禁止です。\n- 全IDは一意な短いASCII文字列にし、analysis、metrics、sourcesは生成しないでください。JSON Schema以外の文章は出力しないでください。${repairInstruction}`;
             return {
                 model: OPENAI_MODEL, store: false, reasoning: { effort: 'low' }, max_output_tokens: 7000,
                 tool_choice: 'required',
                 tools: [{ type: 'web_search', search_context_size: 'medium', user_location: { type: 'approximate', country: 'JP', timezone: 'Asia/Tokyo' } }],
                 input: [
-                    { role: 'system', content: [{ type: 'input_text', text: 'あなたはBubbleBreakerのrootカテゴリ生成エンジンです。rootだけを具体的に返し、下位階層やテンプレートによる穴埋めをしないでください。' }] },
+                    { role: 'system', content: [{ type: 'input_text', text: 'あなたはBubbleBreakerの意味的探索空間を設計するエンジンです。分類だけでなく、比較・対立・論争・文化背景をWeb Searchで確認し、rootと探索軸を具体的に返してください。' }] },
                     { role: 'user', content: [{ type: 'input_text', text: prompt }] }
                 ],
                 text: { format: { type: 'json_schema', name: 'bubble_universe_root', strict: true, schema: OPENAI_ROOT_RESPONSE_SCHEMA } }
@@ -855,19 +869,20 @@
 
         function buildOpenAICentralGroupRequest(input, rootGroup, rootBubble, options = {}) {
             const isEntryBranch = options.isEntryBranch === true;
+            const explorationAxes = Array.isArray(options.explorationAxes) ? options.explorationAxes : [];
             const repairInstruction = options.repair
                 ? `\n- 前回のcentral応答を検証できませんでした。指定されたrootバブルだけを親として、central groupを1つ再生成してください。${isEntryBranch ? '入力意見に対応するentryBubbleIdも実在確認してください。' : 'entryBubbleIdはnullにしてください。'}`
                 : '';
             const entryInstruction = isEntryBranch
                 ? '- このcentralはroot段階で入力意見の所属先として指定された枝です。入力意見に対応するcentralバブルを必ず1つ含め、その実在IDをentryBubbleIdに設定してください。'
                 : '- このcentralは入力意見の所属先ではありません。entryBubbleIdは必ずnullにし、入力意見バブルを作らないでください。';
-            const prompt = `ユーザーの意見: ${input}\nrootカテゴリ: ${rootGroup.title}（${rootGroup.id}）\n展開対象のrootバブル: ${rootBubble.name}（${rootBubble.id}）\n\nWeb Searchを使って、指定されたrootバブルの直下にあるcentralカテゴリを1つだけ生成してください。\n- groupsはcentral 1つだけにし、levelはcentral、parentIdは${rootGroup.id}、parentBubbleIdは${rootBubble.id}と完全一致させてください。\n- centralのバブルは2〜${OPENAI_STRUCTURE_MAX_BUBBLES}個の具体的な、互いに意味の異なる内容にしてください。各childIdはnullにしてください。\n- ${OPENAI_GROUP_TYPE_GUIDANCE}\n- centralバブル名は下位候補をすべて列挙せず、意味を包む短い名称にしてください。原則24文字以内にし、「・」「、」などで3つ以上の候補を並べないでください。\n${entryInstruction}\n- rootバブルの意味に直接包含される一段下だけを生成し、二段下の内容をcentralバブルに混ぜないでください。\n- 入力意見の経路だけを特別扱いせず、他のrootバブルと同じ具体性で生成してください。テンプレート名、親名への機械的な接尾辞、汎用ラベルは禁止です。\n- 全IDは一意な短いASCII文字列にし、analysis、metrics、sourcesは生成しないでください。JSON Schema以外の文章は出力しないでください。${repairInstruction}`;
+            const prompt = `ユーザーの意見: ${input}\nrootカテゴリ: ${rootGroup.title}（${rootGroup.id}）\n展開対象のrootバブル: ${rootBubble.name}（${rootBubble.id}）\n探索軸: ${JSON.stringify(explorationAxes)}\n\nWeb Searchを使って、指定されたrootバブルを具体化するcentralカテゴリを1つだけ生成してください。\n- groupsはcentral 1つだけにし、levelはcentral、parentIdは${rootGroup.id}、parentBubbleIdは${rootBubble.id}と完全一致させてください。\n- centralのバブルは2〜${OPENAI_STRUCTURE_MAX_BUBBLES}個の具体的な、互いに意味の異なる内容にしてください。各childIdはnullにしてください。\n- ${OPENAI_GROUP_TYPE_GUIDANCE}\n- centralバブル名は下位候補をすべて列挙せず、意味を包む短い名称にしてください。原則24文字以内にし、「・」「、」などで3つ以上の候補を並べないでください。\n${entryInstruction}\n- 純粋な包含分類だけに限定せず、このrootバブルに対応する探索軸から、対象・比較相手・支持理由・批判・論争構造・文化的背景などを同じ粒度で展開してください。\n- 探索軸に存在しても、このrootバブルとの関係が弱い項目は含めないでください。テンプレート名、親名への機械的な接尾辞、汎用ラベルは禁止です。\n- 全IDは一意な短いASCII文字列にし、analysis、metrics、sourcesは生成しないでください。JSON Schema以外の文章は出力しないでください。${repairInstruction}`;
             return {
                 model: OPENAI_MODEL, store: false, reasoning: { effort: 'low' }, max_output_tokens: 7000,
                 tool_choice: 'required',
                 tools: [{ type: 'web_search', search_context_size: 'medium', user_location: { type: 'approximate', country: 'JP', timezone: 'Asia/Tokyo' } }],
                 input: [
-                    { role: 'system', content: [{ type: 'input_text', text: 'あなたはBubbleBreakerのcentralカテゴリ生成エンジンです。指定されたrootバブルの直下だけを、意味的に具体的な実データ分類として生成してください。' }] },
+                    { role: 'system', content: [{ type: 'input_text', text: 'あなたはBubbleBreakerのcentral探索カテゴリ生成エンジンです。指定されたrootの探索軸を、対象・比較・対立・背景を含む具体的なまとまりへ展開してください。' }] },
                     { role: 'user', content: [{ type: 'input_text', text: prompt }] }
                 ],
                 text: { format: { type: 'json_schema', name: 'bubble_universe_central_group', strict: true, schema: OPENAI_CENTRAL_RESPONSE_SCHEMA } }
@@ -875,16 +890,17 @@
         }
 
         function buildOpenAILeafGroupRequest(input, centralGroup, centralBubble, options = {}) {
+            const explorationAxes = Array.isArray(options.explorationAxes) ? options.explorationAxes : [];
             const repairInstruction = options.repair
                 ? '\n- 前回のleaf応答を検証できませんでした。指定されたcentralバブルだけを親として、leaf groupを1つ再生成してください。'
                 : '';
-            const prompt = `ユーザーの意見: ${input}\ncentralカテゴリ: ${centralGroup.title}（${centralGroup.id}）\n展開対象のcentralバブル: ${centralBubble.name}（${centralBubble.id}）\n\nWeb Searchを使って、指定されたcentralバブルの直下にあるleafカテゴリを1つだけ生成してください。\n- groupsはleaf 1つだけにし、levelはleaf、parentIdは${centralGroup.id}、parentBubbleIdは${centralBubble.id}と完全一致させてください。\n- leafのバブルは2〜${OPENAI_STRUCTURE_MAX_BUBBLES}個の、親バブルに意味的に包含される具体的な選択肢・方式・製品・作品・派閥などにしてください。各childIdはnullにしてください。\n- ${OPENAI_GROUP_TYPE_GUIDANCE}\n- centralバブルより一段下の内容だけを生成し、親の説明や二段上の分類をそのまま繰り返さないでください。\n- 入力意見の経路だけを特別扱いせず、すべてのcentralバブルを同じ調査深度・具体性で生成してください。テンプレート名、親名への機械的な接尾辞、汎用ラベルは禁止です。\n- 全IDは一意な短いASCII文字列にし、analysis、metrics、sourcesは生成しないでください。JSON Schema以外の文章は出力しないでください。${repairInstruction}`;
+            const prompt = `ユーザーの意見: ${input}\ncentralカテゴリ: ${centralGroup.title}（${centralGroup.id}）\n展開対象のcentralバブル: ${centralBubble.name}（${centralBubble.id}）\n探索軸: ${JSON.stringify(explorationAxes)}\n\nWeb Searchを使って、指定されたcentralバブルを掘り下げるleafカテゴリを1つだけ生成してください。\n- groupsはleaf 1つだけにし、levelはleaf、parentIdは${centralGroup.id}、parentBubbleIdは${centralBubble.id}と完全一致させてください。\n- leafのバブルは2〜${OPENAI_STRUCTURE_MAX_BUBBLES}個の、具体的な対象・選択肢・方式・製品・作品・派閥・主張・事例などにしてください。各childIdはnullにしてください。\n- ${OPENAI_GROUP_TYPE_GUIDANCE}\n- centralバブルをそのまま言い換えず、比較・対立・背景を含め、その関係を入力から説明できる具体項目を生成してください。\n- 入力意見の経路だけを特別扱いせず、すべてのcentralバブルを同じ調査深度・具体性で生成してください。関係の薄い連想、テンプレート名、親名への機械的な接尾辞、汎用ラベルは禁止です。\n- 全IDは一意な短いASCII文字列にし、analysis、metrics、sourcesは生成しないでください。JSON Schema以外の文章は出力しないでください。${repairInstruction}`;
             return {
                 model: OPENAI_MODEL, store: false, reasoning: { effort: 'low' }, max_output_tokens: 7000,
                 tool_choice: 'required',
                 tools: [{ type: 'web_search', search_context_size: 'medium', user_location: { type: 'approximate', country: 'JP', timezone: 'Asia/Tokyo' } }],
                 input: [
-                    { role: 'system', content: [{ type: 'input_text', text: 'あなたはBubbleBreakerのleafカテゴリ生成エンジンです。指定されたcentralバブルの直下だけを具体的に返し、テンプレートで補完しないでください。' }] },
+                    { role: 'system', content: [{ type: 'input_text', text: 'あなたはBubbleBreakerのleaf探索項目生成エンジンです。指定されたcentralバブルから関係を説明できる具体的な対象・主張・事例を返し、テンプレートで補完しないでください。' }] },
                     { role: 'user', content: [{ type: 'input_text', text: prompt }] }
                 ],
                 text: { format: { type: 'json_schema', name: 'bubble_universe_leaf_group', strict: true, schema: OPENAI_LEAF_RESPONSE_SCHEMA_V2 } }
@@ -1056,6 +1072,27 @@
             return error.code === 'API_TIMEOUT' || error.code === 'API_NETWORK_ERROR' || error.code === 'API_INCOMPLETE_OUTPUT' || error.code === 'API_JSON_PARSE_ERROR' || error.code === 'API_EMPTY_OUTPUT' || error.code === 'API_INVALID_BUBBLE_COUNT' || error.code === 'API_INVALID_UNIVERSE' || error.status === 408 || error.status === 409 || error.status === 429 || error.status >= 500;
         }
 
+        function validateExplorationAxes(axes, group, idMap = null) {
+            const allowedRelations = new Set(['direct', 'counterpart', 'comparison', 'debate', 'history', 'culture', 'broader', 'narrower', 'adjacent']);
+            const contextualRelations = new Set(['counterpart', 'comparison', 'debate', 'history', 'culture']);
+            if (!Array.isArray(axes) || axes.length < 4 || axes.length > 9) throw new Error('探索軸は4〜9件必要です');
+            const bubbleIds = new Set(group.bubbles.map(bubble => String(bubble.id)));
+            const normalized = axes.map(axis => {
+                const label = String(axis && axis.label || '').trim();
+                const relation = String(axis && axis.relation || '').trim();
+                const reason = String(axis && axis.reason || '').trim();
+                const rootBubbleId = String(axis && axis.rootBubbleId || '').trim();
+                if (!label || !reason || !allowedRelations.has(relation) || !bubbleIds.has(rootBubbleId)) {
+                    throw new Error('探索軸の関係またはrootBubbleIdが不正です');
+                }
+                return { label, relation, reason, rootBubbleId: idMap ? idMap.get(rootBubbleId) : rootBubbleId };
+            });
+            if (!normalized.some(axis => contextualRelations.has(axis.relation))) {
+                throw new Error('比較・対立・論争・歴史・文化のいずれかを示す探索軸が必要です');
+            }
+            return normalized;
+        }
+
         async function requestStage(stage, buildRequest, validate) {
             let lastError = null;
             for (let attempt = 0; attempt < OPENAI_STRUCTURE_MAX_ATTEMPTS; attempt++) {
@@ -1086,17 +1123,25 @@
                     throw new Error('entryRootBubbleIdがrootバブルに存在しません');
                 }
                 const canonicalized = canonicalizeStageGroupIds(group, 'root', null, null);
+                const explorationAxes = validateExplorationAxes(parsed.explorationAxes, group, canonicalized.modelToCanonicalBubbleId);
                 return {
                     group: canonicalized.group,
-                    entryRootBubbleId: canonicalized.modelToCanonicalBubbleId.get(entryRootBubbleId)
+                    entryRootBubbleId: canonicalized.modelToCanonicalBubbleId.get(entryRootBubbleId),
+                    explorationAxes
                 };
             });
-            apiLog('rootカテゴリを確定しました', { groupId: result.group.id, bubbleCount: result.group.bubbles.length, entryRootBubbleId: result.entryRootBubbleId });
+            apiLog('rootカテゴリを確定しました', {
+                groupId: result.group.id,
+                bubbleCount: result.group.bubbles.length,
+                entryRootBubbleId: result.entryRootBubbleId,
+                explorationAxisCount: result.explorationAxes.length
+            });
             return result;
         }
 
-        async function requestCentralGroup(input, rootGroup, rootBubble, isEntryBranch) {
-            const result = await requestStage('central', options => buildOpenAICentralGroupRequest(input, rootGroup, rootBubble, { ...options, isEntryBranch }), parsed => {
+        async function requestCentralGroup(input, rootGroup, rootBubble, isEntryBranch, explorationAxes = []) {
+            const relevantAxes = explorationAxes.filter(axis => axis.rootBubbleId === rootBubble.id);
+            const result = await requestStage('central', options => buildOpenAICentralGroupRequest(input, rootGroup, rootBubble, { ...options, isEntryBranch, explorationAxes: relevantAxes }), parsed => {
                 if (!parsed || !Array.isArray(parsed.groups) || parsed.groups.length !== 1) throw new Error('centralカテゴリは1つだけ必要です');
                 const group = validateStageGroup(parsed.groups[0], 'central', rootGroup.id, rootBubble.id);
                 const entryBubbleId = parsed.entryBubbleId == null ? null : String(parsed.entryBubbleId);
@@ -1113,8 +1158,8 @@
             return result;
         }
 
-        async function requestLeafGroup(input, centralGroup, centralBubble) {
-            const result = await requestStage('leaf', options => buildOpenAILeafGroupRequest(input, centralGroup, centralBubble, options), parsed => {
+        async function requestLeafGroup(input, centralGroup, centralBubble, explorationAxes = []) {
+            const result = await requestStage('leaf', options => buildOpenAILeafGroupRequest(input, centralGroup, centralBubble, { ...options, explorationAxes }), parsed => {
                 if (!parsed || !Array.isArray(parsed.groups) || parsed.groups.length !== 1) throw new Error('leafカテゴリは1つだけ必要です');
                 const group = validateStageGroup(parsed.groups[0], 'leaf', centralGroup.id, centralBubble.id);
                 return canonicalizeStageGroupIds(group, `leaf_${centralBubble.id}`, centralGroup.id, centralBubble.id).group;
@@ -1151,7 +1196,13 @@
                 const rootResult = await requestRootGroup(activeAnalysisInput);
                 generationProgress.root = true;
                 const root = rootResult.group;
-                const centralResults = await runWithConcurrency(root.bubbles, 3, rootBubble => requestCentralGroup(activeAnalysisInput, root, rootBubble, rootBubble.id === rootResult.entryRootBubbleId));
+                const centralResults = await runWithConcurrency(root.bubbles, 3, rootBubble => requestCentralGroup(
+                    activeAnalysisInput,
+                    root,
+                    rootBubble,
+                    rootBubble.id === rootResult.entryRootBubbleId,
+                    rootResult.explorationAxes
+                ));
                 generationProgress.centralCount = centralResults.length;
                 const entryResults = centralResults.filter(result => result.entryBubbleId);
                 if (entryResults.length !== 1) throw new Error('入力意見を含むcentralカテゴリは1つだけ必要です');
@@ -1160,7 +1211,11 @@
                 root.bubbles.forEach((bubble, index) => { bubble.childId = centralGroups[index].id; });
 
                 const leafRequests = centralGroups.flatMap(centralGroup => centralGroup.bubbles.map(centralBubble => ({ centralGroup, centralBubble })));
-                const leafGroups = await runWithConcurrency(leafRequests, 3, ({ centralGroup, centralBubble }) => requestLeafGroup(activeAnalysisInput, centralGroup, centralBubble));
+                const leafGroups = await runWithConcurrency(leafRequests, 3, ({ centralGroup, centralBubble }) => {
+                    const branchRoot = root.bubbles.find(bubble => bubble.childId === centralGroup.id);
+                    const relevantAxes = rootResult.explorationAxes.filter(axis => branchRoot && axis.rootBubbleId === branchRoot.id);
+                    return requestLeafGroup(activeAnalysisInput, centralGroup, centralBubble, relevantAxes);
+                });
                 generationProgress.leafCount = leafGroups.length;
                 const leafByParentBubble = new Map(leafRequests.map((request, index) => [request.centralBubble.id, leafGroups[index]]));
                 centralGroups.forEach(centralGroup => centralGroup.bubbles.forEach(bubble => {
