@@ -41,6 +41,9 @@
         window.hasRuntimeOpenAIKey = function() {
             return isOpenAIKeyConfigured();
         };
+        window.resetBubbleAnalysisRequests = function() {
+            bubbleAnalysisRequests.clear();
+        };
         if (isOpenAIKeyConfigured()) {
             apiLog('API設定を検出しました', { model: OPENAI_MODEL, apiKeyConfigured: true });
         } else {
@@ -49,29 +52,68 @@
 
         // Responses APIのStructured Outputsで利用するスキーマ。
         // すべてのプロパティをrequiredにし、API応答をそのまま画面データへ変換できる形にする。
-        const OPENAI_METRIC_SCHEMA = {
+        const OPENAI_SOURCE_REFS_SCHEMA = { type: 'array', maxItems: 8, items: { type: 'string' } };
+        const OPENAI_IMAGE_REFS_SCHEMA = { type: 'array', maxItems: 2, items: { type: 'string' } };
+        const OPENAI_OVERVIEW_SCHEMA = {
             type: 'object', additionalProperties: false,
-            required: ['label', 'value'],
-            properties: { label: { type: 'string' }, value: { type: 'number' } }
+            required: ['summary', 'sourceIds', 'imageIds'],
+            properties: { summary: { type: 'string' }, sourceIds: OPENAI_SOURCE_REFS_SCHEMA, imageIds: OPENAI_IMAGE_REFS_SCHEMA }
         };
-        const OPENAI_ANALYSIS_SECTION_SCHEMA = {
+        const OPENAI_HISTORY_EVENT_SCHEMA = {
             type: 'object', additionalProperties: false,
-            required: ['summary', 'insight', 'metrics', 'isEstimated'],
+            required: ['dateLabel', 'sortKey', 'title', 'description', 'sourceIds', 'imageIds'],
+            properties: {
+                dateLabel: { type: 'string' }, sortKey: { type: 'integer' }, title: { type: 'string' }, description: { type: 'string' },
+                sourceIds: { type: 'array', minItems: 1, maxItems: 4, items: { type: 'string' } }, imageIds: OPENAI_IMAGE_REFS_SCHEMA
+            }
+        };
+        const OPENAI_HISTORY_SCHEMA = {
+            type: 'object', additionalProperties: false,
+            required: ['summary', 'events', 'sourceIds'],
             properties: {
                 summary: { type: 'string' },
-                insight: { type: 'string' },
-            metrics: { type: 'array', items: OPENAI_METRIC_SCHEMA, maxItems: 3 },
-                isEstimated: { type: 'boolean' }
+                events: { type: 'array', maxItems: 8, items: OPENAI_HISTORY_EVENT_SCHEMA },
+                sourceIds: OPENAI_SOURCE_REFS_SCHEMA
             }
+        };
+        const OPENAI_DEMOGRAPHIC_SCHEMA = {
+            type: 'object', additionalProperties: false,
+            required: ['summary', 'sourceIds', 'imageIds'],
+            properties: { summary: { type: 'string' }, sourceIds: OPENAI_SOURCE_REFS_SCHEMA, imageIds: OPENAI_IMAGE_REFS_SCHEMA }
+        };
+        const OPENAI_PERSPECTIVE_SCHEMA = {
+            type: 'object', additionalProperties: false,
+            required: ['summary', 'comments', 'sourceIds', 'imageIds'],
+            properties: {
+                summary: { type: 'string' },
+                comments: {
+                    type: 'array', maxItems: 4,
+                    items: {
+                        type: 'object', additionalProperties: false,
+                        required: ['text', 'sourceIds'],
+                        properties: {
+                            text: { type: 'string', minLength: 1 },
+                            sourceIds: { type: 'array', minItems: 1, maxItems: 3, items: { type: 'string' } }
+                        }
+                    }
+                },
+                sourceIds: OPENAI_SOURCE_REFS_SCHEMA,
+                imageIds: OPENAI_IMAGE_REFS_SCHEMA
+            }
+        };
+        const OPENAI_EVALUATION_SCHEMA = {
+            type: 'object', additionalProperties: false,
+            required: ['opposition', 'support'],
+            properties: { opposition: OPENAI_PERSPECTIVE_SCHEMA, support: OPENAI_PERSPECTIVE_SCHEMA }
         };
         const OPENAI_ANALYSIS_SCHEMA = {
             type: 'object', additionalProperties: false,
             required: ['overview', 'history', 'demographic', 'evaluation'],
             properties: {
-                overview: OPENAI_ANALYSIS_SECTION_SCHEMA,
-                history: OPENAI_ANALYSIS_SECTION_SCHEMA,
-                demographic: OPENAI_ANALYSIS_SECTION_SCHEMA,
-                evaluation: OPENAI_ANALYSIS_SECTION_SCHEMA
+                overview: OPENAI_OVERVIEW_SCHEMA,
+                history: OPENAI_HISTORY_SCHEMA,
+                demographic: OPENAI_DEMOGRAPHIC_SCHEMA,
+                evaluation: OPENAI_EVALUATION_SCHEMA
             }
         };
         // 階層は一度に全体をモデルへ委ねず、直上の実体を確定してから
@@ -81,7 +123,7 @@
             type: 'object', additionalProperties: false,
             required: ['id', 'name', 'size', 'childId'],
             properties: {
-                id: { type: 'string' }, name: { type: 'string' }, size: { type: 'number' },
+                id: { type: 'string', minLength: 1 }, name: { type: 'string', minLength: 1 }, size: { type: 'number' },
                 childId: { type: 'null' }
             }
         };
@@ -131,10 +173,13 @@
             properties: { groups: { type: 'array', minItems: 1, maxItems: 1, items: OPENAI_LEAF_GROUP_SCHEMA } }
         };
         const DEFAULT_ANALYSIS = {
-            overview: { summary: 'このバブルを形成する主な意見の概要です。', insight: '公開情報が十分でないため、一般的な説明を表示しています。', metrics: [], isEstimated: true },
-            history: { summary: '形成時期を確認できる公開情報がありません。', insight: '検索結果が増えると形成の歴史を推定できます。', metrics: [], isEstimated: true },
-            demographic: { summary: '構成層・情報源を確認できる公開情報がありません。', insight: '検索で得られた情報源の傾向から推定します。', metrics: [], isEstimated: true },
-            evaluation: { summary: 'このバブルに対する反対派の批判を確認できる公開情報がありません。', insight: '異なる立場が問題視している点を比較できる情報が見つかると、批判の背景を表示できます。', metrics: [], isEstimated: true }
+            overview: { summary: 'このバブルを形成する主な意見の概要です。', sourceIds: [], imageIds: [] },
+            history: { summary: '形成時期を確認できる公開情報がありません。', events: [], sourceIds: [] },
+            demographic: { summary: '構成層・情報源を確認できる公開情報がありません。', sourceIds: [], imageIds: [], segments: [] },
+            evaluation: {
+                opposition: { summary: '反対派の見解を確認できる公開情報がありません。', comments: [], sourceIds: [], imageIds: [] },
+                support: { summary: '賛成派の見解を確認できる公開情報がありません。', comments: [], sourceIds: [], imageIds: [] }
+            }
         };
 
         function fallbackEntryGroupId(input) {
@@ -190,20 +235,62 @@
         }
 
         function normalizeAnalysis(analysis) {
-            const result = {};
-            ['overview', 'history', 'demographic', 'evaluation'].forEach(key => {
-                const section = analysis && analysis[key] ? analysis[key] : {};
-                result[key] = {
-                    summary: String(section.summary || DEFAULT_ANALYSIS[key].summary),
-                    insight: String(section.insight || DEFAULT_ANALYSIS[key].insight),
-                    metrics: Array.isArray(section.metrics) ? section.metrics
-                        .filter(metric => metric && Number.isFinite(Number(metric.value)))
-                        .slice(0, 8)
-                        .map(metric => ({ label: String(metric.label || '指標'), value: Number(metric.value) })) : [],
-                    isEstimated: section.isEstimated !== false
+            const value = analysis && typeof analysis === 'object' ? analysis : {};
+            const refs = (items, maximum = 8) => Array.isArray(items) ? Array.from(new Set(items.map(String).filter(Boolean))).slice(0, maximum) : [];
+            const strings = (items, maximum = 4) => Array.isArray(items) ? items.map(item => String(item || '').trim()).filter(Boolean).slice(0, maximum) : [];
+            const overview = value.overview || {};
+            const history = value.history || {};
+            const demographic = value.demographic || {};
+            const evaluation = value.evaluation || {};
+            const normalizePerspective = (section, fallback, legacySummary = '') => {
+                const sourceIds = refs(section && section.sourceIds);
+                const comments = Array.isArray(section && section.comments)
+                    ? section.comments.map(comment => ({
+                        text: String(comment && comment.text || '').trim(),
+                        sourceIds: refs(comment && comment.sourceIds, 3)
+                    })).filter(comment => comment.text).slice(0, 4)
+                    : strings(section && section.points).map(text => ({ text, sourceIds: sourceIds.slice(0, 3) }));
+                return {
+                    summary: String((section && section.summary) || legacySummary || fallback.summary),
+                    comments,
+                    sourceIds,
+                    imageIds: refs(section && section.imageIds, 2)
                 };
-            });
-            return result;
+            };
+            return {
+                overview: {
+                    summary: String(overview.summary || DEFAULT_ANALYSIS.overview.summary),
+                    sourceIds: refs(overview.sourceIds), imageIds: refs(overview.imageIds, 2)
+                },
+                history: {
+                    summary: String(history.summary || DEFAULT_ANALYSIS.history.summary),
+                    events: (Array.isArray(history.events) ? history.events : [])
+                        .filter(event => event && Number.isFinite(Number(event.sortKey)) && String(event.title || '').trim())
+                        .slice(0, 8)
+                        .map(event => ({
+                            dateLabel: String(event.dateLabel || ''), sortKey: Math.trunc(Number(event.sortKey)),
+                            title: String(event.title), description: String(event.description || ''),
+                            sourceIds: refs(event.sourceIds, 4), imageIds: refs(event.imageIds, 2)
+                        }))
+                        .sort((left, right) => left.sortKey - right.sortKey),
+                    sourceIds: refs(history.sourceIds)
+                },
+                demographic: {
+                    summary: String(demographic.summary || DEFAULT_ANALYSIS.demographic.summary),
+                    sourceIds: refs(demographic.sourceIds), imageIds: refs(demographic.imageIds, 2),
+                    segments: (Array.isArray(demographic.segments) ? demographic.segments : [])
+                        .filter(segment => segment && Number(segment.value) > 0)
+                        .slice(0, 8)
+                        .map(segment => ({
+                            sourceType: String(segment.sourceType || 'UNKNOWN'), label: String(segment.label || segment.sourceType || '不明'),
+                            value: Number(segment.value), count: Math.max(0, Math.trunc(Number(segment.count) || 0)), sourceIds: refs(segment.sourceIds)
+                        }))
+                },
+                evaluation: {
+                    opposition: normalizePerspective(evaluation.opposition, DEFAULT_ANALYSIS.evaluation.opposition, evaluation.summary),
+                    support: normalizePerspective(evaluation.support, DEFAULT_ANALYSIS.evaluation.support)
+                }
+            };
         }
 
         function normalizeSources(sources) {
@@ -264,6 +351,14 @@
                 assigned += percentage;
                 return { ...bubble, size: Math.max(0, Number(percentage.toFixed(2))) };
             });
+        }
+
+        function isRenderableBubbleData(bubble) {
+            return Boolean(
+                bubble && typeof bubble === 'object'
+                && String(bubble.id || '').trim()
+                && String(bubble.name || '').trim()
+            );
         }
 
         function separateBubblePositions(bubbles, options = {}) {
@@ -586,14 +681,20 @@
             const groupIds = new Set();
             const bubbleIds = new Set();
             groups.forEach(group => {
-                if (!group || !group.id || groupIds.has(group.id)) throw new Error('グループIDが不正です');
+                const groupId = String(group && group.id || '').trim();
+                if (!groupId || groupIds.has(groupId)) throw new Error('グループIDが不正です');
                 if (!OPENAI_GROUP_TYPES.includes(group.type)) throw new Error('バブル群の型が不正です');
                 if (!Array.isArray(group.bubbles) || group.bubbles.length < 1 || group.bubbles.length > 10) {
                     const error = new Error('バブル数が不正です');
                     error.code = 'API_INVALID_BUBBLE_COUNT';
                     throw error;
                 }
-                groupIds.add(String(group.id));
+                if (group.bubbles.some(bubble => !isRenderableBubbleData(bubble))) {
+                    const error = new Error('空のIDまたは名称を持つバブルが含まれています');
+                    error.code = 'API_INVALID_EMPTY_BUBBLE';
+                    throw error;
+                }
+                groupIds.add(groupId);
             });
             if (!allowSyntheticFallback && groups.some(group => group.bubbles.length > 10)) {
                 const error = new Error('API応答のバブル数が最大10個を超えています');
@@ -605,12 +706,14 @@
             groups.forEach(group => {
                 const weightedBubbles = normalizeBubblePercentages(group.bubbles);
                 const bubbles = weightedBubbles.map((bubble, index) => {
-                    if (!bubble || !bubble.id || bubbleIds.has(bubble.id)) throw new Error('バブルIDが不正です');
-                    bubbleIds.add(String(bubble.id));
+                    const bubbleId = String(bubble && bubble.id || '').trim();
+                    const bubbleName = String(bubble && bubble.name || '').trim();
+                    if (!bubbleId || !bubbleName || bubbleIds.has(bubbleId)) throw new Error('バブルIDまたは名称が不正です');
+                    bubbleIds.add(bubbleId);
                     const numericColor = normalizeColor(bubble.color, colorFromText(String(bubble.name || bubble.id)));
                     const pos = Array.isArray(bubble.pos) && bubble.pos.length === 3 ? bubble.pos.map(value => Math.max(-90, Math.min(90, Number(value) || 0))) : [0, 0, 0];
                     return {
-                        id: String(bubble.id), name: String(bubble.name || '名称未設定'), size: bubble.size,
+                        id: bubbleId, name: bubbleName, size: bubble.size,
                         color: numericColor, htmlColor: normalizeHtmlColor(bubble.htmlColor, numericColor), pos,
                         childId: bubble.childId ? String(bubble.childId) : null, desc: String(bubble.desc || `${String(bubble.name || bubble.id)}に関する意見や評価が集まるバブルです。`),
                         isEstimated: bubble.isEstimated !== false, confidence: Math.max(0, Math.min(1, Number(bubble.confidence) || 0)),
@@ -619,7 +722,7 @@
                 });
                 ensureDistinctBubbleColors(bubbles);
                 separateBubblePositions(bubbles);
-                const groupId = String(group.id);
+                const groupId = String(group.id).trim();
                 const declaredParentId = group.parentId === null ? null : String(group.parentId || '');
                 const level = allowSyntheticFallback ? null : String(group.level || '');
                 const parentBubbleId = allowSyntheticFallback
@@ -636,7 +739,7 @@
                 }
                 declaredParentIds.set(groupId, declaredParentId);
                 db[groupId] = {
-                    id: groupId, title: String(group.title || group.id), type: group.type,
+                    id: groupId, title: String(group.title || group.id).trim(), type: group.type,
                     level, parentBubbleId,
                     parentId: allowSyntheticFallback ? declaredParentId : null,
                     desc: String(group.desc || ''), bubbles
@@ -875,7 +978,7 @@
 
         function compactHierarchyBubbleName(value, level) {
             const name = String(value || '').replace(/\s+/g, ' ').trim();
-            if (!name || !['root', 'central'].includes(level)) return name || '名称未設定';
+            if (!name || !['root', 'central'].includes(level)) return name;
             const limit = 24;
             const segments = name.split(/[・、,，／/|]/).map(segment => segment.trim()).filter(Boolean);
             if (segments.length >= 3) {
@@ -891,7 +994,7 @@
         }
 
         function validateStageGroup(group, expectedLevel, expectedParentId, expectedParentBubbleId) {
-            if (!group || !group.id || !group.title || !group.level) throw new Error(`${expectedLevel}カテゴリの構造が空です`);
+            if (!group || !String(group.id || '').trim() || !String(group.title || '').trim() || !group.level) throw new Error(`${expectedLevel}カテゴリの構造が空です`);
             if (group.level !== expectedLevel) throw new Error(`${expectedLevel}カテゴリのlevelが不正です`);
             const expectedParent = expectedParentId === null ? null : String(expectedParentId);
             const expectedParentBubble = expectedParentBubbleId === null ? null : String(expectedParentBubbleId);
@@ -906,18 +1009,21 @@
             }
             const bubbleIds = new Set();
             group.bubbles.forEach(bubble => {
-                if (!bubble || !bubble.id || bubbleIds.has(String(bubble.id))) throw new Error(`${expectedLevel}カテゴリのバブルIDが不正です`);
+                const bubbleId = String(bubble && bubble.id || '').trim();
+                const bubbleName = String(bubble && bubble.name || '').trim();
+                if (!bubbleId || !bubbleName || bubbleIds.has(bubbleId)) throw new Error(`${expectedLevel}カテゴリのバブルIDまたは名称が不正です`);
                 if (bubble.childId !== null) throw new Error(`${expectedLevel}カテゴリのchildIdはnullである必要があります`);
-                bubbleIds.add(String(bubble.id));
+                bubbleIds.add(bubbleId);
             });
             return {
                 ...group,
-                id: String(group.id),
+                id: String(group.id).trim(),
+                title: String(group.title).trim(),
                 parentId: expectedParent,
                 parentBubbleId: expectedParentBubble,
                 bubbles: group.bubbles.map(bubble => ({
                     ...bubble,
-                    id: String(bubble.id),
+                    id: String(bubble.id).trim(),
                     name: compactHierarchyBubbleName(bubble.name, expectedLevel),
                     childId: null
                 }))
@@ -1088,6 +1194,10 @@
             if (!bubble || !group || !isOpenAIKeyConfigured()) return null;
             const bubbleId = String(bubble.id || '');
             if (!bubbleId) return null;
+            const analysisSessionDatabase = activeDB;
+            if ((bubble.analysisStatus === 'ready' || bubble.analysisStatus === 'partial') && bubble.detailResearch) {
+                return { analysis: bubble.analysis, sources: bubble.sources || [], detailResearch: bubble.detailResearch };
+            }
             if (bubbleAnalysisRequests.has(bubbleId)) return bubbleAnalysisRequests.get(bubbleId);
             let request;
             request = (async () => {
@@ -1121,6 +1231,7 @@
                         elapsedMs: Math.round(performance.now() - startedAt)
                     });
                     if (typeof window.refreshAnalysisView === 'function') window.refreshAnalysisView(bubbleId);
+                    if (typeof window.scheduleBubbleDatabaseSessionSave === 'function') window.scheduleBubbleDatabaseSessionSave(analysisSessionDatabase, 'bubble-analysis-complete');
                     return { analysis: bubble.analysis, sources: bubble.sources, detailResearch: bubble.detailResearch };
                 } catch (error) {
                     if (error.detailResearch) bubble.detailResearch = error.detailResearch;
@@ -1131,6 +1242,7 @@
                         bubbleId, groupId: group.id, code: error.code || null, status: error.status || null,
                         message: redactApiLog(error.message || '不明なエラー'), elapsedMs: Math.round(performance.now() - startedAt)
                     });
+                    if (typeof window.scheduleBubbleDatabaseSessionSave === 'function') window.scheduleBubbleDatabaseSessionSave(analysisSessionDatabase, 'bubble-analysis-error');
                     return null;
                 }
             })();

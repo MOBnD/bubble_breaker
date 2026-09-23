@@ -22,90 +22,6 @@
         renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)); // 高解像度ディスプレイ対応
         container.appendChild(renderer.domElement);
 
-        // 航行中の3Dシーンを一度テクスチャへ描画し、画面中央へ向けて複数回再サンプリングする
-        // フルスクリーン放射ブラー。速度線を重ねるだけでなく、実際の天体像を伸ばして超高速感を作る。
-        const motionBlurRenderScene = new THREE.Scene();
-        const motionBlurRenderCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
-        motionBlurRenderCamera.position.z = 1;
-        const motionBlurRenderTarget = new THREE.WebGLRenderTarget(
-            Math.max(1, Math.floor(window.innerWidth * renderer.getPixelRatio())),
-            Math.max(1, Math.floor(window.innerHeight * renderer.getPixelRatio())),
-            { minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter, format: THREE.RGBAFormat, depthBuffer: true, stencilBuffer: false }
-        );
-        motionBlurRenderTarget.texture.generateMipmaps = false;
-        const motionBlurQuadGeometry = new THREE.PlaneGeometry(2, 2);
-        const motionBlurMaterial = new THREE.ShaderMaterial({
-            depthTest: false,
-            depthWrite: false,
-            uniforms: {
-                uScene: { value: motionBlurRenderTarget.texture },
-                uBlurAmount: { value: 0 },
-                uCenter: { value: new THREE.Vector2(0.5, 0.5) }
-            },
-            vertexShader: `
-                varying vec2 vUv;
-                void main() {
-                    vUv = uv;
-                    gl_Position = vec4(position, 1.0);
-                }
-            `,
-            fragmentShader: `
-                uniform sampler2D uScene;
-                uniform float uBlurAmount;
-                uniform vec2 uCenter;
-                varying vec2 vUv;
-                void main() {
-                    vec4 accumulated = texture2D(uScene, vUv) * 0.24;
-                    float totalWeight = 0.24;
-                    for (int sampleIndex = 1; sampleIndex <= 14; sampleIndex++) {
-                        float progress = float(sampleIndex) / 14.0;
-                        float weight = 0.92 - progress * 0.045;
-                        vec2 sampleUv = mix(vUv, uCenter, progress * uBlurAmount);
-                        accumulated += texture2D(uScene, sampleUv) * weight;
-                        totalWeight += weight;
-                    }
-                    gl_FragColor = accumulated / totalWeight;
-                }
-            `
-        });
-        motionBlurMaterial.toneMapped = false;
-        const motionBlurQuad = new THREE.Mesh(motionBlurQuadGeometry, motionBlurMaterial);
-        motionBlurQuad.frustumCulled = false;
-        motionBlurRenderScene.add(motionBlurQuad);
-        let motionBlurEnabled = localStorage.getItem('bubblebreaker.motionBlur') !== 'off';
-        let motionBlurStrength = clampSceneSetting(localStorage.getItem('bubblebreaker.motionBlurStrength'), 0, 100, 50);
-        function clearMotionBlurLayer() {
-            motionBlurMaterial.uniforms.uBlurAmount.value = 0;
-        }
-        function updateMotionBlurFrame(active, normalizedSpeed = 0, deltaSeconds = 0.016) {
-            const speed = Math.max(0, Math.min(1, normalizedSpeed));
-            const intensity = Math.max(0, Math.min(1, motionBlurStrength / 100));
-            if (!motionBlurEnabled || !active || intensity <= 0 || speed < 0.01) {
-                clearMotionBlurLayer();
-                return false;
-            }
-            const blurAmount = Math.min(0.72, intensity * speed * (0.14 + intensity * 0.52));
-            motionBlurMaterial.uniforms.uBlurAmount.value = blurAmount;
-            return blurAmount > 0;
-        }
-        function renderMotionBlurPass() {
-            renderer.setRenderTarget(motionBlurRenderTarget);
-            renderer.render(scene, camera);
-            renderer.setRenderTarget(null);
-            renderer.render(motionBlurRenderScene, motionBlurRenderCamera);
-        }
-        window.setMotionBlurEnabled = function(enabled, persist = true) {
-            motionBlurEnabled = Boolean(enabled);
-            if (!motionBlurEnabled) clearMotionBlurLayer();
-            if (persist) localStorage.setItem('bubblebreaker.motionBlur', motionBlurEnabled ? 'on' : 'off');
-            return motionBlurEnabled;
-        };
-        window.setMotionBlurStrength = function(value, persist = true) {
-            motionBlurStrength = clampSceneSetting(value, 0, 100, 50);
-            if (motionBlurStrength <= 0) clearMotionBlurLayer();
-            if (persist) localStorage.setItem('bubblebreaker.motionBlurStrength', String(motionBlurStrength));
-            return motionBlurStrength;
-        };
         // OrbitControls：マウスのドラッグで視点移動するための標準プラグイン
         const controls = new THREE.OrbitControls(camera, renderer.domElement);
         controls.enableDamping = true; // 視点移動に滑らかな慣性をつける
@@ -500,15 +416,14 @@
         const cosmicSystems = [];
         const shootingStars = [];
         let ngc3324Dome = null;
-        const deepSeaBackgroundGroup = new THREE.Group();
         const dataBackgroundGroup = new THREE.Group();
-        const backgroundThemeGroups = { deepSea: deepSeaBackgroundGroup, data: dataBackgroundGroup };
-        const BACKGROUND_THEME_NAMES = ['space', 'deepSea', 'data'];
+        const backgroundThemeGroups = { data: dataBackgroundGroup };
+        const BACKGROUND_THEME_NAMES = ['space', 'data'];
         let backgroundTheme = BACKGROUND_THEME_NAMES.includes(localStorage.getItem('bubblebreaker.backgroundTheme'))
             ? localStorage.getItem('bubblebreaker.backgroundTheme')
             : 'space';
         scene.add(cosmicBackgroundGroup);
-        scene.add(deepSeaBackgroundGroup, dataBackgroundGroup);
+        scene.add(dataBackgroundGroup);
 
         function cosmicRandom(seed) {
             const value = Math.sin(seed * 12.9898 + 78.233) * 43758.5453;
@@ -550,24 +465,6 @@
             canvas.height = 1024;
             const context = canvas.getContext('2d');
             const gradient = context.createLinearGradient(0, 0, 0, canvas.height);
-            if (theme === 'deepSea') {
-                gradient.addColorStop(0, '#02182e');
-                gradient.addColorStop(0.5, '#043f5a');
-                gradient.addColorStop(1, '#010817');
-                context.fillStyle = gradient;
-                context.fillRect(0, 0, canvas.width, canvas.height);
-                for (let index = 0; index < 28; index++) {
-                    const x = cosmicRandom(index * 4.3 + 20) * canvas.width;
-                    const y = (0.2 + cosmicRandom(index * 7.1 + 40) * 0.72) * canvas.height;
-                    const radius = 70 + cosmicRandom(index * 2.7 + 60) * 220;
-                    const glow = context.createRadialGradient(x, y, 0, x, y, radius);
-                    glow.addColorStop(0, 'rgba(54, 231, 218, 0.42)');
-                    glow.addColorStop(0.45, 'rgba(17, 155, 180, 0.14)');
-                    glow.addColorStop(1, 'rgba(0, 0, 0, 0)');
-                    context.fillStyle = glow;
-                    context.fillRect(x - radius, y - radius, radius * 2, radius * 2);
-                }
-            } else {
                 gradient.addColorStop(0, '#05071e');
                 gradient.addColorStop(0.5, '#11134a');
                 gradient.addColorStop(1, '#03050f');
@@ -587,7 +484,6 @@
                     context.fillStyle = index % 3 === 0 ? 'rgba(240, 119, 255, 0.7)' : 'rgba(76, 229, 255, 0.64)';
                     context.fillRect(x, y, 4 + (index % 3) * 2, 4 + (index % 3) * 2);
                 }
-            }
             const texture = new THREE.CanvasTexture(canvas);
             texture.encoding = THREE.sRGBEncoding;
             texture.wrapS = THREE.RepeatWrapping;
@@ -604,34 +500,6 @@
             dome.renderOrder = -999;
             group.add(dome);
             return dome;
-        }
-
-        function createDeepSeaBackgroundTheme() {
-            const group = deepSeaBackgroundGroup;
-            const positions = new Float32Array(1600 * 3);
-            const colors = new Float32Array(1600 * 3);
-            for (let index = 0; index < 1600; index++) {
-                const position = createSphericalBackgroundPosition(index, 1600, 800, 14500, 77);
-                positions[index * 3] = position.x;
-                positions[index * 3 + 1] = position.y;
-                positions[index * 3 + 2] = position.z;
-                const color = new THREE.Color().setHSL(0.43 + cosmicRandom(index * 1.7) * 0.13, 0.82, 0.48 + cosmicRandom(index * 2.9) * 0.3);
-                colors[index * 3] = color.r; colors[index * 3 + 1] = color.g; colors[index * 3 + 2] = color.b;
-            }
-            const geometry = new THREE.BufferGeometry();
-            geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-            geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-            const plankton = new THREE.Points(geometry, new THREE.PointsMaterial({ size: 18, vertexColors: true, transparent: true, opacity: 0.66, depthWrite: false, blending: THREE.AdditiveBlending }));
-            group.add(plankton);
-            const beacons = [];
-            for (let index = 0; index < 18; index++) {
-                const beacon = new THREE.Sprite(new THREE.SpriteMaterial({ map: createGlowTexture('rgba(64,255,226,1)'), color: 0x52f0d2, transparent: true, opacity: 0.38, depthWrite: false, blending: THREE.AdditiveBlending, fog: false }));
-                beacon.position.copy(createSphericalBackgroundPosition(index, 18, 3000, 11500, 177));
-                beacon.scale.setScalar(90 + (index % 5) * 22);
-                group.add(beacon);
-                beacons.push(beacon);
-            }
-            group.userData.themeAnimation = { rotationSpeed: 0.000006, plankton, beacons, phase: 0.4 };
         }
 
         function createDataBackgroundTheme() {
@@ -659,8 +527,6 @@
         }
 
         function createAdditionalBackgroundThemes() {
-            createThemeDome('deepSea', deepSeaBackgroundGroup);
-            createDeepSeaBackgroundTheme();
             createDataBackgroundTheme();
         }
 
@@ -669,7 +535,6 @@
             starMesh.visible = isSpace;
             galaxyClusters.forEach(cluster => { cluster.visible = isSpace; });
             cosmicBackgroundGroup.visible = isSpace;
-            deepSeaBackgroundGroup.visible = theme === 'deepSea';
             dataBackgroundGroup.visible = theme === 'data';
         }
 
@@ -677,7 +542,6 @@
             backgroundTheme = BACKGROUND_THEME_NAMES.includes(theme) ? theme : 'space';
             const colors = {
                 space: { clear: 0x10182d, fog: 0x10182d, density: 0.0003 },
-                deepSea: { clear: 0x021426, fog: 0x03283b, density: 0.00022 },
                 data: { clear: 0x06081e, fog: 0x0b0d32, density: 0.00018 }
             }[backgroundTheme];
             scene.background.set(colors.clear);
@@ -973,44 +837,11 @@
         let groupEntryCameraDistance = 25;
         let singleViewDirection = new THREE.Vector3(0, 0, 1);
         let explorerSelectedBubbleId = null;
-        const FIELD_OF_VIEW_MIN = 35;
-        const FIELD_OF_VIEW_MAX = 100;
-        const DEFAULT_FIELD_OF_VIEW = 60;
-        const WARP_SPEED_MIN = 0.25;
-        const WARP_SPEED_MAX = 3;
-        const DEFAULT_WARP_SPEED = 1;
-        const WARP_STOP_COUNT_MIN = 0;
-        const WARP_STOP_COUNT_MAX = 30;
-        const DEFAULT_WARP_STOP_COUNT = 3;
-        function clampSceneSetting(value, minimum, maximum, fallback) {
-            if (value === null || value === undefined || value === '') return fallback;
-            const numeric = Number(value);
-            return Number.isFinite(numeric) ? Math.min(maximum, Math.max(minimum, numeric)) : fallback;
-        }
-        let configuredFieldOfView = clampSceneSetting(localStorage.getItem('bubblebreaker.fov'), FIELD_OF_VIEW_MIN, FIELD_OF_VIEW_MAX, DEFAULT_FIELD_OF_VIEW);
-        let warpSpeedFactor = clampSceneSetting(localStorage.getItem('bubblebreaker.warpSpeed'), WARP_SPEED_MIN, WARP_SPEED_MAX, DEFAULT_WARP_SPEED);
-        let warpStopCount = Math.round(clampSceneSetting(localStorage.getItem('bubblebreaker.warpStops'), WARP_STOP_COUNT_MIN, WARP_STOP_COUNT_MAX, DEFAULT_WARP_STOP_COUNT));
+        const configuredFieldOfView = 60;
+        const warpSpeedFactor = 1;
+        const warpStopCount = 3;
         camera.fov = configuredFieldOfView;
         camera.updateProjectionMatrix();
-        window.setFieldOfView = function(value, persist = true) {
-            configuredFieldOfView = clampSceneSetting(value, FIELD_OF_VIEW_MIN, FIELD_OF_VIEW_MAX, DEFAULT_FIELD_OF_VIEW);
-            if (!loadingAnimation) {
-                camera.fov = configuredFieldOfView;
-                camera.updateProjectionMatrix();
-            }
-            if (persist) localStorage.setItem('bubblebreaker.fov', String(configuredFieldOfView));
-            return configuredFieldOfView;
-        };
-        window.setWarpSpeedFactor = function(value, persist = true) {
-            warpSpeedFactor = clampSceneSetting(value, WARP_SPEED_MIN, WARP_SPEED_MAX, DEFAULT_WARP_SPEED);
-            if (persist) localStorage.setItem('bubblebreaker.warpSpeed', String(warpSpeedFactor));
-            return warpSpeedFactor;
-        };
-        window.setWarpStopCount = function(value, persist = true) {
-            warpStopCount = Math.round(clampSceneSetting(value, WARP_STOP_COUNT_MIN, WARP_STOP_COUNT_MAX, DEFAULT_WARP_STOP_COUNT));
-            if (persist) localStorage.setItem('bubblebreaker.warpStops', String(warpStopCount));
-            return warpStopCount;
-        };
         window.markBubbleAnalysisComplete = function(bubbleId) {
             const bubble = activeDB && Object.values(activeDB).flatMap(group => group.bubbles || []).find(item => String(item.id) === String(bubbleId));
             if (bubble) bubble.analysisCompletionAt = performance.now();
@@ -1019,14 +850,10 @@
                 visibleBubble.mesh.userData.analysisProbe.userData.analysisProbeAnimation.completionStartedAt = performance.now();
             }
         };
-        const BUBBLE_VISUAL_MODE_NAMES = ['network', 'classic', 'cosmic', 'deepSea', 'data'];
-        let bubbleVisualMode = BUBBLE_VISUAL_MODE_NAMES.includes(localStorage.getItem('bubblebreaker.bubbleVisualMode'))
-            ? localStorage.getItem('bubblebreaker.bubbleVisualMode')
-            : 'network';
-        const BUBBLE_COLOR_THEME_NAMES = ['legacy', 'neon', 'warm', 'space', 'deepSea', 'data'];
-        let bubbleColorTheme = BUBBLE_COLOR_THEME_NAMES.includes(localStorage.getItem('bubblebreaker.bubbleColorTheme'))
-            ? localStorage.getItem('bubblebreaker.bubbleColorTheme')
-            : 'legacy';
+        const BUBBLE_VISUAL_MODE_NAMES = ['network', 'deepSea', 'data'];
+        const storedSceneBubbleVisualMode = localStorage.getItem('bubblebreaker.bubbleVisualMode');
+        let bubbleVisualMode = BUBBLE_VISUAL_MODE_NAMES.includes(storedSceneBubbleVisualMode) ? storedSceneBubbleVisualMode : 'network';
+        if (['classic', 'cosmic'].includes(storedSceneBubbleVisualMode)) localStorage.setItem('bubblebreaker.bubbleVisualMode', 'network');
 
         function getGroupOverviewTarget() {
             if (!currentBubbles.length) return null;
@@ -1127,52 +954,24 @@
             return hash >>> 0;
         }
 
-        function getBubbleThemeColor(colorHex, bubbleData = null) {
-            const base = new THREE.Color(Number(colorHex) || 0x66ccff);
-            if (bubbleColorTheme === 'legacy') return base;
-            const hsl = {};
-            base.getHSL(hsl);
-            const seed = hashBubbleValue(bubbleData && bubbleData.id);
-            const variation = (seed % 100) / 100;
-            if (bubbleColorTheme === 'neon') {
-                hsl.h = (0.46 + variation * 0.48) % 1;
-                hsl.s = 0.88;
-                hsl.l = 0.62 + (seed % 12) / 100;
-            } else if (bubbleColorTheme === 'warm') {
-                hsl.h = 0.015 + variation * 0.13;
-                hsl.s = 0.86;
-                hsl.l = 0.58 + (seed % 15) / 100;
-            } else if (bubbleColorTheme === 'space') {
-                hsl.h = (0.57 + variation * 0.27) % 1;
-                hsl.s = 0.78;
-                hsl.l = 0.58 + (seed % 14) / 100;
-            } else if (bubbleColorTheme === 'deepSea') {
-                hsl.h = 0.43 + variation * 0.13;
-                hsl.s = 0.78;
-                hsl.l = 0.48 + (seed % 15) / 100;
-            } else if (bubbleColorTheme === 'data') {
-                hsl.h = (0.48 + variation * 0.39) % 1;
-                hsl.s = 0.92;
-                hsl.l = 0.59 + (seed % 13) / 100;
-            }
-            return base.setHSL(hsl.h, hsl.s, hsl.l);
+        function getBubbleDisplayColor(colorHex) {
+            return new THREE.Color(Number(colorHex) || 0x66ccff);
         }
 
         function applyBubbleMeshColor(mesh, bubbleData) {
             if (!mesh || !mesh.material) return;
-            const color = getBubbleThemeColor(mesh.userData.sourceColor, bubbleData);
+            const color = getBubbleDisplayColor(mesh.userData.sourceColor, bubbleData);
             mesh.material.color.copy(color);
             if (mesh.material.emissive) mesh.material.emissive.copy(color);
             const visuals = [
                 mesh.userData.networkVisual,
-                mesh.userData.cosmicVisual,
                 mesh.userData.deepSeaVisual,
                 mesh.userData.dataVisual,
                 mesh.userData.analysisProbe
             ].filter(Boolean);
             visuals.forEach(visual => visual.traverse(child => {
                 if (!child.material || !child.material.color) return;
-                const animation = visual.userData.networkAnimation || visual.userData.cosmicAnimation || visual.userData.deepSeaAnimation || visual.userData.dataAnimation;
+                const animation = visual.userData.networkAnimation || visual.userData.deepSeaAnimation || visual.userData.dataAnimation;
                 if (animation && (child === animation.observerRing || child === animation.scanRing)) return;
                 child.material.color.copy(color);
             }));
@@ -1355,72 +1154,6 @@
                 scanRing
             };
             visual.userData.bubbleVisualMode = 'network';
-            return visual;
-        }
-
-        function createCosmicBubbleVisual(displayColor, bubbleData, level = 'central', isFocus = false) {
-            const seed = hashBubbleValue(`${bubbleData && bubbleData.id}:cosmic`);
-            const visual = new THREE.Group();
-            const atmosphere = new THREE.Mesh(
-                new THREE.SphereGeometry(1.11, 28, 18),
-                new THREE.MeshBasicMaterial({ color: displayColor, transparent: true, opacity: isFocus ? 0.2 : 0.11, side: THREE.BackSide, depthWrite: false, blending: THREE.AdditiveBlending })
-            );
-            visual.add(atmosphere);
-            const orbitMaterial = new THREE.MeshBasicMaterial({ color: displayColor, transparent: true, opacity: isFocus ? 0.78 : 0.42, depthWrite: false, blending: THREE.AdditiveBlending });
-            const orbitRings = [];
-            [1.22, 1.43].forEach((radius, index) => {
-                const orbit = new THREE.Mesh(new THREE.TorusGeometry(radius, index === 0 ? 0.022 : 0.014, 6, 56), orbitMaterial);
-                orbit.rotation.set(
-                    Math.PI * (0.26 + ((seed + index * 11) % 30) / 100),
-                    Math.PI * ((seed + index * 37) % 100) / 100,
-                    Math.PI * ((seed + index * 17) % 100) / 100
-                );
-                visual.add(orbit);
-                orbitRings.push(orbit);
-            });
-            const moonMaterial = new THREE.MeshBasicMaterial({ color: displayColor, transparent: true, opacity: 0.9, depthWrite: false, blending: THREE.AdditiveBlending });
-            const moonGeometry = new THREE.SphereGeometry(isFocus ? 0.09 : 0.07, 10, 8);
-            const moons = [];
-            const moonCount = level === 'central' ? 3 : 2;
-            for (let index = 0; index < moonCount; index++) {
-                const moon = new THREE.Mesh(moonGeometry, moonMaterial);
-                visual.add(moon);
-                moons.push({ mesh: moon, radius: 1.28 + index * 0.13, angle: ((seed + index * 113) % 360) * Math.PI / 180, speed: 0.34 + index * 0.11, height: (index - 1) * 0.12 });
-            }
-            const asteroidCount = level === 'central' ? 44 : 28;
-            const asteroidPositions = new Float32Array(asteroidCount * 3);
-            for (let index = 0; index < asteroidCount; index++) {
-                const angle = ((seed + index * 71) % 360) * Math.PI / 180;
-                const radius = 1.48 + ((seed + index * 19) % 28) / 100;
-                asteroidPositions[index * 3] = Math.cos(angle) * radius;
-                asteroidPositions[index * 3 + 1] = (cosmicRandom(seed + index * 2.7) - 0.5) * 0.12;
-                asteroidPositions[index * 3 + 2] = Math.sin(angle) * radius;
-            }
-            const asteroidGeometry = new THREE.BufferGeometry();
-            asteroidGeometry.setAttribute('position', new THREE.BufferAttribute(asteroidPositions, 3));
-            const asteroidCloud = new THREE.Points(asteroidGeometry, new THREE.PointsMaterial({ color: displayColor, size: isFocus ? 0.065 : 0.045, transparent: true, opacity: 0.58, depthWrite: false, blending: THREE.AdditiveBlending }));
-            visual.add(asteroidCloud);
-
-            const comet = new THREE.Mesh(
-                new THREE.ConeGeometry(0.07, 0.62, 7, 1, true),
-                new THREE.MeshBasicMaterial({ color: isFocus ? 0xffe38a : 0xd4f7ff, transparent: true, opacity: 0.9, depthWrite: false, blending: THREE.AdditiveBlending })
-            );
-            visual.add(comet);
-            const scanRing = new THREE.Mesh(
-                new THREE.TorusGeometry(0.94, 0.018, 6, 48),
-                new THREE.MeshBasicMaterial({ color: 0x9beeff, transparent: true, opacity: 0.9, depthWrite: false, blending: THREE.AdditiveBlending })
-            );
-            scanRing.visible = false;
-            visual.add(scanRing);
-            visual.userData.cosmicAnimation = {
-                phase: (seed % 1000) / 1000 * Math.PI * 2,
-                orbitRings,
-                moons,
-                asteroidCloud,
-                comet,
-                scanRing
-            };
-            visual.userData.bubbleVisualMode = 'cosmic';
             return visual;
         }
 
@@ -1641,17 +1374,6 @@
             return mesh.userData.networkVisual;
         }
 
-        function ensureCosmicBubbleVisual(mesh, bubbleData, level, isFocus = false) {
-            if (!mesh || !bubbleData) return null;
-            if (!mesh.userData.cosmicVisual) {
-                const displayColor = mesh.material && mesh.material.color ? mesh.material.color.clone() : new THREE.Color(0x66ccff);
-                mesh.userData.cosmicVisual = createCosmicBubbleVisual(displayColor, bubbleData, level, isFocus);
-                mesh.add(mesh.userData.cosmicVisual);
-            }
-            mesh.userData.cosmicVisual.visible = bubbleVisualMode === 'cosmic';
-            return mesh.userData.cosmicVisual;
-        }
-
         function ensureDeepSeaBubbleVisual(mesh, bubbleData, level, isFocus = false) {
             if (!mesh || !bubbleData) return null;
             if (!mesh.userData.deepSeaVisual) {
@@ -1676,39 +1398,15 @@
 
         function ensureBubbleVisual(mesh, bubbleData, level, isFocus = false) {
             if (!mesh || !bubbleData) return null;
-            if (bubbleVisualMode === 'network') {
-                const visual = ensureNetworkBubbleVisual(mesh, bubbleData, level, isFocus);
-                if (mesh.userData.cosmicVisual) mesh.userData.cosmicVisual.visible = false;
-                if (mesh.userData.deepSeaVisual) mesh.userData.deepSeaVisual.visible = false;
-                if (mesh.userData.dataVisual) mesh.userData.dataVisual.visible = false;
-                return visual;
-            }
-            if (bubbleVisualMode === 'cosmic') {
-                const visual = ensureCosmicBubbleVisual(mesh, bubbleData, level, isFocus);
-                if (mesh.userData.networkVisual) mesh.userData.networkVisual.visible = false;
-                if (mesh.userData.deepSeaVisual) mesh.userData.deepSeaVisual.visible = false;
-                if (mesh.userData.dataVisual) mesh.userData.dataVisual.visible = false;
-                return visual;
-            }
-            if (bubbleVisualMode === 'deepSea') {
-                const visual = ensureDeepSeaBubbleVisual(mesh, bubbleData, level, isFocus);
-                if (mesh.userData.networkVisual) mesh.userData.networkVisual.visible = false;
-                if (mesh.userData.cosmicVisual) mesh.userData.cosmicVisual.visible = false;
-                if (mesh.userData.dataVisual) mesh.userData.dataVisual.visible = false;
-                return visual;
-            }
-            if (bubbleVisualMode === 'data') {
-                const visual = ensureDataBubbleVisual(mesh, bubbleData, level, isFocus);
-                if (mesh.userData.networkVisual) mesh.userData.networkVisual.visible = false;
-                if (mesh.userData.cosmicVisual) mesh.userData.cosmicVisual.visible = false;
-                if (mesh.userData.deepSeaVisual) mesh.userData.deepSeaVisual.visible = false;
-                return visual;
-            }
-            if (mesh.userData.networkVisual) mesh.userData.networkVisual.visible = false;
-            if (mesh.userData.cosmicVisual) mesh.userData.cosmicVisual.visible = false;
-            if (mesh.userData.deepSeaVisual) mesh.userData.deepSeaVisual.visible = false;
-            if (mesh.userData.dataVisual) mesh.userData.dataVisual.visible = false;
-            return null;
+            const visual = bubbleVisualMode === 'deepSea'
+                ? ensureDeepSeaBubbleVisual(mesh, bubbleData, level, isFocus)
+                : bubbleVisualMode === 'data'
+                    ? ensureDataBubbleVisual(mesh, bubbleData, level, isFocus)
+                    : ensureNetworkBubbleVisual(mesh, bubbleData, level, isFocus);
+            if (mesh.userData.networkVisual) mesh.userData.networkVisual.visible = bubbleVisualMode === 'network';
+            if (mesh.userData.deepSeaVisual) mesh.userData.deepSeaVisual.visible = bubbleVisualMode === 'deepSea';
+            if (mesh.userData.dataVisual) mesh.userData.dataVisual.visible = bubbleVisualMode === 'data';
+            return visual;
         }
 
         window.setBubbleVisualMode = function(mode = 'network') {
@@ -1722,19 +1420,11 @@
             return bubbleVisualMode;
         };
 
-        window.setBubbleColorTheme = function(theme = 'legacy') {
-            bubbleColorTheme = BUBBLE_COLOR_THEME_NAMES.includes(theme) ? theme : 'legacy';
-            const bubbles = [...currentBubbles];
-            if (transitionState) bubbles.push(...(transitionState.outgoing || []));
-            bubbles.forEach(bubble => applyBubbleMeshColor(bubble.mesh, bubble.data));
-            return bubbleColorTheme;
-        };
-
         // バブルの3Dモデル(Mesh)を作る関数
         function createBubbleMesh(size, colorHex, position, bubbleData = null, level = 'central', isFocus = false) {
             // ガラスのような質感を出すための物理ベースマテリアル設定
             const sourceColor = new THREE.Color(colorHex);
-            const displayColor = getBubbleThemeColor(colorHex, bubbleData);
+            const displayColor = getBubbleDisplayColor(colorHex, bubbleData);
             const hsl = {};
             displayColor.getHSL(hsl);
             displayColor.setHSL(hsl.h, Math.max(0.58, hsl.s), Math.max(0.48, hsl.l));
@@ -1751,12 +1441,11 @@
             mesh.userData.bubbleId = bubbleData && bubbleData.id ? bubbleData.id : null;
             mesh.userData.sourceColor = sourceColor.getHex();
             mesh.userData.networkVisual = null;
-            mesh.userData.cosmicVisual = null;
             mesh.userData.deepSeaVisual = null;
             mesh.userData.dataVisual = null;
             mesh.userData.analysisProbe = createAnalysisProbeVisual(isFocus);
             mesh.add(mesh.userData.analysisProbe);
-            if (bubbleData && bubbleVisualMode !== 'classic') ensureBubbleVisual(mesh, bubbleData, level, isFocus);
+            if (bubbleData) ensureBubbleVisual(mesh, bubbleData, level, isFocus);
             return mesh;
         }
 
@@ -1791,7 +1480,7 @@
         function disposeBubble(bubble) {
             if (!bubble) return;
             scene.remove(bubble.mesh);
-            ['networkVisual', 'cosmicVisual', 'deepSeaVisual', 'dataVisual', 'analysisProbe'].forEach(key => {
+            ['networkVisual', 'deepSeaVisual', 'dataVisual', 'analysisProbe'].forEach(key => {
                 if (!bubble.mesh.userData || !bubble.mesh.userData[key]) return;
                 disposeObjectTree(bubble.mesh.userData[key]);
                 bubble.mesh.remove(bubble.mesh.userData[key]);
@@ -1833,14 +1522,289 @@
                 .sort((a, b) => (Number(b.size) || 0) - (Number(a.size) || 0))[0] || null;
         }
 
+        window.getBubbleNavigationPath = function() {
+            const path = navigationStack.map(entry => entry.groupId).filter(groupId => activeDB && activeDB[groupId]);
+            if (state.groupId && activeDB && activeDB[state.groupId] && !path.includes(state.groupId)) path.push(state.groupId);
+            return path;
+        };
+
+        window.restoreBubbleNavigationPath = function(savedPath, lastGroupId) {
+            const candidates = Array.isArray(savedPath) ? savedPath.map(String) : [];
+            const path = [];
+            candidates.forEach(groupId => {
+                if (!activeDB || !activeDB[groupId] || path.includes(groupId)) return;
+                if (path.length > 0 && activeDB[groupId].parentId !== path[path.length - 1]) return;
+                path.push(groupId);
+            });
+            if (activeDB && activeDB[lastGroupId] && !path.includes(lastGroupId)) path.push(lastGroupId);
+            if (path.length === 0) return [];
+
+            let offset = new THREE.Vector3(0, 0, 0);
+            let scale = 1;
+            navigationStack = path.map((groupId, index) => {
+                const group = activeDB[groupId];
+                let anchorBubble = null;
+                if (index > 0) {
+                    const parent = activeDB[path[index - 1]];
+                    anchorBubble = parent && parent.bubbles.find(bubble => bubble.childId === groupId);
+                    if (anchorBubble && Array.isArray(anchorBubble.pos)) {
+                        offset = offset.clone().add(new THREE.Vector3(...anchorBubble.pos).multiplyScalar(scale));
+                        scale = Math.max(0.42, scale * 0.9);
+                    }
+                }
+                return {
+                    groupId,
+                    parentGroupId: group.parentId || null,
+                    anchorBubbleId: anchorBubble ? anchorBubble.id : null,
+                    worldPosition: offset.clone(),
+                    worldScale: scale,
+                    depth: index
+                };
+            });
+            const current = navigationStack[navigationStack.length - 1];
+            groupWorldOffset.copy(current.worldPosition);
+            groupWorldScale = current.worldScale;
+            updateCosmicDepthVisual(Math.max(0, navigationStack.length - 1));
+            return path;
+        };
+
+        function getGroupDisplayTitle(group) {
+            if (!group) return '';
+            const parent = group.parentId && activeDB[group.parentId];
+            const anchor = parent && parent.bubbles.find(bubble => bubble.childId === group.id);
+            return String(anchor && anchor.name || group.title || group.id).trim();
+        }
+
+        function getGroupHierarchyPath(groupId) {
+            const path = [];
+            const visited = new Set();
+            let current = activeDB && activeDB[groupId];
+            while (current && !visited.has(current.id)) {
+                visited.add(current.id);
+                path.unshift(current);
+                current = current.parentId ? activeDB[current.parentId] : null;
+            }
+            return path;
+        }
+
+        function renderGroupBreadcrumb(groupId) {
+            const container = document.getElementById('group-breadcrumb');
+            if (!container) return;
+            container.replaceChildren();
+            const path = getGroupHierarchyPath(groupId);
+            path.forEach((group, index) => {
+                if (index) {
+                    const separator = document.createElement('span');
+                    separator.className = 'group-breadcrumb-separator';
+                    separator.textContent = '→';
+                    container.appendChild(separator);
+                }
+                const button = document.createElement('button');
+                button.type = 'button';
+                button.textContent = getGroupDisplayTitle(group);
+                button.title = button.textContent;
+                if (group.id === groupId) {
+                    button.setAttribute('aria-current', 'page');
+                    button.disabled = true;
+                } else {
+                    button.addEventListener('click', () => window.navigateToBreadcrumbGroup(group.id));
+                }
+                container.appendChild(button);
+            });
+        }
+
+        window.navigateToBreadcrumbGroup = function(groupId) {
+            if (!activeDB || !activeDB[groupId] || groupId === state.groupId) return false;
+            const entryIndex = navigationStack.findIndex(entry => entry.groupId === groupId);
+            if (entryIndex >= 0) {
+                const entry = navigationStack[entryIndex];
+                navigationStack = navigationStack.slice(0, entryIndex + 1);
+                groupWorldOffset.copy(entry.worldPosition);
+                groupWorldScale = entry.worldScale;
+            }
+            loadGroup(groupId);
+            return true;
+        };
+
+        function createGroupComposition(bubbles) {
+            const valid = bubbles.filter(isRenderableBubbleData);
+            const total = valid.reduce((sum, bubble) => sum + Math.max(0, Number(bubble.size) || 0), 0);
+            if (!total) return [];
+            let assigned = 0;
+            return valid.map((bubble, index) => {
+                const value = index === valid.length - 1
+                    ? Number((100 - assigned).toFixed(2))
+                    : Math.floor((Math.max(0, Number(bubble.size) || 0) / total) * 10000) / 100;
+                assigned += value;
+                return { bubble, value };
+            });
+        }
+
+        const GROUP_CHART_SVG_NS = 'http://www.w3.org/2000/svg';
+
+        function createGroupChartElement(tagName, attributes = {}, textContent = '') {
+            const element = document.createElementNS(GROUP_CHART_SVG_NS, tagName);
+            Object.entries(attributes).forEach(([name, value]) => element.setAttribute(name, String(value)));
+            if (textContent) element.textContent = textContent;
+            return element;
+        }
+
+        function distributeGroupChartLabels(items) {
+            if (!items.length) return;
+            const minimumY = 27;
+            const maximumY = 223;
+            const gap = items.length > 1 ? Math.min(42, (maximumY - minimumY) / (items.length - 1)) : 0;
+            items.sort((left, right) => left.targetY - right.targetY);
+            items.forEach((item, index) => {
+                item.labelY = Math.max(item.targetY, index === 0 ? minimumY : items[index - 1].labelY + gap);
+            });
+            const overflow = items[items.length - 1].labelY - maximumY;
+            if (overflow > 0) items.forEach(item => { item.labelY -= overflow; });
+            for (let index = items.length - 2; index >= 0; index -= 1) {
+                items[index].labelY = Math.min(items[index].labelY, items[index + 1].labelY - gap);
+            }
+        }
+
+        function renderGroupComposition(bubbles) {
+            const chart = document.getElementById('group-composition-chart');
+            const fallback = document.getElementById('group-list');
+            if (!chart || !fallback) return;
+            const composition = createGroupComposition(bubbles);
+            chart.replaceChildren();
+            fallback.replaceChildren();
+            if (!composition.length) {
+                chart.setAttribute('aria-label', '表示できる構成要素はありません');
+                fallback.hidden = false;
+                fallback.textContent = '表示できる構成要素はありません';
+                return;
+            }
+
+            fallback.hidden = true;
+            chart.setAttribute('aria-label', `${state.groupData?.name || '現在のバブル群'}の構成要素と占有率`);
+            chart.appendChild(createGroupChartElement('title', {}, '構成要素を選択すると対応するバブルへズームします'));
+            const centerX = 180;
+            const centerY = 125;
+            const radius = 53;
+            const outerRadius = 72;
+            const circumference = 2 * Math.PI * radius;
+            chart.appendChild(createGroupChartElement('circle', {
+                class: 'group-composition-track', cx: centerX, cy: centerY, r: radius
+            }));
+
+            let cursor = 0;
+            const labels = composition.map(({ bubble, value }) => {
+                const midpoint = cursor + value / 2;
+                const angle = (midpoint * 3.6 - 90) * Math.PI / 180;
+                const item = {
+                    bubble,
+                    value,
+                    cursor,
+                    angle,
+                    side: Math.cos(angle) >= 0 ? 'right' : 'left',
+                    targetY: centerY + Math.sin(angle) * 92,
+                    labelY: centerY
+                };
+                cursor += value;
+                return item;
+            });
+            distributeGroupChartLabels(labels.filter(item => item.side === 'left'));
+            distributeGroupChartLabels(labels.filter(item => item.side === 'right'));
+
+            labels.forEach(item => {
+                const { bubble, value } = item;
+                const isFocus = isFocusPathBubble(state.groupData, bubble);
+                const slice = createGroupChartElement('circle', {
+                    class: `group-composition-slice${isFocus ? ' is-focus' : ''}`,
+                    cx: centerX,
+                    cy: centerY,
+                    r: radius,
+                    pathLength: 100,
+                    'stroke-dasharray': `${Math.max(0, value)} ${Math.max(0, 100 - value)}`,
+                    'stroke-dashoffset': -item.cursor,
+                    stroke: bubble.htmlColor,
+                    transform: `rotate(-90 ${centerX} ${centerY})`,
+                    tabindex: 0,
+                    role: 'button',
+                    'aria-label': `${bubble.name} ${value.toLocaleString('ja-JP')}%、このバブルへズーム`
+                });
+                const activate = event => {
+                    if (event.type === 'keydown' && !['Enter', ' '].includes(event.key)) return;
+                    event.preventDefault();
+                    selectBubble(bubble);
+                };
+                slice.addEventListener('click', activate);
+                slice.addEventListener('keydown', activate);
+                chart.appendChild(slice);
+
+                const startX = centerX + Math.cos(item.angle) * outerRadius;
+                const startY = centerY + Math.sin(item.angle) * outerRadius;
+                const rightSide = item.side === 'right';
+                const elbowX = rightSide ? 238 : 122;
+                const labelEdgeX = rightSide ? 252 : 108;
+                chart.appendChild(createGroupChartElement('polyline', {
+                    class: 'group-composition-leader',
+                    points: `${startX.toFixed(1)},${startY.toFixed(1)} ${elbowX},${item.labelY.toFixed(1)} ${labelEdgeX},${item.labelY.toFixed(1)}`,
+                    stroke: bubble.htmlColor
+                }));
+                chart.appendChild(createGroupChartElement('circle', {
+                    class: 'group-composition-endpoint', cx: labelEdgeX, cy: item.labelY, r: 3.5, fill: bubble.htmlColor
+                }));
+
+                const labelX = rightSide ? 252 : 4;
+                const label = createGroupChartElement('g', {
+                    class: `group-composition-label-button${isFocus ? ' is-focus' : ''}`,
+                    role: 'button',
+                    tabindex: 0,
+                    'aria-label': `${bubble.name}へズーム`
+                });
+                label.addEventListener('click', activate);
+                label.addEventListener('keydown', activate);
+                label.appendChild(createGroupChartElement('title', {}, bubble.name));
+                label.appendChild(createGroupChartElement('rect', {
+                    x: labelX,
+                    y: item.labelY - 16,
+                    width: 104,
+                    height: 32,
+                    rx: 8
+                }));
+                const nameCharacters = Array.from(String(bubble.name || ''));
+                const shortName = nameCharacters.length > 10 ? `${nameCharacters.slice(0, 9).join('')}…` : nameCharacters.join('');
+                label.appendChild(createGroupChartElement('text', {
+                    class: 'group-composition-label-name',
+                    x: labelX + 52,
+                    y: item.labelY - 2,
+                    'text-anchor': 'middle'
+                }, shortName));
+                label.appendChild(createGroupChartElement('text', {
+                    class: 'group-composition-label-value',
+                    x: labelX + 52,
+                    y: item.labelY + 11,
+                    'text-anchor': 'middle'
+                }, `${value.toLocaleString('ja-JP')}%${isFocus ? '・入力意見' : ''}`));
+                chart.appendChild(label);
+            });
+
+            chart.appendChild(createGroupChartElement('circle', {
+                class: 'group-composition-center', cx: centerX, cy: centerY, r: 29
+            }));
+            chart.appendChild(createGroupChartElement('text', {
+                class: 'group-composition-center-value', x: centerX, y: centerY + 4, 'text-anchor': 'middle'
+            }, '100%'));
+        }
+
         // 【バブル群画面】 を読み込んで表示する関数
         // isAfterDive: ワープ直後に遠くからズームインしてくる演出を入れるかどうかのフラグ
         window.loadGroup = function(groupId, isAfterDive = false) {
             const data = activeDB[groupId];
             if(!data) return;
-            if (bgmTransition === 'change' && !isAfterDive && bgmEnabled) {
-                bgmTrackIndex = (bgmTrackIndex + 1) % bgmTracks.length;
-                startBackgroundMusic();
+            const validBubbles = data.bubbles.filter(isRenderableBubbleData);
+            if (validBubbles.length !== data.bubbles.length) {
+                data.bubbles = validBubbles.length ? normalizeBubblePercentages(validBubbles) : [];
+                if (typeof window.scheduleCurrentBubbleSessionSave === 'function') window.scheduleCurrentBubbleSessionSave('empty-bubble-cleanup');
+            }
+            if (!data.bubbles.length) {
+                showToast('表示できる構成要素がないため、この階層を開けません');
+                return;
             }
             stopZoomSound();
             // 連続入力で遷移が重なった場合も、前のincoming/outgoingを必ず破棄する。
@@ -1969,22 +1933,10 @@
             document.getElementById('group-desc').innerText = groupDisplayDescription;
             document.getElementById('group-type').innerText = data.type;
             document.getElementById('btn-zoomout-group').style.display = data.parentId ? 'flex' : 'none';
+            renderGroupBreadcrumb(groupId);
             
             // 右側のリスト（構成要素と占有率）を生成
-            const listContainer = document.getElementById('group-list');
-            listContainer.innerHTML = '';
-            data.bubbles.forEach(bData => {
-                const item = document.createElement('div');
-                const isFocus = isFocusPathBubble(data, bData);
-                item.className = `flex items-center gap-3 cursor-pointer group ${isFocus ? 'rounded-lg border border-yellow-300/80 bg-yellow-300/20 px-2 py-1 shadow-[0_0_14px_rgba(253,224,71,0.45)]' : ''}`;
-                item.onclick = () => selectBubble(bData);
-                item.innerHTML = `
-                    <div class="w-3 h-3 rounded-full shadow-[0_0_8px_${bData.htmlColor}]" style="background-color: ${bData.htmlColor};"></div>
-                    <div class="flex-1 text-sm group-hover:text-white truncate">${bData.name}</div>
-                    <div class="text-sm font-bold w-8 text-right">${bData.size}%</div>${isFocus ? '<span class="text-[10px] text-yellow-200">入力意見</span>' : ''}
-                `;
-                listContainer.appendChild(item);
-            });
+            renderGroupComposition(data.bubbles);
 
             // カメラ位置の設定（ダイブ後か、通常の移動かで動きを変える）
             if (isAfterDive) {
@@ -2009,6 +1961,7 @@
             
             // 画面UIをバブル群画面(GROUP)に切り替え
             switchScreen('GROUP');
+            if (typeof window.scheduleCurrentBubbleSessionSave === 'function') window.scheduleCurrentBubbleSessionSave('group-navigation');
             showToast(`${groupDisplayTitle} の宇宙を観測中`);
         }
 
@@ -2072,21 +2025,6 @@
                 element.classList.toggle('text-cyan-200', !failed && !partial);
                 element.classList.toggle('text-amber-200', partial);
             });
-            const evaluation = state.bubbleData && state.bubbleData.analysis
-                ? state.bubbleData.analysis.evaluation || DEFAULT_ANALYSIS.evaluation
-                : DEFAULT_ANALYSIS.evaluation;
-            const summary = document.getElementById('analysis-evaluation-summary');
-            const insight = document.getElementById('analysis-evaluation-insight');
-            if (summary) summary.innerText = loading
-                ? '反対派の批判を調査しています…'
-                : failed
-                    ? '反対派の批判を取得できませんでした。'
-                    : evaluation.summary;
-            if (insight) insight.innerText = loading
-                ? '異なる立場の根拠を整理しています…'
-                : failed
-                    ? '詳細画面から分析を再試行できます。'
-                    : evaluation.insight;
         }
 
         window.loadAnalysis = function() {
@@ -2115,6 +2053,175 @@
             showToast(`解析モードへ移行しました`);
         }
 
+        function createDetailElement(tagName, className = '', text = '') {
+            const element = document.createElement(tagName);
+            if (className) element.className = className;
+            if (text) element.textContent = text;
+            return element;
+        }
+
+        function getDetailSourceMap() {
+            const researchSources = state.bubbleData && state.bubbleData.detailResearch && Array.isArray(state.bubbleData.detailResearch.sources)
+                ? state.bubbleData.detailResearch.sources : [];
+            const visibleSources = state.bubbleData && Array.isArray(state.bubbleData.sources) ? state.bubbleData.sources : [];
+            return new Map([...researchSources, ...visibleSources].filter(source => source && source.sourceId).map(source => [String(source.sourceId), source]));
+        }
+
+        function getDetailImageMap() {
+            const images = state.bubbleData && state.bubbleData.detailResearch && Array.isArray(state.bubbleData.detailResearch.images)
+                ? state.bubbleData.detailResearch.images : [];
+            return new Map(images.filter(image => image && image.imageId).map(image => [String(image.imageId), image]));
+        }
+
+        function appendDetailSourceLinks(container, sourceIds, sourceMap, label = '根拠') {
+            const sources = Array.from(new Set(Array.isArray(sourceIds) ? sourceIds.map(String) : [])).map(id => sourceMap.get(id)).filter(Boolean);
+            if (!sources.length) return;
+            const block = createDetailElement('div', 'detail-source-block');
+            block.appendChild(createDetailElement('div', 'detail-source-label', label));
+            const links = createDetailElement('div', 'detail-source-links');
+            sources.forEach(source => {
+                const link = createDetailElement('a', 'detail-source-link', source.title || source.publisher || source.domain || source.url);
+                link.href = source.url;
+                link.target = '_blank';
+                link.rel = 'noopener noreferrer';
+                links.appendChild(link);
+            });
+            block.appendChild(links);
+            container.appendChild(block);
+        }
+
+        function createDetailImageFigure(image) {
+            if (!image || !image.imageUrl || !image.sourceWebsiteUrl) return null;
+            const figure = createDetailElement('figure', 'detail-image-card');
+            const visual = createDetailElement('img', 'detail-image');
+            visual.src = image.thumbnailUrl || image.imageUrl;
+            visual.alt = image.caption || '関連画像';
+            visual.loading = 'lazy';
+            visual.decoding = 'async';
+            visual.referrerPolicy = 'no-referrer';
+            visual.addEventListener('error', () => {
+                if (visual.src !== image.imageUrl && !visual.dataset.fullImageTried) {
+                    visual.dataset.fullImageTried = 'true';
+                    visual.src = image.imageUrl;
+                    return;
+                }
+                figure.remove();
+            });
+            const caption = createDetailElement('figcaption', 'detail-image-caption');
+            if (image.caption) caption.appendChild(createDetailElement('span', 'detail-image-description', image.caption));
+            const sourceLink = createDetailElement('a', 'detail-image-source', `画像出典: ${image.sourceDomain || '出典ページ'}`);
+            sourceLink.href = image.sourceWebsiteUrl;
+            sourceLink.target = '_blank';
+            sourceLink.rel = 'noopener noreferrer';
+            caption.appendChild(sourceLink);
+            figure.append(visual, caption);
+            return figure;
+        }
+
+        function appendDetailImages(container, imageIds, imageMap) {
+            const images = Array.from(new Set(Array.isArray(imageIds) ? imageIds.map(String) : [])).map(id => imageMap.get(id)).filter(Boolean);
+            if (!images.length) return;
+            const gallery = createDetailElement('div', 'detail-image-gallery');
+            images.forEach(image => {
+                const figure = createDetailImageFigure(image);
+                if (figure) gallery.appendChild(figure);
+            });
+            if (gallery.childElementCount) container.appendChild(gallery);
+        }
+
+        function renderOverviewDetail(container, section, sourceMap, imageMap) {
+            container.appendChild(createDetailElement('p', 'detail-summary', section.summary));
+            appendDetailImages(container, section.imageIds, imageMap);
+            appendDetailSourceLinks(container, section.sourceIds, sourceMap, '概要の参照ソース');
+        }
+
+        function renderHistoryDetail(container, section, sourceMap, imageMap) {
+            container.appendChild(createDetailElement('p', 'detail-summary', section.summary));
+            if (!section.events.length) {
+                container.appendChild(createDetailElement('div', 'detail-empty-state', '根拠付きの時系列イベントを確認できませんでした。'));
+                appendDetailSourceLinks(container, section.sourceIds, sourceMap, '形成史の参照ソース');
+                return;
+            }
+            const timeline = createDetailElement('div', 'detail-timeline');
+            timeline.setAttribute('aria-label', 'バブル形成の時系列');
+            timeline.style.setProperty('--detail-timeline-width', `${Math.max(260, section.events.length * 308 - 40)}px`);
+            section.events.forEach(event => {
+                const card = createDetailElement('article', 'detail-timeline-event');
+                card.appendChild(createDetailElement('time', 'detail-timeline-date', event.dateLabel));
+                card.appendChild(createDetailElement('h3', 'detail-timeline-title', event.title));
+                card.appendChild(createDetailElement('p', 'detail-timeline-description', event.description));
+                appendDetailImages(card, event.imageIds, imageMap);
+                appendDetailSourceLinks(card, event.sourceIds, sourceMap, '出来事の根拠');
+                timeline.appendChild(card);
+            });
+            container.appendChild(timeline);
+        }
+
+        function renderDemographicDetail(container, section, sourceMap, imageMap) {
+            container.appendChild(createDetailElement('p', 'detail-summary', section.summary));
+            const segments = Array.isArray(section.segments) && section.segments.length
+                ? section.segments
+                : (state.bubbleData.detailResearch && Array.isArray(state.bubbleData.detailResearch.sourceComposition) ? state.bubbleData.detailResearch.sourceComposition : []);
+            if (segments.length) {
+                const colors = ['#48e5ff', '#f6c85f', '#9b8cff', '#ff7f91', '#63d69f', '#f39c5a', '#6fa8ff', '#95a3b8'];
+                let cursor = 0;
+                const stops = segments.map((segment, index) => {
+                    const start = cursor;
+                    cursor = Math.min(100, cursor + Math.max(0, Number(segment.value) || 0));
+                    return `${colors[index % colors.length]} ${start}% ${cursor}%`;
+                });
+                const chartLayout = createDetailElement('div', 'detail-composition-layout');
+                const chart = createDetailElement('div', 'detail-pie-chart');
+                chart.style.background = `conic-gradient(${stops.join(', ')})`;
+                chart.setAttribute('role', 'img');
+                chart.setAttribute('aria-label', segments.map(segment => `${segment.label} ${segment.value}%`).join('、'));
+                chart.appendChild(createDetailElement('span', 'detail-pie-center', 'Evidence'));
+                const legend = createDetailElement('div', 'detail-pie-legend');
+                segments.forEach((segment, index) => {
+                    const item = createDetailElement('div', 'detail-pie-legend-item');
+                    const swatch = createDetailElement('span', 'detail-pie-swatch');
+                    swatch.style.backgroundColor = colors[index % colors.length];
+                    item.append(swatch, createDetailElement('span', 'detail-pie-label', segment.label), createDetailElement('strong', '', `${segment.value}%`), createDetailElement('small', '', `${segment.count}独立群`));
+                    legend.appendChild(item);
+                });
+                chartLayout.append(chart, legend);
+                container.appendChild(chartLayout);
+            } else {
+                container.appendChild(createDetailElement('div', 'detail-empty-state', '円グラフを作成できる情報源データがありません。'));
+            }
+            container.appendChild(createDetailElement('p', 'detail-data-note', 'この割合は今回収集した独立Evidence群の内訳であり、社会全体の世論や利用者属性の割合ではありません。'));
+            appendDetailImages(container, section.imageIds, imageMap);
+            appendDetailSourceLinks(container, section.sourceIds, sourceMap, '構成分析の参照ソース');
+        }
+
+        function createPerspectivePanel(title, section, tone, sourceMap, imageMap) {
+            const panel = createDetailElement('section', `detail-perspective detail-perspective-${tone}`);
+            panel.appendChild(createDetailElement('h3', 'detail-perspective-title', title));
+            panel.appendChild(createDetailElement('p', 'detail-perspective-summary', section.summary));
+            if (section.comments.length) {
+                const comments = createDetailElement('div', 'detail-comments');
+                section.comments.forEach(comment => {
+                    const card = createDetailElement('article', 'detail-comment');
+                    card.appendChild(createDetailElement('p', '', comment.text));
+                    appendDetailSourceLinks(card, comment.sourceIds, sourceMap, 'この意見の根拠');
+                    comments.appendChild(card);
+                });
+                panel.appendChild(comments);
+            }
+            appendDetailImages(panel, section.imageIds, imageMap);
+            appendDetailSourceLinks(panel, section.sourceIds, sourceMap, `${title}の根拠`);
+            return panel;
+        }
+
+        function renderEvaluationDetail(container, section, sourceMap, imageMap) {
+            const comparison = createDetailElement('div', 'detail-perspective-grid');
+            comparison.append(
+                createPerspectivePanel('反対派の意見', section.opposition, 'opposition', sourceMap, imageMap),
+                createPerspectivePanel('賛成派の意見', section.support, 'support', sourceMap, imageMap)
+            );
+            container.appendChild(comparison);
+        }
+
         // 【解析バブル詳細表示画面】(一番最後の詳細テキスト画面)を表示する関数
         window.showDetail = function(cardType) {
             state.analysisCardType = cardType;
@@ -2122,48 +2229,33 @@
                 'overview': 'バブルの概要と特徴',
                 'history': '形成の歴史と拡大要因',
                 'demographic': '構成層・情報源の分析',
-                'evaluation': '反対派からの批判'
+                'evaluation': '内外からの意見'
             };
-            const analysis = state.bubbleData && state.bubbleData.analysis
-                ? state.bubbleData.analysis[cardType] || DEFAULT_ANALYSIS[cardType]
-                : DEFAULT_ANALYSIS[cardType];
+            const normalizedAnalysis = normalizeAnalysis(state.bubbleData && state.bubbleData.analysis);
+            const analysis = normalizedAnalysis[cardType] || DEFAULT_ANALYSIS[cardType];
             updateAnalysisGenerationStatus();
             // どのカードがクリックされたかに応じてタイトルを変更
             document.getElementById('detail-tag').innerText = state.groupData.title;
             document.getElementById('detail-title').innerText = titles[cardType] || '詳細解析';
             document.getElementById('detail-origin-title').innerText = state.bubbleData.name;
-            document.getElementById('detail-description').innerText = analysis.summary;
-            document.getElementById('detail-insight').innerText = analysis.insight;
-            const insightLabel = document.getElementById('detail-insight-label');
-            if (insightLabel) insightLabel.innerText = cardType === 'evaluation'
-                ? '反対派が問題視する点'
-                : 'AIによる分析インサイト';
-
-            const metrics = Array.isArray(analysis.metrics) ? analysis.metrics : [];
-            const metricText = metrics.length
-                ? metrics.map(metric => `${metric.label}: ${Number(metric.value).toLocaleString('ja-JP')}`).join('\n')
-                : '検索ソースから利用可能なグラフデータがありません';
-            document.getElementById('detail-chart-a').innerText = `検索データ\n${metricText}`;
-            document.getElementById('detail-chart-b').innerText = analysis.isEstimated ? '推定値（Web Search由来）' : '参照ソースに基づく値';
-
+            const content = document.getElementById('detail-content');
             const sourcesContainer = document.getElementById('detail-sources');
-            sourcesContainer.innerHTML = '';
-            const sources = state.bubbleData.sources || [];
-            if (sources.length === 0) {
-                sourcesContainer.innerText = '参照ソースはありません。';
-            } else {
-                const heading = document.createElement('div');
-                heading.innerText = '参照ソース';
-                sourcesContainer.appendChild(heading);
-                sources.forEach(source => {
-                    const link = document.createElement('a');
-                    link.href = source.url;
-                    link.target = '_blank';
-                    link.rel = 'noopener noreferrer';
-                    link.className = 'block text-blue-300 hover:text-blue-200 truncate';
-                    link.innerText = source.title;
-                    sourcesContainer.appendChild(link);
-                });
+            content.replaceChildren();
+            sourcesContainer.replaceChildren();
+            const sourceMap = getDetailSourceMap();
+            const imageMap = getDetailImageMap();
+            if (cardType === 'overview') renderOverviewDetail(content, analysis, sourceMap, imageMap);
+            else if (cardType === 'history') renderHistoryDetail(content, analysis, sourceMap, imageMap);
+            else if (cardType === 'demographic') renderDemographicDetail(content, analysis, sourceMap, imageMap);
+            else if (cardType === 'evaluation') renderEvaluationDetail(content, analysis, sourceMap, imageMap);
+
+            const limitations = state.bubbleData.detailResearch && Array.isArray(state.bubbleData.detailResearch.limitations)
+                ? state.bubbleData.detailResearch.limitations : [];
+            if (limitations.length) {
+                sourcesContainer.appendChild(createDetailElement('div', 'detail-limitations-title', '取得・検証上の制限'));
+                const list = createDetailElement('ul', 'detail-limitations-list');
+                limitations.forEach(item => list.appendChild(createDetailElement('li', '', item)));
+                sourcesContainer.appendChild(list);
             }
 
             switchScreen('DETAIL');

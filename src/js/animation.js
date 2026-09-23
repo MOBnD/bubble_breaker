@@ -318,7 +318,7 @@
             const preEntry = target.position.clone().addScaledVector(direction, preEntryDistance);
             const end = target.position.clone().addScaledVector(direction, horizonRadius);
             const candidatePools = getWarpCandidateStops(destinationIndex);
-            const desiredCount = Math.round(Math.min(WARP_STOP_COUNT_MAX, Math.max(WARP_STOP_COUNT_MIN, loadingAnimation?.stopCount ?? warpStopCount)));
+            const desiredCount = Math.max(0, Math.round(loadingAnimation?.stopCount ?? warpStopCount));
             const selected = selectWarpCandidates(candidatePools, desiredCount, start);
             let route = null;
             let swingByDiagnostics = [];
@@ -607,8 +607,8 @@
                 loadingAnimation.apiReady = true;
                 loadingAnimation.universeReadyAt = now;
             }
-            loadingAnimation.segmentDuration = 60000 / Math.max(WARP_SPEED_MIN, Math.min(WARP_SPEED_MAX, warpSpeedFactor));
-            loadingAnimation.maxSpeed = 900 * Math.max(WARP_SPEED_MIN, Math.min(WARP_SPEED_MAX, warpSpeedFactor));
+            loadingAnimation.segmentDuration = 60000 / warpSpeedFactor;
+            loadingAnimation.maxSpeed = 900 * warpSpeedFactor;
             if (!loadingAnimation.route || loadingAnimation.routeTargetIndex !== loadingAnimation.targetIndex) initializeLoadingRoute(target);
             if (loadingAnimation.apiReady && !loadingAnimation.returnRoute && !loadingAnimation.preEntryStartedAt && !loadingAnimation.entryStartedAt) beginReturnToDestination();
             const routeSampler = loadingAnimation.routeSampler || createRouteDistanceSampler(loadingAnimation.route);
@@ -1030,42 +1030,6 @@
                         });
                     });
                 }
-
-                const cosmicVisual = b.mesh.userData && b.mesh.userData.cosmicVisual;
-                const cosmicAnimation = cosmicVisual && cosmicVisual.userData.cosmicAnimation;
-                if (cosmicVisual && cosmicAnimation) {
-                    cosmicVisual.rotation.y += 0.0012 + b.mesh.scale.x * 0.00006;
-                    cosmicVisual.rotation.x = Math.sin(time * 0.14 + cosmicAnimation.phase) * 0.06;
-                    cosmicAnimation.orbitRings.forEach((ring, ringIndex) => {
-                        ring.rotation.z += 0.0018 * (ringIndex % 2 === 0 ? 1 : -1);
-                    });
-                    cosmicAnimation.moons.forEach(moon => {
-                        const angle = moon.angle + time * moon.speed;
-                        moon.mesh.position.set(Math.cos(angle) * moon.radius, Math.sin(angle * 1.7) * moon.height, Math.sin(angle) * moon.radius);
-                    });
-                    cosmicAnimation.asteroidCloud.rotation.y -= 0.0025;
-                    const cometAngle = cosmicAnimation.phase + time * 0.28;
-                    cosmicAnimation.comet.position.set(Math.cos(cometAngle) * 1.36, Math.sin(cometAngle * 1.6) * 0.2, Math.sin(cometAngle) * 1.36);
-                    cosmicAnimation.comet.rotation.y = cometAngle + Math.PI;
-                    if (cosmicAnimation.scanRing) {
-                        const isAnalysisLoading = state.bubbleData && state.bubbleData.id === b.data.id && b.data.analysisStatus === 'loading';
-                        cosmicAnimation.scanRing.visible = Boolean(isAnalysisLoading);
-                        if (isAnalysisLoading) {
-                            cosmicAnimation.scanRing.rotation.z += 0.04;
-                            cosmicAnimation.scanRing.scale.setScalar(0.94 + Math.sin(time * 4 + cosmicAnimation.phase) * 0.06);
-                        }
-                    }
-                    const fade = Math.max(0, Math.min(1, b.mesh.material.opacity / 0.95));
-                    cosmicVisual.traverse(child => {
-                        if (!child.material) return;
-                        const materials = Array.isArray(child.material) ? child.material : [child.material];
-                        materials.forEach(material => {
-                            if (!Number.isFinite(material.userData.cosmicBaseOpacity)) material.userData.cosmicBaseOpacity = material.opacity;
-                            material.opacity = material.userData.cosmicBaseOpacity * fade;
-                        });
-                    });
-                }
-
                 const deepSeaVisual = b.mesh.userData && b.mesh.userData.deepSeaVisual;
                 const deepSeaAnimation = deepSeaVisual && deepSeaVisual.userData.deepSeaAnimation;
                 if (deepSeaVisual && deepSeaAnimation) {
@@ -1235,11 +1199,7 @@
             // 個別画面への遷移はクリック、ラベル選択、または意図した近接ズームで行う。
 
             // 最後に、全ての計算結果をもとに画面を描画（レンダリング）する
-            const motionBlurSpeed = loadingAnimation && loadingAnimation.route
-                ? Math.min(1, Math.max(0, loadingAnimation.routeSpeed * (loadingAnimation.routeSampler?.totalLength || loadingAnimation.route.getLength()) / 900))
-                : 0;
-            updateMotionBlurFrame(Boolean(loadingAnimation), motionBlurSpeed, deltaSeconds);
-            renderMotionBlurPass();
+            renderer.render(scene, camera);
         }
 
         // --- 画面サイズが変更された時の対応処理 ---
@@ -1249,9 +1209,6 @@
             camera.aspect = width / height; // カメラの縦横比を修正
             camera.updateProjectionMatrix(); // カメラ設定を更新
             renderer.setSize(width, height); // レンダラーのサイズを更新
-            const pixelRatio = renderer.getPixelRatio();
-            motionBlurRenderTarget.setSize(Math.max(1, Math.floor(width * pixelRatio)), Math.max(1, Math.floor(height * pixelRatio)));
-            clearMotionBlurLayer();
         });
 
         // アニメーションループを開始！

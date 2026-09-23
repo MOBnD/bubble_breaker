@@ -38,67 +38,31 @@
             </div>
             <div id="panel-bgm-content" class="panel-collapsible-content">
                 <button id="btn-sound-toggle" class="sound-control" type="button">🔊 効果音ON</button>
-                <label class="flex items-center gap-2"><input id="bgm-toggle" type="checkbox" checked> BGM</label>
                 <label class="flex items-center gap-2"><input id="ngc3324-toggle" type="checkbox" checked> NGC 3324背景</label>
                 <label class="flex items-center gap-2"><input id="warp-haze-toggle" type="checkbox" checked> ワープ中の靄</label>
-                <div class="navigation-settings" aria-label="航行設定">
-                    <label class="navigation-range-row" for="fov-range">
-                        <span>視野角 FOV <output id="fov-value" for="fov-range">60°</output></span>
-                        <input id="fov-range" type="range" min="35" max="100" step="1" value="60">
-                    </label>
-                    <label class="navigation-range-row" for="warp-speed-range">
-                        <span>航行速度 <output id="warp-speed-value" for="warp-speed-range">1.00×</output></span>
-                        <input id="warp-speed-range" type="range" min="0.25" max="3" step="0.25" value="1">
-                    </label>
-                    <label class="navigation-range-row" for="warp-stops-range">
-                        <span>経由天体数 <output id="warp-stops-value" for="warp-stops-range">3個</output></span>
-                        <input id="warp-stops-range" type="range" min="0" max="30" step="1" value="3">
-                    </label>
-                    <label class="flex items-center gap-2"><input id="motion-blur-toggle" type="checkbox" checked> 航行速度線（モーションブラー）</label>
-                    <label class="navigation-range-row" for="motion-blur-strength-range">
-                        <span>速度線強度 <output id="motion-blur-strength-value" for="motion-blur-strength-range">50</output></span>
-                        <input id="motion-blur-strength-range" type="range" min="0" max="100" step="1" value="50">
-                    </label>
-                </div>
                 <div class="bubble-visual-control">
                     <span class="bubble-visual-label">BUBBLE FORM / VISUAL MODE</span>
                     <div class="bubble-visual-options" role="group" aria-label="バブル表示デザイン">
                         <button type="button" data-bubble-visual-mode="network" aria-pressed="true">装飾あり</button>
-                        <button type="button" data-bubble-visual-mode="classic" aria-pressed="false">装飾なし</button>
-                        <button type="button" data-bubble-visual-mode="cosmic" aria-pressed="false">宇宙テーマ</button>
                         <button type="button" data-bubble-visual-mode="deepSea" aria-pressed="false">深海</button>
                         <button type="button" data-bubble-visual-mode="data" aria-pressed="false">データ空間</button>
                     </div>
                 </div>
-                <label class="theme-select-row">球色テーマ
-                    <select id="bubble-color-theme" class="bg-black/60 rounded px-1 py-0.5">
-                        <option value="legacy">既存配色</option>
-                        <option value="neon">ネオン</option>
-                        <option value="warm">暖色</option>
-                        <option value="space">宇宙</option>
-                        <option value="deepSea">深海</option>
-                        <option value="data">データ空間</option>
-                    </select>
-                </label>
                 <label class="theme-select-row">背景テーマ
                     <select id="background-theme" class="bg-black/60 rounded px-1 py-0.5">
                         <option value="space">宇宙</option>
-                        <option value="deepSea">深海</option>
                         <option value="data">データ空間</option>
                     </select>
                 </label>
-                <div class="panel-size-control">
-                    <span class="panel-size-label">EXPLORATION PANEL / SIZE</span>
-                    <div class="panel-size-options" role="group" aria-label="探索パネルの大きさ">
-                        <button type="button" data-panel-size="small" aria-pressed="false">小</button>
-                        <button type="button" data-panel-size="medium" aria-pressed="true">中</button>
-                        <button type="button" data-panel-size="large" aria-pressed="false">大</button>
-                    </div>
-                </div>
-                <label class="flex items-center gap-2">音量 <input id="audio-volume" type="range" min="0" max="1" step="0.05" value="0.45"></label>
-                <select id="bgm-type" class="bg-black/60 rounded px-1 py-0.5"><option value="宇宙遊泳.mp3">宇宙遊泳.mp3</option><option value="星間宇宙.mp3">星間宇宙.mp3</option><option value="edgeworth-kuiper-belt.mp3">エッジワース・カイパーベルト</option><option value="Far_away_from_the_Earth.mp3">Far_away_from_the_Earth.mp3</option></select>
-                <label class="flex items-center gap-2"><input id="bgm-auto-next" type="checkbox"> 曲終了で次曲</label>
-                <select id="bgm-transition" class="bg-black/60 rounded px-1 py-0.5"><option value="persist">遷移しても継続</option><option value="change">カテゴリ移動で変更</option></select>
+                <label class="theme-select-row">BGMの選択
+                    <select id="bgm-type" class="bg-black/60 rounded px-1 py-0.5">
+                        <option value="none">なし</option>
+                        <option value="宇宙遊泳.mp3">宇宙遊泳.mp3</option>
+                        <option value="星間宇宙.mp3">星間宇宙.mp3</option>
+                        <option value="edgeworth-kuiper-belt.mp3">エッジワース・カイパーベルト</option>
+                        <option value="Far_away_from_the_Earth.mp3">Far_away_from_the_Earth.mp3</option>
+                    </select>
+                </label>
                 <label class="flex items-center gap-2"><input id="explorer-mode" type="checkbox"> 探索者モード（階層ズームのみ）</label>
                 <div class="visibility-control" role="group" aria-label="表示切替">
                     <button id="btn-toggle-title" type="button" aria-pressed="true">タイトル表示 ON</button>
@@ -111,7 +75,6 @@
         
         <!-- ヘッダー -->
         <div class="brand-hud absolute top-6 left-6 flex flex-col gap-1 z-50 pointer-events-none">
-            <div class="brand-overline">INTEREST NETWORK / LIVE EXPLORATION</div>
             <h1 class="text-2xl font-bold tracking-widest text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-purple-500">
                 BubbleBreaker
             </h1>
@@ -139,37 +102,51 @@
                 <button id="btn-dive" disabled class="w-full bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 text-white font-bold py-3 px-4 rounded-lg transition-all shadow-[0_0_15px_rgba(59,130,246,0.5)] cursor-pointer pointer-events-auto">
                     宇宙へダイブ 🚀
                 </button>
+                <button id="btn-return-current-exploration" type="button" class="hidden current-exploration-button">
+                    現在のバブル宇宙へ戻る
+                </button>
+                <section class="saved-explorations" aria-labelledby="saved-explorations-heading">
+                    <div class="saved-explorations-heading-row">
+                        <h2 id="saved-explorations-heading">保存済みの探索</h2>
+                        <span id="saved-exploration-status" aria-live="polite"></span>
+                    </div>
+                    <p id="saved-exploration-empty" class="saved-exploration-empty">保存済みの探索はありません。</p>
+                    <div id="saved-exploration-list" class="saved-exploration-list"></div>
+                </section>
             </div>
         </div>
 
         <!-- ② バブル群画面 -->
-        <div id="screen-group" class="exploration-screen screen-container screen-hidden flex justify-end p-6 pt-24 z-40">
-            <div id="panel-group" class="exploration-panel glass-panel w-80 rounded-xl p-5 flex flex-col gap-5 h-fit max-h-[80vh] overflow-y-auto relative pointer-events-auto">
-                <div class="panel-section panel-header">
-                    <div class="text-[10px] text-blue-300 font-semibold mb-1 flex items-center justify-between">
-                        <span>現在の観測領域 (階層)</span>
-                        <span class="panel-header-actions">
-                            <button id="btn-zoomout-group" class="bg-white/10 hover:bg-white/20 px-2 py-1 rounded text-white flex items-center gap-1 transition-colors cursor-pointer">
-                                <span>↓ 上の階層へ</span>
-                            </button>
-                            <button class="panel-collapse-button" data-collapse-panel="panel-group" aria-controls="panel-group-content" aria-expanded="true" type="button" title="パネルを畳む">−</button>
-                        </span>
-                    </div>
-                    <h2 id="group-title" class="text-xl font-bold">--</h2>
-                    <p id="group-desc" class="group-description">--</p>
+        <div id="screen-group" class="exploration-screen screen-container screen-hidden flex justify-end z-40">
+            <div id="panel-group" class="exploration-panel glass-panel rounded-xl relative pointer-events-auto">
+                <div class="panel-section panel-header panel-compact-header">
+                    <span class="text-[10px] text-blue-300 font-semibold">現在の観測領域</span>
+                    <button class="panel-collapse-button" data-collapse-panel="panel-group" aria-controls="panel-group-content" aria-expanded="true" type="button" title="パネルを畳む">−</button>
                 </div>
                 <div id="panel-group-content" class="panel-collapsible-content">
+                    <nav id="group-breadcrumb" class="group-breadcrumb" aria-label="現在のバブル階層"></nav>
+                    <div class="panel-section group-heading-section">
+                        <h2 id="group-title" class="text-xl font-bold">--</h2>
+                        <p id="group-desc" class="group-description">--</p>
+                        <button id="btn-zoomout-group" class="group-parent-button bg-white/10 hover:bg-white/20 px-2 py-1 rounded text-white transition-colors cursor-pointer">
+                            ↓ 上の階層へ
+                        </button>
+                    </div>
                     <div class="panel-section panel-type-card bg-black/40 rounded-lg p-3 border border-gray-700">
                         <div class="text-xs text-gray-400 mb-1">バブル群の型</div>
                         <div id="group-type" class="text-lg font-bold text-purple-300">--</div>
                     </div>
                     <div class="panel-section panel-list-section">
-                        <div class="text-xs text-gray-400 mb-2 flex justify-between"><span>構成要素</span><span>占有率</span></div>
-                        <div id="group-list" class="flex flex-col gap-2"></div>
+                        <div class="text-xs text-gray-400 mb-2"><span>構成要素と占有率</span></div>
+                        <div class="group-composition-chart-wrap">
+                            <svg id="group-composition-chart" class="group-composition-chart" viewBox="0 0 360 250" role="img" aria-label="構成要素の割合"></svg>
+                        </div>
+                        <div id="group-list" class="group-composition-fallback" aria-live="polite"></div>
                     </div>
                     <div class="panel-section panel-help text-[10px] text-gray-500 mt-2 text-center">
                         バブルをクリックするか、ズームイン<br>下スクロールで全体を俯瞰し、もう一度で上の階層へ戻る<br>WASDで前後左右へ移動
                     </div>
+                    <button id="btn-open-input" type="button" class="group-input-navigation-button">← 意見入力・保存履歴へ</button>
                 </div>
             </div>
         </div>
@@ -241,11 +218,11 @@
                 <div class="card-tl card-anim absolute top-0 left-0 lg:left-10 pointer-events-auto">
                     <div onclick="showDetail('overview')" class="analysis-card w-64 glass-panel p-4 rounded-xl cursor-pointer hover:scale-105 hover:border-blue-400 transition-all group relative overflow-hidden">
                         <h3 class="text-sm font-bold text-blue-300 mb-2 border-b border-blue-500/30 pb-1 relative z-10">📖 バブルの概要</h3>
-                        <div class="w-full h-24 bg-gray-800 rounded mb-2 flex items-center justify-center text-gray-500 text-xs overflow-hidden relative z-10">
+                        <div class="w-full h-24 bg-gray-800 rounded mb-2 flex items-center justify-center text-gray-400 text-xs overflow-hidden relative z-10">
                             <div class="absolute inset-0 bg-gradient-to-br from-blue-900/40 to-purple-900/40"></div>
-                            [関連画像/グラフ]
+                            <span class="relative">概要・画像・出典を確認</span>
                         </div>
-                        <p class="text-xs text-gray-300 line-clamp-2 relative z-10">このバブルを形成する主な意見や特徴的な行動パターンのサマリーです。</p>
+                        <p class="text-xs text-gray-300 line-clamp-2 relative z-10">文字情報と取得できた関連画像から概要を確認します。</p>
                         <div class="absolute -right-2 -top-2 bg-blue-500 w-6 h-6 rounded-full flex items-center justify-center text-xs opacity-0 group-hover:opacity-100 transition-opacity shadow-lg z-10">↗</div>
                     </div>
                 </div>
@@ -253,42 +230,30 @@
                 <div class="card-bl card-anim absolute bottom-0 left-0 lg:left-10 pointer-events-auto">
                     <div onclick="showDetail('history')" class="analysis-card w-64 glass-panel p-4 rounded-xl cursor-pointer hover:scale-105 hover:border-green-400 transition-all group">
                         <h3 class="text-sm font-bold text-green-300 mb-2 border-b border-green-500/30 pb-1">⏳ 形成の歴史</h3>
-                        <div class="w-full h-20 flex items-end gap-1 mb-2 px-2">
-                            <div class="w-1/5 bg-green-900/50 h-1/4 rounded-t"></div>
-                            <div class="w-1/5 bg-green-800/50 h-2/4 rounded-t"></div>
-                            <div class="w-1/5 bg-green-600/50 h-full rounded-t"></div>
-                            <div class="w-1/5 bg-green-500/80 h-3/4 rounded-t"></div>
-                            <div class="w-1/5 bg-green-400 h-full rounded-t shadow-[0_0_8px_#4ade80]"></div>
+                        <div class="analysis-card-timeline-preview" aria-hidden="true">
+                            <span></span><span></span><span></span><span></span>
                         </div>
-                        <p class="text-[10px] text-gray-400">いつ頃からこの意見が形成され、どう拡大したかを示すトレンドグラフ。</p>
+                        <p class="text-[10px] text-gray-400">根拠を確認できた出来事を左から右の時系列で表示します。</p>
                     </div>
                 </div>
 
                 <div class="card-tr card-anim absolute top-0 right-0 lg:right-10 pointer-events-auto">
                     <div onclick="showDetail('demographic')" class="analysis-card w-64 glass-panel p-4 rounded-xl cursor-pointer hover:scale-105 hover:border-yellow-400 transition-all group">
                         <h3 class="text-sm font-bold text-yellow-300 mb-2 border-b border-yellow-500/30 pb-1">🎯 構成層・情報源</h3>
-                        <div class="flex justify-center mb-2">
-                            <div class="w-20 h-20 rounded-full border-4 border-yellow-500/50 border-t-yellow-400 border-r-yellow-400 flex items-center justify-center text-xs font-bold shadow-inner">
-                                SNS 65%
-                            </div>
+                        <div class="flex justify-center mb-2" aria-hidden="true">
+                            <div class="analysis-card-pie-preview"><span>Evidence</span></div>
                         </div>
-                        <p class="text-xs text-gray-300 line-clamp-2">このバブルに属する人々の主な年齢層や、情報を得ているプラットフォーム。</p>
+                        <p class="text-xs text-gray-300 line-clamp-2">今回収集した独立Evidenceの情報源構成を表示します。</p>
                     </div>
                 </div>
 
                 <div class="card-br card-anim absolute bottom-0 right-0 lg:right-10 pointer-events-auto">
                     <div onclick="showDetail('evaluation')" class="analysis-card w-64 glass-panel p-4 rounded-xl cursor-pointer hover:scale-105 hover:border-purple-400 transition-all group">
-                        <h3 class="text-sm font-bold text-purple-300 mb-2 border-b border-purple-500/30 pb-1">⚖️ 反対派からの批判</h3>
-                        <div class="text-xs space-y-2">
-                            <div class="bg-blue-900/30 p-2 rounded border-l-2 border-blue-500">
-                                <span class="text-[10px] text-blue-400 block mb-1">反対派の主な批判</span>
-                                <span id="analysis-evaluation-summary">分析生成中…</span>
-                            </div>
-                            <div class="bg-red-900/30 p-2 rounded border-l-2 border-red-500">
-                                <span class="text-[10px] text-red-400 block mb-1">批判の焦点</span>
-                                <span id="analysis-evaluation-insight">異なる立場が問題視する前提や影響を整理します。</span>
-                            </div>
+                        <h3 class="text-sm font-bold text-purple-300 mb-2 border-b border-purple-500/30 pb-1">⚖️ 内外からの意見</h3>
+                        <div class="analysis-card-perspective-preview" aria-hidden="true">
+                            <span>反対派</span><span>賛成派</span>
                         </div>
+                        <p class="text-xs text-gray-300 mt-3">詳細画面で両方の立場と根拠を比較します。</p>
                     </div>
                 </div>
 
@@ -300,48 +265,28 @@
 
         <!-- ⑤ 解析バブル詳細表示画面 -->
         <div id="screen-detail" class="detail-screen screen-container screen-hidden bg-black/80 backdrop-blur-lg flex items-center justify-center p-10 z-50 pointer-events-auto">
-            <div class="detail-shell w-full max-w-5xl h-[80vh] bg-gray-900 border border-gray-700 rounded-2xl shadow-2xl relative flex overflow-hidden">
-                <div class="w-2/3 p-10 overflow-y-auto">
-                    <div class="inline-block px-3 py-1 bg-blue-900/50 text-blue-300 text-xs font-bold rounded-full mb-4 border border-blue-500/50" id="detail-tag">カテゴリ</div>
-                    <div id="detail-status" class="hidden inline-block px-3 py-1 ml-2 bg-cyan-900/50 text-cyan-200 text-xs font-bold rounded-full mb-4 border border-cyan-500/50">分析生成中…</div>
-                    <h2 id="detail-title" class="text-4xl font-bold mb-6 text-white">解析詳細タイトル</h2>
-                    
-                    <div class="space-y-6 text-gray-300">
-                        <p id="detail-description" class="text-lg leading-relaxed">ここに詳細な解析テキストが入ります。個別バブル解析画面でクリックされた解析バブルの詳細を画面全体で見ることができます。（一枚スライド風）</p>
-                        
-                        <div class="bg-black/50 p-6 rounded-xl border border-gray-800">
-                            <h4 id="detail-insight-label" class="text-white font-bold mb-3">AIによる分析インサイト</h4>
-                            <p id="detail-insight" class="text-sm">このバブルは、特定のキーワードに対するアルゴリズムの推薦によって強化されています。情報源が限定されることで、構成員の思考が単一化しやすい傾向にあります。フィルターバブルを脱出するには、対極にある情報源を意図的にフォローすることが推奨されます。</p>
+            <div class="detail-shell w-full max-w-6xl h-[84vh] bg-gray-900 border border-gray-700 rounded-2xl shadow-2xl relative overflow-hidden">
+                <div class="detail-main p-10 overflow-y-auto">
+                    <div class="detail-toolbar">
+                        <div class="detail-origin">
+                            <span class="detail-origin-label">対象バブル</span>
+                            <strong id="detail-origin-title">元のバブル名</strong>
                         </div>
-
-                        <div class="flex gap-4 h-48">
-                            <div id="detail-chart-a" class="flex-1 bg-gray-800 rounded-lg flex items-center justify-center text-gray-500 text-sm text-center p-3">詳細データグラフA</div>
-                            <div id="detail-chart-b" class="flex-1 bg-gray-800 rounded-lg flex items-center justify-center text-gray-500 text-sm text-center p-3">詳細データグラフB</div>
-                        </div>
-                        <div id="detail-sources" class="text-xs text-gray-400 space-y-1"></div>
-                    </div>
-                </div>
-
-                <div class="w-1/3 bg-gray-800/50 p-8 border-l border-gray-700 flex flex-col justify-between relative">
-                    <div>
-                        <div class="text-xs text-gray-400 mb-1">対象バブル</div>
-                        <div id="detail-origin-title" class="text-xl font-bold text-white mb-8">元のバブル名</div>
-                        
-                        <div class="space-y-4">
-                            <div class="h-2 bg-gray-700 rounded-full overflow-hidden"><div class="w-3/4 h-full bg-blue-500"></div></div>
-                            <div class="h-2 bg-gray-700 rounded-full overflow-hidden"><div class="w-1/2 h-full bg-purple-500"></div></div>
-                            <div class="h-2 bg-gray-700 rounded-full overflow-hidden"><div class="w-5/6 h-full bg-green-500"></div></div>
-                        </div>
-                    </div>
-                    
-                    <div class="self-end text-right">
-                        <button id="btn-back-detail" class="group relative inline-flex items-center justify-center w-32 h-32 rounded-full bg-gradient-to-br from-blue-900 to-purple-900 border-4 border-blue-500 shadow-[0_0_20px_rgba(59,130,246,0.5)] hover:scale-105 transition-all cursor-pointer">
-                            <span class="absolute inset-0 rounded-full bg-white opacity-0 group-hover:opacity-10 transition-opacity"></span>
-                            <div class="text-center">
-                                <div class="text-xs text-blue-200 mb-1">ズームアウト</div>
-                                <div class="font-bold text-white text-sm">解析画面へ<br>戻る</div>
-                            </div>
+                        <button id="btn-back-detail" class="detail-back-button" type="button" aria-label="解析画面へ戻る">
+                            <span aria-hidden="true">−</span>
+                            <span>解析画面へ戻る</span>
                         </button>
+                    </div>
+                    <div class="detail-heading">
+                        <div>
+                            <div class="inline-block px-3 py-1 bg-blue-900/50 text-blue-300 text-xs font-bold rounded-full mb-4 border border-blue-500/50" id="detail-tag">カテゴリ</div>
+                            <div id="detail-status" class="hidden inline-block px-3 py-1 ml-2 bg-cyan-900/50 text-cyan-200 text-xs font-bold rounded-full mb-4 border border-cyan-500/50">分析生成中…</div>
+                        </div>
+                        <h2 id="detail-title" class="text-4xl font-bold mb-6 text-white">解析詳細タイトル</h2>
+                    </div>
+                    <div class="detail-body">
+                        <div id="detail-content" class="detail-content text-gray-300"></div>
+                        <div id="detail-sources" class="detail-sources text-xs text-gray-400"></div>
                     </div>
                 </div>
             </div>
@@ -353,6 +298,7 @@
     <script src="./js/research.js"></script>
     <script src="./js/api.js"></script>
     <script src="./js/state.js"></script>
+    <script src="./js/storage.js"></script>
     <script src="./js/audio.js"></script>
     <script src="./js/navigation.js"></script>
     <script src="./js/scene.js"></script>

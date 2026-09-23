@@ -6,7 +6,8 @@
     "build": "node scripts/build.mjs",
     "check": "node scripts/check-inline-script.mjs",
     "check:visual": "node scripts/check-visual-navigation.mjs",
-    "test": "node scripts/check-universe-hierarchy.mjs && node scripts/check-bubble-research.mjs",
-    "test:research": "node scripts/check-bubble-research.mjs"
+    "test": "node scripts/check-universe-hierarchy.mjs && node scripts/check-bubble-research.mjs && node scripts/check-local-storage.mjs",
+    "test:research": "node scripts/check-bubble-research.mjs",
+    "test:storage": "node scripts/check-local-storage.mjs"
   }
 }

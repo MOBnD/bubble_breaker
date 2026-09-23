@@ -21,6 +21,21 @@ function payload(url, title = 'source') {
     return { output: [{ type: 'web_search_call', action: { sources: [{ url, title }] } }] };
 }
 
+function imagePayload(index = 1, options = {}) {
+    return {
+        output: [{
+            type: 'web_search_call', results: [
+                {
+                    type: 'image_result', image_url: `https://images.example/image-${index}.jpg`,
+                    thumbnail_url: `https://images.example/thumb-${index}.jpg`, source_website_url: `https://publisher.example/page-${index}`,
+                    caption: options.caption || `関連画像 ${index}`
+                },
+                ...(options.invalid ? [{ type: 'image_result', image_url: 'http://unsafe.example/image.jpg', source_website_url: '' }] : [])
+            ]
+        }]
+    };
+}
+
 function candidate(url, title, options = {}) {
     return {
         sourceUrl: url, sourceTitle: title, publisher: options.publisher || title,
@@ -47,6 +62,13 @@ const responses = [
 const normalized = research.normalizeSearchResponses(plan, responses);
 assert.equal(normalized.sources.length, 3, 'canonical URL duplicates must merge');
 assert.ok(normalized.excluded.some(item => item.reason === 'not_in_web_search_sources'), 'unconsulted model URLs must be rejected');
+const imageRequest = research.buildImageSearchRequest(plan, 'test');
+assert.deepEqual(Array.from(imageRequest.tools[0].search_content_types), ['image', 'text']);
+assert.equal(imageRequest.tools[0].image_settings.max_results, 8);
+assert.deepEqual(Array.from(imageRequest.include), ['web_search_call.results']);
+const normalizedImages = research.imageResultsFromPayload(imagePayload(1, { invalid: true }));
+assert.equal(normalizedImages.length, 1, 'only HTTPS images with an attribution page should be accepted');
+assert.equal(normalizedImages[0].sourceWebsiteUrl, 'https://publisher.example/page-1');
 const government = normalized.sources.find(item => item.domain === 'government.example');
 assert.deepEqual(Array.from(government.queryIntents).sort(), ['primary', 'support']);
 
@@ -93,27 +115,32 @@ const dependencyResponses = dependencyPlan.intents.slice(0, 2).map((intent, inde
 });
 const dependencies = research.normalizeSearchResponses(dependencyPlan, dependencyResponses);
 assert.equal(new Set(Array.from(dependencies.sources, item => item.independenceGroup)).size, 1, 'sources sharing an original source must not count as independent');
+const composition = research.sourceComposition(normalized.sources);
+assert.equal(Number(composition.reduce((sum, segment) => sum + segment.value, 0).toFixed(1)), 100, 'source composition must total 100 percent');
+assert.equal(composition.reduce((sum, segment) => sum + segment.count, 0), new Set(Array.from(normalized.sources, source => source.independenceGroup)).size, 'source composition should count independent groups');
 
 const ANALYSIS_SCHEMA = {
     type: 'object', additionalProperties: false,
     required: ['overview', 'history', 'demographic', 'evaluation'],
-    properties: Object.fromEntries(['overview', 'history', 'demographic', 'evaluation'].map(key => [key, {
-        type: 'object', additionalProperties: false, required: ['summary', 'insight', 'metrics', 'isEstimated'],
-        properties: { summary: { type: 'string' }, insight: { type: 'string' }, metrics: { type: 'array', items: { type: 'object' } }, isEstimated: { type: 'boolean' } }
-    }]))
+    properties: {
+        overview: { type: 'object' }, history: { type: 'object' }, demographic: { type: 'object' }, evaluation: { type: 'object' }
+    }
 };
-const analysis = Object.fromEntries(['overview', 'history', 'demographic', 'evaluation'].map(key => [key, { summary: key, insight: key, metrics: [], isEstimated: false }]));
 
 function sourceIdsFromPrompt(body) {
     return Array.from(new Set(Array.from(body.input[1].content[0].text.matchAll(/"sourceId":"([^"]+)"/g), match => match[1])));
 }
 
-async function runIntegration({ failIntent = null, failSynthesis = false, empty = false } = {}) {
+async function runIntegration({ failIntent = null, failSynthesis = false, failImage = false, empty = false } = {}) {
     research.clearCache();
     const calls = [];
     let searchIndex = 0;
     const requestResponse = async (body, _timeout, stage) => {
         calls.push({ body, stage });
+        if (body.text.format.name === 'bubble_image_search') {
+            if (failImage) { const error = new Error('image search failed'); error.status = 503; throw error; }
+            return { parsed: { completed: true }, payload: imagePayload(1) };
+        }
         if (body.text.format.name === 'bubble_evidence_search') {
             searchIndex += 1;
             if (stage === `bubble-search-${failIntent}`) { const error = new Error('temporary'); error.status = 503; throw error; }
@@ -127,6 +154,30 @@ async function runIntegration({ failIntent = null, failSynthesis = false, empty 
         }
         assert.equal(Object.hasOwn(body, 'tools'), false, 'synthesis must not receive web search tools');
         if (failSynthesis) { const error = new Error('synthesis failed'); error.status = 400; throw error; }
+        const imageIds = Array.from(new Set(Array.from(body.input[1].content[0].text.matchAll(/"imageId":"([^"]+)"/g), match => match[1])));
+        const analysis = {
+            overview: { summary: 'overview', sourceIds: ids.slice(0, 2), imageIds: imageIds.slice(0, 1) },
+            history: {
+                summary: 'history', sourceIds: ids.slice(0, 3),
+                events: [
+                    { dateLabel: '2025年', sortKey: 20250000, title: '後の出来事', description: '後', sourceIds: ids.slice(0, 1), imageIds: imageIds.slice(0, 1) },
+                    { dateLabel: '2020年', sortKey: 20200000, title: '先の出来事', description: '先', sourceIds: ids.slice(1, 2), imageIds: [] },
+                    { dateLabel: '不明', sortKey: 0, title: '無効参照', description: '除外', sourceIds: ['invented-source'], imageIds: ['invented-image'] }
+                ]
+            },
+            demographic: { summary: 'demographic', sourceIds: ids.slice(0, 4), imageIds: imageIds.slice(0, 1) },
+            evaluation: {
+                opposition: {
+                    summary: 'opposition',
+                    comments: [
+                        { text: '反対論点', sourceIds: ids.slice(1, 2) },
+                        { text: '無効参照', sourceIds: ['invented-source'] }
+                    ],
+                    sourceIds: ids.slice(1, 2), imageIds: imageIds.slice(0, 1)
+                },
+                support: { summary: 'support', comments: [{ text: '賛成論点', sourceIds: ids.slice(0, 1) }], sourceIds: ids.slice(0, 1), imageIds: [] }
+            }
+        };
         return { parsed: { analysis, sourceIds: ids.slice(0, 4) }, payload: {} };
     };
     const result = await research.runBubbleResearch({ bubble: { ...bubble, id: `run-${failIntent || failSynthesis || empty || 'ok'}` }, group, input: 'integration', model: 'test', analysisSchema: ANALYSIS_SCHEMA, requestResponse });
@@ -135,9 +186,15 @@ async function runIntegration({ failIntent = null, failSynthesis = false, empty 
 
 const integrated = await runIntegration();
 assert.equal(integrated.calls.filter(call => call.body.text.format.name === 'bubble_evidence_search').length, 4);
-assert.equal(integrated.calls.length, 6, 'pipeline should use four searches, one verification and one synthesis');
+assert.equal(integrated.calls.filter(call => call.body.text.format.name === 'bubble_image_search').length, 1);
+assert.equal(integrated.calls.length, 7, 'pipeline should use four evidence searches, one image search, one verification and one synthesis');
 assert.equal(integrated.result.detailResearch.queries.length, 4);
 assert.ok(integrated.result.detailResearch.claims.length > 0);
+assert.equal(integrated.result.detailResearch.images.length, 1);
+assert.deepEqual(Array.from(integrated.result.analysis.history.events, event => event.sortKey), [20200000, 20250000], 'timeline should be chronological and omit invalid refs');
+assert.equal(Number(integrated.result.analysis.demographic.segments.reduce((sum, segment) => sum + segment.value, 0).toFixed(1)), 100);
+assert.equal(integrated.result.analysis.evaluation.opposition.comments.length, 1, 'comments without valid Evidence refs should be removed');
+assert.equal(integrated.result.analysis.evaluation.support.comments[0].text, '賛成論点');
 
 const partialSearch = await runIntegration({ failIntent: 'contradict' });
 assert.equal(partialSearch.result.status, 'partial', 'one failed search intent should preserve partial results');
@@ -147,6 +204,11 @@ const partialSynthesis = await runIntegration({ failSynthesis: true });
 assert.equal(partialSynthesis.result.status, 'partial');
 assert.equal(partialSynthesis.result.analysis, null);
 assert.ok(partialSynthesis.result.sources.length > 0, 'Evidence should survive synthesis failure');
+
+const noImages = await runIntegration({ failImage: true });
+assert.equal(noImages.result.status, 'complete', 'optional image search failure should not downgrade verified text analysis');
+assert.equal(noImages.result.detailResearch.images.length, 0);
+assert.ok(noImages.result.detailResearch.limitations.some(item => item.includes('画像検索')));
 
 await assert.rejects(() => runIntegration({ empty: true }), error => error.code === 'RESEARCH_NO_EVIDENCE');
 

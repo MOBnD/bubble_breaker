@@ -4,7 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const [scene, animation, events, audio, indexHtml, styles, buildScript, apiSource, researchSource] = await Promise.all([
+const [scene, animation, events, audio, indexHtml, styles, buildScript, apiSource, researchSource, storageSource] = await Promise.all([
     readFile(path.join(root, 'src', 'js', 'scene.js'), 'utf8'),
     readFile(path.join(root, 'src', 'js', 'animation.js'), 'utf8'),
     readFile(path.join(root, 'src', 'js', 'events.js'), 'utf8'),
@@ -13,7 +13,8 @@ const [scene, animation, events, audio, indexHtml, styles, buildScript, apiSourc
     readFile(path.join(root, 'src', 'styles.css'), 'utf8'),
     readFile(path.join(root, 'scripts', 'build.mjs'), 'utf8'),
     readFile(path.join(root, 'src', 'js', 'api.js'), 'utf8'),
-    readFile(path.join(root, 'src', 'js', 'research.js'), 'utf8')
+    readFile(path.join(root, 'src', 'js', 'research.js'), 'utf8'),
+    readFile(path.join(root, 'src', 'js', 'storage.js'), 'utf8')
 ]);
 
 const shapeMatch = scene.match(/const GALAXY_SHAPE_NAMES\s*=\s*\[([^\]]+)\]/);
@@ -79,15 +80,44 @@ assert.match(events, /getTouchDistance\(touches\)/, 'pinch distance should be me
 assert.match(events, /handleZoomNavigation\(distanceDelta > 0 \? 'zoomIn' : 'zoomOut'\)/, 'pinch direction should map to application zoom direction');
 assert.match(events, /touchZoomState\.handled/, 'one pinch gesture should not trigger repeated hierarchy transitions');
 assert.match(events, /function handleZoomNavigation\(direction\)/, 'wheel and touch zoom should share navigation behavior');
-assert.match(scene, /analysis-evaluation-summary/, 'opposition criticism should be reflected in the analysis preview');
-assert.match(scene, /analysis-evaluation-insight/, 'opposition criticism focus should be reflected in the analysis preview');
-assert.match(scene, /'evaluation': '反対派からの批判'/, 'evaluation detail title should describe opposition criticism');
-assert.match(indexHtml, /反対派からの批判/, 'analysis card should be labelled as opposition criticism');
-assert.match(indexHtml, /反対派の主な批判/, 'analysis card should expose the main criticism label');
+assert.doesNotMatch(indexHtml, /analysis-evaluation-summary|analysis-evaluation-insight/, 'opposition content should not be shown before opening the detail panel');
+assert.match(scene, /'evaluation': '内外からの意見'/, 'evaluation detail title should use the new panel name');
+assert.match(indexHtml, /内外からの意見/, 'analysis card should use the new panel name');
+assert.doesNotMatch(indexHtml, /反対派からの批判/, 'the old panel name should be removed');
+assert.match(indexHtml, /詳細画面で両方の立場と根拠を比較します/, 'analysis preview should invite a neutral comparison without exposing opinions');
 assert.doesNotMatch(indexHtml, /内部からの視点\(自認\)|外部からの視点\(印象\)/, 'analysis card should not use the old inside/outside evaluation labels');
-assert.match(researchSource, /evaluationは反対派・異なる立場/, 'analysis synthesis should request opposition criticism');
-assert.match(researchSource, /藁人形論法/, 'analysis synthesis should avoid fabricated strawman criticism');
-assert.match(apiSource, /このバブルに対する反対派の批判/, 'fallback analysis should describe opposition criticism');
+assert.doesNotMatch(indexHtml, /AIによる分析インサイト|detail-insight|detail-chart-a|detail-chart-b/, 'generic AI insight and placeholder charts should be removed');
+assert.match(scene, /function renderHistoryDetail\(/, 'history detail should have a dedicated timeline renderer');
+assert.match(styles, /\.detail-timeline\s*\{[^}]*overflow-x: auto/, 'history timeline should scroll horizontally');
+assert.match(scene, /function renderDemographicDetail\(/, 'source composition should have a dedicated pie renderer');
+assert.match(scene, /conic-gradient/, 'source composition should render a pie chart');
+assert.match(scene, /createPerspectivePanel\('反対派の意見'/, 'opposition should render on the comparison left side');
+assert.match(scene, /createPerspectivePanel\('賛成派の意見'/, 'support should render on the comparison right side');
+assert.match(scene, /detail-comments/, 'perspective additions should render as independent comments');
+assert.match(scene, /comment\.sourceIds/, 'each generated comment should expose its Evidence refs');
+assert.match(researchSource, /匿名のパラフレーズ/, 'synthesis should request natural evidence-grounded anonymous comments');
+assert.match(indexHtml, /id="group-breadcrumb"/, 'group panel should expose breadcrumb navigation');
+assert.match(indexHtml, /id="group-composition-chart"/, 'group panel should expose a composition pie chart');
+assert.match(scene, /function renderGroupBreadcrumb\(/, 'breadcrumb navigation should be rendered from the hierarchy');
+assert.match(scene, /window\.navigateToBreadcrumbGroup/, 'breadcrumb ancestors should be clickable');
+assert.match(scene, /function renderGroupComposition\(/, 'group composition should render from current bubble data');
+assert.match(indexHtml, /<svg id="group-composition-chart"/, 'group composition should use a responsive SVG');
+assert.match(scene, /group-composition-leader/, 'pie slices should connect to their labels with leader lines');
+assert.match(scene, /group-composition-label-button/, 'composition labels should be interactive controls');
+assert.match(scene, /slice\.addEventListener\('keydown', activate\)/, 'pie slices should support keyboard activation');
+assert.match(scene, /selectBubble\(bubble\)/, 'pie labels should reuse the existing bubble zoom path');
+assert.match(styles, /\.group-composition-chart \{[^}]*width: 100%/, 'composition chart should scale within the panel');
+assert.match(styles, /\.exploration-panel\.panel-is-collapsed > \.panel-collapsible-content/, 'collapsed right panels should hide their content');
+assert.doesNotMatch(indexHtml, /detail-sidebar/, 'detail windows should no longer use a right sidebar');
+assert.match(indexHtml, /detail-toolbar/, 'detail controls should move into a top toolbar');
+assert.match(styles, /--hud-edge:/, 'right-side panels should share one edge offset');
+assert.match(storageSource, /event\.target !== inputScreen/, 'input history overlay should close only on backdrop clicks');
+assert.match(scene, /画像出典:/, 'external images should expose attribution links');
+assert.match(scene, /referrerPolicy = 'no-referrer'/, 'external images should not send the page referrer');
+assert.match(researchSource, /evaluationは反対派と賛成派を分け/, 'analysis synthesis should request both perspectives');
+assert.match(researchSource, /藁人形/, 'analysis synthesis should avoid fabricated strawman criticism');
+assert.match(apiSource, /反対派の見解を確認できる公開情報がありません/, 'fallback analysis should describe missing opposition evidence');
+assert.match(apiSource, /賛成派の見解を確認できる公開情報がありません/, 'fallback analysis should describe missing support evidence');
 assert.match(scene, /function createAnalysisProbeVisual\(/, 'analysis loading should use a surface probe');
 assert.match(scene, /window\.markBubbleAnalysisComplete = function/, 'analysis completion should notify the bubble scene');
 assert.match(animation, /analysisProbeAnimation/, 'analysis probes should animate around bubbles');
@@ -103,7 +133,7 @@ assert.match(animation, /blackHole\.clone\(\)\.addScaledVector\(loadingAnimation
 assert.match(animation, /new THREE\.CurvePath/, 'warp should be assembled from continuous curve segments');
 assert.match(animation, /new THREE\.CubicBezierCurve3/, 'warp should use cubic Bezier segments');
 assert.doesNotMatch(animation, /new THREE\.CatmullRomCurve3/, 'warp should not use unstable point-spline interpolation');
-assert.match(animation, /WARP_STOP_COUNT_MIN/, 'warp should use the configured zero to thirty stop range');
+assert.match(scene, /const warpStopCount = 3;/, 'warp should use the fixed three-stop route');
 assert.match(animation, /routeStops/, 'warp should retain generated galaxy and stellar-system stops');
 assert.match(animation, /selectWarpCandidates\(/, 'warp should select actual galaxy and stellar-system anchors');
 assert.match(animation, /candidate\.anchor/, 'warp candidates should be anchored to real world objects');
@@ -149,17 +179,9 @@ assert.match(animation, /returningToDestination/, 'the loading route should swit
 assert.match(animation, /initializeLoadingRoute\(firstTarget\)/, 'each dive should receive a multi-stop route');
 assert.match(animation, /relocateGalaxyUniverse\('black-hole-universe-switch'\)/, 'black-hole universe switches should relocate galaxies');
 assert.doesNotMatch(animation, /warpStarStreakGroup|updateWarpStarStreaks/, 'concentration-line warp overlays should be removed');
-assert.match(scene, /const motionBlurRenderTarget = new THREE\.WebGLRenderTarget/, 'motion blur should render the scene into a texture first');
-assert.match(scene, /const motionBlurRenderScene = new THREE\.Scene\(\)/, 'motion blur should use a dedicated post-process scene');
-assert.match(scene, /uBlurAmount/, 'motion blur should expose a shader blur amount');
-assert.match(scene, /for \(int sampleIndex = 1; sampleIndex <= 14; sampleIndex\+\+\)/, 'motion blur should use multiple radial texture samples');
-assert.match(scene, /mix\(vUv, uCenter, progress \* uBlurAmount\)/, 'motion blur samples should stretch toward the vanishing point');
-assert.match(scene, /function renderMotionBlurPass\(/, 'motion blur should have a dedicated post-process render pass');
-assert.match(scene, /renderer\.setRenderTarget\(motionBlurRenderTarget\)/, 'motion blur should capture the main scene into a render target');
-assert.doesNotMatch(scene, /MOTION_BLUR_LINE_COUNT|motionBlurGeometry|motionBlurOverlayScene|renderer\.clearDepth\(\)/, 'motion blur should not use the old speed-line overlay');
-assert.match(scene, /window\.setMotionBlurEnabled/, 'motion blur should have a runtime toggle');
-assert.match(animation, /updateMotionBlurFrame\(/, 'motion blur should be updated after the scene render');
-assert.match(animation, /renderMotionBlurPass\(/, 'animation should finish each frame through the motion blur pass');
+assert.doesNotMatch(scene, /motionBlurRenderTarget|motionBlurRenderScene|uBlurAmount|setMotionBlur/, 'removed motion blur rendering should not remain');
+assert.doesNotMatch(animation, /updateMotionBlurFrame|renderMotionBlurPass/, 'animation should not run a motion blur pass');
+assert.match(animation, /renderer\.render\(scene, camera\)/, 'animation should render the scene directly');
 assert.match(animation, /createUniverseRevealBeacon\(/, 'the next universe should begin as a central light beacon');
 assert.match(animation, /function updateUniverseReveal\(/, 'the next universe should reveal from a distant view');
 assert.match(animation, /beginUniverseReveal\(true\)/, 'the next universe should use the fast reveal mode after a dive');
@@ -169,26 +191,28 @@ assert.doesNotMatch(animation, /nearHole|Math\.pow\(1 - p/, 'warp should not ent
 assert.match(audio, /EDGEWORTH_BGM = 'edgeworth-kuiper-belt\.mp3'/, 'the default BGM should use a stable ASCII filename');
 assert.match(audio, /storedBgmType === LEGACY_EDGEWORTH_BGM/, 'legacy BGM selections should migrate safely');
 assert.match(indexHtml, /value="edgeworth-kuiper-belt\.mp3">エッジワース・カイパーベルト/, 'the BGM selector should expose the Edgeworth track');
+assert.match(indexHtml, /id="bgm-type"[\s\S]*?<option value="none">なし<\/option>/, 'BGM selection should include a none option');
+assert.doesNotMatch(indexHtml, /id="bgm-toggle"|id="audio-volume"|id="bgm-auto-next"|id="bgm-transition"/, 'BGM should expose only the track selector');
+assert.match(audio, /const FIXED_BGM_VOLUME = audioVolume \* 0\.55;/, 'BGM should use a fixed volume');
+assert.match(audio, /bgmAudio\.loop = true;/, 'the selected BGM should loop');
+assert.match(audio, /if \(bgmType === 'none'\)/, 'the none selection should stop BGM playback');
 assert.match(buildScript, /ngc-3324-nircam-clean-4000\.png/, 'the build should embed the clean NGC 3324 asset');
 assert.match(indexHtml, /id="ngc3324-toggle"/, 'NGC 3324 visibility should have a UI toggle');
 assert.match(events, /bubblebreaker\.ngc3324/, 'NGC 3324 visibility should persist in localStorage');
 assert.match(scene, /function setNGC3324BackgroundVisible\(visible\)/, 'NGC 3324 visibility should be controlled without rebuilding the scene');
-assert.match(indexHtml, /data-panel-size="small"/, 'exploration panel size controls should include small');
-assert.match(indexHtml, /data-panel-size="medium"/, 'exploration panel size controls should include medium');
-assert.match(indexHtml, /data-panel-size="large"/, 'exploration panel size controls should include large');
-assert.match(events, /bubblebreaker\.panelSize/, 'exploration panel size should persist in localStorage');
-assert.match(events, /applyExplorationPanelSize\(/, 'exploration panel size should be applied at startup and on selection');
+assert.doesNotMatch(indexHtml, /data-panel-size|EXPLORATION PANEL \/ SIZE/, 'panel size controls should be removed');
+assert.doesNotMatch(events, /applyExplorationPanelSize|data-panel-size/, 'panel size runtime settings should be removed');
 assert.match(indexHtml, /class="[^"]*cosmic-ui/, 'the interface should expose the cosmic network theme hook');
 assert.match(indexHtml, /class="[^"]*portal-panel/, 'the input screen should use the network entry panel');
 assert.match(indexHtml, /class="[^"]*exploration-panel/, 'category screens should use the exploration panel theme hook');
 assert.match(indexHtml, /data-bubble-visual-mode="network"/, 'network bubble visual mode should be selectable');
-assert.match(indexHtml, /data-bubble-visual-mode="classic"/, 'classic bubble visual mode should be selectable');
-assert.match(indexHtml, /data-bubble-visual-mode="cosmic"/, 'cosmic bubble visual mode should be selectable');
+assert.doesNotMatch(indexHtml, /data-bubble-visual-mode="classic"/, 'undecorated bubble mode should be removed');
+assert.doesNotMatch(indexHtml, /data-bubble-visual-mode="cosmic"/, 'cosmic bubble mode should be removed');
 assert.match(indexHtml, /data-bubble-visual-mode="deepSea"/, 'deep sea bubble visual mode should be selectable');
 assert.match(indexHtml, /data-bubble-visual-mode="data"/, 'data space bubble visual mode should be selectable');
 assert.match(indexHtml, /data-bubble-visual-mode="network"[^>]*>装飾あり/, 'network mode should be labelled as decorated');
-assert.match(indexHtml, /data-bubble-visual-mode="classic"[^>]*>装飾なし/, 'classic mode should be labelled as undecorated');
-assert.match(indexHtml, /data-bubble-visual-mode="cosmic"[^>]*>宇宙テーマ/, 'cosmic mode should be labelled as space themed');
+assert.doesNotMatch(indexHtml, />装飾なし</, 'undecorated option label should be removed');
+assert.doesNotMatch(indexHtml, />宇宙テーマ</, 'cosmic option label should be removed');
 assert.match(indexHtml, /data-bubble-visual-mode="deepSea"[^>]*>深海/, 'deep sea mode should be labelled');
 assert.match(indexHtml, /data-bubble-visual-mode="data"[^>]*>データ空間/, 'data space mode should be labelled');
 assert.match(indexHtml, /id="btn-sound-toggle"/, 'sound toggle should remain available');
@@ -207,33 +231,13 @@ assert.match(indexHtml, /id="panel-single-content"/, 'single panel should have a
 assert.doesNotMatch(indexHtml, /data-close-panel="panel-group"|data-close-panel="panel-single"/, 'right panels should not close');
 assert.match(indexHtml, /id="btn-toggle-title"/, 'title visibility should have a control');
 assert.match(indexHtml, /id="btn-toggle-ui"/, 'global UI visibility should have a control');
-assert.match(indexHtml, /id="fov-range"/, 'FOV should have a range control');
-assert.match(indexHtml, /id="fov-value"/, 'FOV should show its current value');
-assert.match(indexHtml, /id="warp-speed-range"/, 'warp speed should have a range control');
-assert.match(indexHtml, /id="warp-stops-range"/, 'warp stop count should have a range control');
-assert.match(indexHtml, /id="warp-stops-value"[^>]*>3個<\//, 'warp stop count UI should default to three');
-assert.match(indexHtml, /id="warp-stops-range"[^>]*value="3"/, 'warp stop range should start at three');
-assert.match(indexHtml, /id="motion-blur-toggle"/, 'motion blur should have an ON/OFF control');
-assert.match(indexHtml, /id="motion-blur-strength-range"/, 'motion blur should have a strength range control');
-assert.match(indexHtml, /速度線強度/, 'speed-line strength should be clearly labelled');
-assert.match(indexHtml, /id="motion-blur-strength-range"[^>]*min="0"[^>]*max="100"/, 'motion blur strength should range from zero to one hundred');
-assert.match(indexHtml, /id="warp-stops-range"[^>]*min="0"[^>]*max="30"/, 'warp stop range should range from zero to thirty');
-assert.match(indexHtml, /id="warp-speed-range"[^>]*max="3"/, 'warp speed range should cap at three times');
-assert.match(events, /window\.setFieldOfView/, 'FOV control should update the camera setting');
-assert.match(events, /window\.setWarpSpeedFactor/, 'warp speed control should update navigation speed');
-assert.match(events, /window\.setWarpStopCount/, 'warp stop control should update navigation count');
-assert.match(events, /storedWarpStops == null \? 3/, 'missing stored warp stop count should default to three');
-assert.match(events, /window\.setMotionBlurStrength/, 'motion blur strength should update the rendering effect');
-assert.match(events, /bubblebreaker\.motionBlur/, 'motion blur preference should persist');
-assert.match(events, /bubblebreaker\.motionBlurStrength/, 'motion blur strength should persist');
-assert.match(scene, /FIELD_OF_VIEW_MIN = 35/, 'FOV should start at 35 degrees');
-assert.match(scene, /FIELD_OF_VIEW_MAX = 100/, 'FOV should end at 100 degrees');
-assert.match(scene, /WARP_SPEED_MIN = 0\.25/, 'warp speed should support low speed');
-assert.match(scene, /WARP_SPEED_MAX = 3/, 'warp speed should support three times speed');
-assert.match(scene, /WARP_STOP_COUNT_MIN = 0/, 'warp stop count should allow zero stops');
-assert.match(scene, /WARP_STOP_COUNT_MAX = 30/, 'warp stop count should allow thirty stops');
-assert.match(scene, /DEFAULT_WARP_STOP_COUNT = 3/, 'warp stop count should default to three');
-assert.match(scene, /motionBlurStrength/, 'motion blur should use a configurable intensity');
+for (const removedControl of ['fov-range', 'warp-speed-range', 'warp-stops-range', 'motion-blur-toggle', 'motion-blur-strength-range']) {
+    assert.doesNotMatch(indexHtml, new RegExp(`id="${removedControl}"`), `${removedControl} should be removed`);
+}
+assert.match(scene, /const configuredFieldOfView = 60;/, 'FOV should be fixed at sixty degrees');
+assert.match(scene, /const warpSpeedFactor = 1;/, 'warp speed should be fixed at normal speed');
+assert.match(scene, /const warpStopCount = 3;/, 'warp route should use three stops');
+assert.doesNotMatch(events, /setFieldOfView|setWarpSpeedFactor|setWarpStopCount|setMotionBlur/, 'removed navigation controls should have no event handlers');
 assert.match(events, /window\.setTitleVisibility = function/, 'title visibility should be exposed for reliable button wiring');
 assert.match(events, /window\.setUIVisibility = function/, 'global UI visibility should be exposed for reliable button wiring');
 assert.match(events, /window\.toggleTitleVisibility\s*=\s*\(\)\s*=>/, 'title visibility should have a public toggle action');
@@ -246,37 +250,34 @@ assert.match(indexHtml, /id="btn-dive"[^>]*disabled/, 'opinion submission should
 assert.match(events, /window\.setRuntimeOpenAIKey/, 'the entered API key should be passed to the runtime API client');
 assert.match(events, /window\.hasRuntimeOpenAIKey/, 'the UI should check the runtime API key state');
 assert.match(buildScript, /window\.__OPENAI_API_KEY__ = ""/, 'published HTML must not contain an embedded API key');
-assert.match(indexHtml, /id="bubble-color-theme"/, 'bubble color themes should be independently selectable');
-for (const theme of ['legacy', 'neon', 'warm', 'space', 'deepSea', 'data']) {
-    assert.match(indexHtml, new RegExp(`value="${theme}"`), `bubble color theme ${theme} should be available`);
-}
-assert.match(indexHtml, /id="background-theme"/, 'background themes should be independently selectable');
-for (const theme of ['space', 'deepSea', 'data']) {
+assert.doesNotMatch(indexHtml, /id="bubble-color-theme"/, 'bubble color theme selector should be removed');
+assert.match(indexHtml, /id="background-theme"/, 'background themes should remain selectable');
+for (const theme of ['space', 'data']) {
     assert.match(indexHtml, new RegExp(`id="background-theme"[\\s\\S]*value="${theme}"`), `background theme ${theme} should be available`);
 }
+assert.doesNotMatch(indexHtml.match(/id="background-theme"[\s\S]*?<\/select>/)?.[0] || '', /value="deepSea"/, 'deep sea background should be removed');
 assert.match(events, /bubblebreaker\.bubbleVisualMode/, 'bubble visual mode should persist in localStorage');
-assert.match(events, /bubbleVisualModeOptions = \['network', 'classic', 'cosmic', 'deepSea', 'data'\]/, 'all bubble visual modes should be accepted at startup');
+assert.match(events, /bubbleVisualModeOptions = \['network', 'deepSea', 'data'\]/, 'only retained bubble visual modes should be accepted at startup');
 assert.match(events, /data-collapse-panel/, 'panel collapse events should be wired');
 assert.match(events, /bubblebreaker\.\$\{panelId\}\.collapsed/, 'panel collapse state should persist for every panel');
 assert.match(events, /bubblebreaker\.titleVisible/, 'title visibility should persist');
 assert.match(events, /bubblebreaker\.uiVisible/, 'global UI visibility should persist');
 assert.match(events, /__bubbleBreakerMovementKeys/, 'WASD key state should be tracked');
-assert.match(events, /bubblebreaker\.bubbleColorTheme/, 'bubble color theme should persist in localStorage');
+assert.doesNotMatch(events, /setBubbleColorTheme/, 'bubble color theme runtime switching should be removed');
 assert.match(events, /bubblebreaker\.backgroundTheme/, 'background theme should persist in localStorage');
 assert.match(scene, /function createNetworkBubbleVisual\(/, 'network bubble decorations should be generated');
-assert.match(scene, /function createCosmicBubbleVisual\(/, 'cosmic bubble decorations should be generated');
+assert.doesNotMatch(scene, /function createCosmicBubbleVisual\(/, 'removed cosmic bubble decorations should not be generated');
 assert.match(scene, /function createDeepSeaBubbleVisual\(/, 'deep sea bubble decorations should be generated');
 assert.match(scene, /function createDataBubbleVisual\(/, 'data space bubble decorations should be generated');
-assert.match(scene, /BUBBLE_VISUAL_MODE_NAMES = \['network', 'classic', 'cosmic', 'deepSea', 'data'\]/, 'five bubble visual modes should be supported');
+assert.match(scene, /BUBBLE_VISUAL_MODE_NAMES = \['network', 'deepSea', 'data'\]/, 'only three retained bubble modes should be supported');
 assert.match(scene, /deepSeaAnimation/, 'deep sea bubble decorations should expose animation metadata');
 assert.match(scene, /dataAnimation/, 'data space bubble decorations should expose animation metadata');
-assert.match(scene, /function createDeepSeaBackgroundTheme\(/, 'deep sea background structures should be generated');
+assert.doesNotMatch(scene, /function createDeepSeaBackgroundTheme\(/, 'removed deep sea background structures should not be generated');
 assert.match(scene, /function createDataBackgroundTheme\(/, 'data space background structures should be generated');
 assert.match(scene, /function createThemeDomeTexture\(theme\)/, 'non-space themes should have their own dome textures');
 assert.match(scene, /window\.setBackgroundTheme = function/, 'background theme should switch at runtime');
-assert.match(scene, /BACKGROUND_THEME_NAMES = \['space', 'deepSea', 'data'\]/, 'three background themes should be supported');
-assert.match(scene, /BUBBLE_COLOR_THEME_NAMES = \['legacy', 'neon', 'warm', 'space', 'deepSea', 'data'\]/, 'six bubble color themes should be supported');
-assert.match(scene, /window\.setBubbleColorTheme = function/, 'bubble color theme should switch at runtime');
+assert.match(scene, /BACKGROUND_THEME_NAMES = \['space', 'data'\]/, 'only retained background themes should be supported');
+assert.doesNotMatch(scene, /BUBBLE_COLOR_THEME_NAMES|setBubbleColorTheme/, 'bubble color theme processing should be removed');
 assert.match(scene, /new THREE\.TorusGeometry/, 'network bubbles should include orbit rings');
 assert.match(scene, /new THREE\.Line\(/, 'network bubbles should include connection lines');
 assert.match(scene, /function disposeObjectTree\(/, 'network bubble decorations should be disposed with the bubble');
@@ -285,7 +286,7 @@ assert.match(animation, /networkVisual\.rotation\.y \+=/, 'network bubble decora
 assert.match(animation, /networkAnimation\.observerRing/, 'the focus bubble should have an observer ring animation');
 assert.match(scene, /const scanRing = new THREE\.Mesh/, 'network bubbles should include an analysis scan ring');
 assert.match(animation, /analysisStatus === 'loading'/, 'analysis generation should activate the scan ring');
-assert.match(animation, /cosmicAnimation/, 'cosmic bubble decorations should animate');
+assert.doesNotMatch(animation, /cosmicAnimation/, 'removed cosmic bubble decorations should not animate');
 assert.match(animation, /deepSeaAnimation/, 'deep sea bubble decorations should animate');
 assert.match(animation, /dataAnimation/, 'data space bubble decorations should animate');
 assert.match(animation, /function updateKeyboardNavigation\(/, 'keyboard navigation should move the camera');
@@ -296,11 +297,9 @@ assert.match(events, /bubblebreaker\.warpHaze/, 'warp haze preference should per
 assert.match(events, /warp-haze-active/, 'warp haze should be applied through a dedicated loading class');
 assert.match(indexHtml, /id="screen-input" class="input-screen screen-container/, 'the input screen should not carry permanent backdrop blur');
 assert.match(styles, /#screen-input\.warp-haze-active/, 'warp haze styling should be limited to the active loading state');
-assert.match(styles, /\.exploration-panel\.panel-size-small[\s\S]*?height: 42vh/, 'small exploration panels should have a distinct height');
-assert.match(styles, /\.exploration-panel\.panel-size-medium[\s\S]*?height: 58vh/, 'medium exploration panels should have a distinct height');
-assert.match(styles, /\.exploration-panel\.panel-size-large[\s\S]*?33vw/, 'large exploration panels should occupy about one third of the viewport width');
-assert.match(styles, /\.exploration-panel\.panel-size-large[\s\S]*?height: 76vh/, 'large exploration panels should be vertically expanded');
-assert.match(styles, /\.exploration-panel\.panel-size-large \.panel-section/, 'large panels should change internal section layout');
+assert.match(styles, /#panel-group \{[\s\S]*?max-height: calc\(100dvh/, 'group panel height should be constrained to the dynamic viewport');
+assert.match(styles, /#panel-group-content \{[^}]*overflow-y: auto/, 'group panel content should scroll only when it overflows');
+assert.doesNotMatch(styles, /panel-size-small|panel-size-medium|panel-size-large/, 'fixed panel size variants should be removed');
 assert.match(styles, /\.bubble-visual-options[\s\S]*?grid-template-columns: repeat\(3, 1fr\)/, 'three bubble visual modes should fit the control');
 assert.match(indexHtml, /id="group-desc"/, 'the group panel should show the parent bubble description');
 assert.match(indexHtml, /id="single-desc"/, 'the individual bubble panel should show a short description');

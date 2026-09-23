@@ -30,7 +30,7 @@ const context = {
     fetch
 };
 vm.createContext(context);
-vm.runInContext(`${dataSource}\n${apiSource}\nglobalThis.__bubbleBreakerTest = { normalizeGeneratedUniverse, normalizeFallbackUniverse, normalizeBubblePercentages, compactHierarchyBubbleName, buildOpenAIRootRequest, buildOpenAICentralGroupRequest, buildOpenAILeafGroupRequest, requestBubbleAnalysis, requestBubbleGroupAnalyses };`, context);
+vm.runInContext(`${dataSource}\n${apiSource}\nglobalThis.__bubbleBreakerTest = { normalizeGeneratedUniverse, normalizeFallbackUniverse, normalizeBubblePercentages, normalizeAnalysis, compactHierarchyBubbleName, buildOpenAIRootRequest, buildOpenAICentralGroupRequest, buildOpenAILeafGroupRequest, requestBubbleAnalysis, requestBubbleGroupAnalyses };`, context);
 
 const bubble = (id, childId = null) => ({
     id, name: id, size: 1, color: 0x4488ff, htmlColor: '#4488ff',
@@ -55,6 +55,11 @@ const variedPercentages = context.__bubbleBreakerTest.normalizeBubblePercentages
 ]);
 assert.equal(Number(variedPercentages.reduce((sum, item) => sum + item.size, 0).toFixed(2)), 100, 'occupancy percentages should total 100');
 assert.ok(new Set(variedPercentages.map(item => item.size)).size > 1, 'flat API sizes should become varied inferred percentages');
+const legacyAnalysis = context.__bubbleBreakerTest.normalizeAnalysis({
+    evaluation: { opposition: { summary: '旧形式', points: ['旧論点'], sourceIds: ['source-1'], imageIds: [] } }
+});
+assert.equal(legacyAnalysis.evaluation.opposition.comments[0].text, '旧論点', 'legacy points should migrate to comment cards');
+assert.deepEqual(Array.from(legacyAnalysis.evaluation.opposition.comments[0].sourceIds), ['source-1']);
 assert.equal(context.__bubbleBreakerTest.compactHierarchyBubbleName('選択肢A・選択肢B・選択肢C', 'central'), '選択肢A・選択肢Bなど', 'hierarchy bubble names should not enumerate every lower option');
 assert.ok(context.__bubbleBreakerTest.compactHierarchyBubbleName('これは非常に長い上位カテゴリ名称です', 'root').length <= 24, 'hierarchy bubble names should have a safe display length');
 const rootRequest = context.__bubbleBreakerTest.buildOpenAIRootRequest('テスト意見');
@@ -124,6 +129,13 @@ assert.equal(partialBubble.analysisStatus, 'partial', 'partial Evidence should r
 assert.equal(partialBubble.sources.length, 1, 'partial Evidence sources should remain attached to the bubble');
 const valid = normalize({ groups, entryGroupId: 'central1', entryBubbleId: 'entry' });
 assert.equal(Object.keys(valid.db).length, 7, 'valid three-level hierarchy should be accepted');
+const whitespaceBubbleGroups = structuredClone(groups);
+whitespaceBubbleGroups[0].bubbles[0].name = '   ';
+assert.throws(
+    () => normalize({ groups: whitespaceBubbleGroups, entryGroupId: 'central1', entryBubbleId: 'entry' }),
+    /空のIDまたは名称/,
+    'API responses with blank bubble names should be rejected before rendering'
+);
 const topologyGroups = structuredClone(groups).filter(group => group.level !== 'leaf');
 topologyGroups.filter(group => group.level === 'central').forEach(group => group.bubbles.forEach(bubble => { bubble.childId = null; }));
 let hierarchyFetchCount = 0;

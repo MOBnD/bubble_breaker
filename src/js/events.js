@@ -54,6 +54,7 @@
         }
         const bootstrapKeyConfigured = typeof window.hasRuntimeOpenAIKey === 'function' && window.hasRuntimeOpenAIKey();
         updateApiKeyUI(bootstrapKeyConfigured);
+        if (typeof window.initializeBubbleSessionUI === 'function') window.initializeBubbleSessionUI();
         apiKeySetButton.addEventListener('click', () => {
             const value = apiKeyInput.value.trim();
             if (value.length < 10) {
@@ -120,9 +121,9 @@
                 activeDB = universe.db;
                 focusEntryGroupId = universe.entryGroupId;
                 focusEntryBubbleId = universe.entryBubbleId || null;
+                if (typeof window.startLocalBubbleSession === 'function') window.startLocalBubbleSession(input, universe);
                 document.getElementById('screen-input').classList.remove('screen-active');
                 document.getElementById('screen-input').classList.add('screen-hidden');
-                if (typeof window.setFieldOfView === 'function') window.setFieldOfView(localStorage.getItem('bubblebreaker.fov'), false);
                 camera.rotation.set(0, 0, 0);
                 isGenerating = false;
                 button.disabled = false;
@@ -181,26 +182,11 @@
             const storedCollapsed = localStorage.getItem(`bubblebreaker.${panelId}.collapsed`) === 'on';
             setPanelCollapsed(panelId, storedCollapsed, false);
         });
-        const bgmToggle = document.getElementById('bgm-toggle');
         const ngc3324Toggle = document.getElementById('ngc3324-toggle');
         const warpHazeToggle = document.getElementById('warp-haze-toggle');
-        const fovRange = document.getElementById('fov-range');
-        const fovValue = document.getElementById('fov-value');
-        const warpSpeedRange = document.getElementById('warp-speed-range');
-        const warpSpeedValue = document.getElementById('warp-speed-value');
-        const warpStopsRange = document.getElementById('warp-stops-range');
-        const warpStopsValue = document.getElementById('warp-stops-value');
-        const motionBlurToggle = document.getElementById('motion-blur-toggle');
-        const motionBlurStrengthRange = document.getElementById('motion-blur-strength-range');
-        const motionBlurStrengthValue = document.getElementById('motion-blur-strength-value');
         const bubbleVisualModeButtons = [...document.querySelectorAll('[data-bubble-visual-mode]')];
-        const bubbleColorThemeControl = document.getElementById('bubble-color-theme');
         const backgroundThemeControl = document.getElementById('background-theme');
-        const panelSizeButtons = [...document.querySelectorAll('[data-panel-size]')];
-        const volumeControl = document.getElementById('audio-volume');
         const bgmTypeControl = document.getElementById('bgm-type');
-        const bgmAutoNextControl = document.getElementById('bgm-auto-next');
-        const bgmTransitionControl = document.getElementById('bgm-transition');
         const explorerModeControl = document.getElementById('explorer-mode');
         const titleToggleButton = document.getElementById('btn-toggle-title');
         const uiToggleButton = document.getElementById('btn-toggle-ui');
@@ -266,7 +252,6 @@
             movementKeys.clear();
             window.__bubbleBreakerShiftDown = false;
         });
-        bgmToggle.checked = bgmEnabled;
         const storedNGC3324Visibility = localStorage.getItem('bubblebreaker.ngc3324');
         const ngc3324Visible = storedNGC3324Visibility !== 'off';
         ngc3324Toggle.checked = ngc3324Visible;
@@ -279,69 +264,9 @@
             if (!inputScreen) return;
             inputScreen.classList.toggle('warp-haze-active', Boolean(isDiving && warpHazeEnabled));
         }
-        function updateNavigationRangeLabels() {
-            if (fovValue) { fovValue.value = `${Number(fovRange.value).toFixed(0)}°`; fovValue.textContent = fovValue.value; }
-            if (warpSpeedValue) { warpSpeedValue.value = `${Number(warpSpeedRange.value).toFixed(2)}×`; warpSpeedValue.textContent = warpSpeedValue.value; }
-            if (warpStopsValue) { warpStopsValue.value = `${Number(warpStopsRange.value).toFixed(0)}個`; warpStopsValue.textContent = warpStopsValue.value; }
-            if (motionBlurStrengthValue) { motionBlurStrengthValue.value = `${Number(motionBlurStrengthRange.value).toFixed(0)}`; motionBlurStrengthValue.textContent = motionBlurStrengthValue.value; }
-        }
-        const storedFov = localStorage.getItem('bubblebreaker.fov');
-        const storedWarpSpeed = localStorage.getItem('bubblebreaker.warpSpeed');
-        const storedWarpStops = localStorage.getItem('bubblebreaker.warpStops');
-        const initialFov = storedFov == null ? 60 : Number(storedFov);
-        const initialWarpSpeed = storedWarpSpeed == null ? 1 : Number(storedWarpSpeed);
-        const initialWarpStops = storedWarpStops == null ? 3 : Number(storedWarpStops);
-        fovRange.value = String(typeof window.setFieldOfView === 'function' ? window.setFieldOfView(initialFov, false) : (Number.isFinite(initialFov) ? initialFov : 60));
-        warpSpeedRange.value = String(typeof window.setWarpSpeedFactor === 'function' ? window.setWarpSpeedFactor(initialWarpSpeed, false) : (Number.isFinite(initialWarpSpeed) ? initialWarpSpeed : 1));
-        warpStopsRange.value = String(typeof window.setWarpStopCount === 'function' ? window.setWarpStopCount(initialWarpStops, false) : (Number.isFinite(initialWarpStops) ? initialWarpStops : 3));
-        motionBlurToggle.checked = localStorage.getItem('bubblebreaker.motionBlur') !== 'off';
-        if (typeof window.setMotionBlurEnabled === 'function') window.setMotionBlurEnabled(motionBlurToggle.checked, false);
-        const storedMotionBlurStrength = localStorage.getItem('bubblebreaker.motionBlurStrength');
-        const initialMotionBlurStrength = storedMotionBlurStrength == null ? 50 : Number(storedMotionBlurStrength);
-        motionBlurStrengthRange.value = String(typeof window.setMotionBlurStrength === 'function'
-            ? window.setMotionBlurStrength(initialMotionBlurStrength, false)
-            : (Number.isFinite(initialMotionBlurStrength) ? initialMotionBlurStrength : 50));
-        updateNavigationRangeLabels();
-        fovRange.addEventListener('input', () => {
-            if (typeof window.setFieldOfView === 'function') window.setFieldOfView(fovRange.value);
-            updateNavigationRangeLabels();
-        });
-        warpSpeedRange.addEventListener('input', () => {
-            if (typeof window.setWarpSpeedFactor === 'function') window.setWarpSpeedFactor(warpSpeedRange.value);
-            updateNavigationRangeLabels();
-        });
-        warpStopsRange.addEventListener('input', () => {
-            if (typeof window.setWarpStopCount === 'function') window.setWarpStopCount(warpStopsRange.value);
-            updateNavigationRangeLabels();
-        });
-        motionBlurStrengthRange.addEventListener('input', () => {
-            if (typeof window.setMotionBlurStrength === 'function') window.setMotionBlurStrength(motionBlurStrengthRange.value);
-            updateNavigationRangeLabels();
-        });
-        motionBlurToggle.addEventListener('change', () => {
-            if (typeof window.setMotionBlurEnabled === 'function') window.setMotionBlurEnabled(motionBlurToggle.checked);
-            showToast(motionBlurToggle.checked ? '航行速度線をONにしました' : '航行速度線をOFFにしました');
-        });
-        const allowedPanelSizes = new Set(['small', 'medium', 'large']);
-        const storedPanelSize = localStorage.getItem('bubblebreaker.panelSize');
-
-        function applyExplorationPanelSize(size) {
-            const nextSize = allowedPanelSizes.has(size) ? size : 'medium';
-            document.querySelectorAll('.exploration-panel').forEach(panel => {
-                panel.classList.remove('panel-size-small', 'panel-size-medium', 'panel-size-large');
-                panel.classList.add(`panel-size-${nextSize}`);
-            });
-            panelSizeButtons.forEach(button => {
-                const isSelected = button.dataset.panelSize === nextSize;
-                button.setAttribute('aria-pressed', String(isSelected));
-                button.classList.toggle('is-selected', isSelected);
-            });
-            return nextSize;
-        }
-
-        let explorationPanelSize = applyExplorationPanelSize(storedPanelSize || 'medium');
-        const bubbleVisualModeOptions = ['network', 'classic', 'cosmic', 'deepSea', 'data'];
+        const bubbleVisualModeOptions = ['network', 'deepSea', 'data'];
         const storedBubbleVisualMode = localStorage.getItem('bubblebreaker.bubbleVisualMode');
+        if (['classic', 'cosmic'].includes(storedBubbleVisualMode)) localStorage.setItem('bubblebreaker.bubbleVisualMode', 'network');
         let selectedBubbleVisualMode = typeof setBubbleVisualMode === 'function'
             ? setBubbleVisualMode(bubbleVisualModeOptions.includes(storedBubbleVisualMode) ? storedBubbleVisualMode : 'network')
             : 'network';
@@ -350,37 +275,33 @@
             button.setAttribute('aria-pressed', String(isSelected));
             button.classList.toggle('is-selected', isSelected);
         });
-        const bubbleColorThemeOptions = ['legacy', 'neon', 'warm', 'space', 'deepSea', 'data'];
-        const storedBubbleColorTheme = localStorage.getItem('bubblebreaker.bubbleColorTheme');
-        let selectedBubbleColorTheme = bubbleColorThemeOptions.includes(storedBubbleColorTheme) ? storedBubbleColorTheme : 'legacy';
-        if (typeof setBubbleColorTheme === 'function') selectedBubbleColorTheme = setBubbleColorTheme(selectedBubbleColorTheme);
-        bubbleColorThemeControl.value = selectedBubbleColorTheme;
-        const backgroundThemeOptions = ['space', 'deepSea', 'data'];
+        const backgroundThemeOptions = ['space', 'data'];
         const storedBackgroundTheme = localStorage.getItem('bubblebreaker.backgroundTheme');
         let selectedBackgroundTheme = backgroundThemeOptions.includes(storedBackgroundTheme) ? storedBackgroundTheme : 'space';
+        if (storedBackgroundTheme === 'deepSea') localStorage.setItem('bubblebreaker.backgroundTheme', 'space');
         if (typeof setBackgroundTheme === 'function') selectedBackgroundTheme = setBackgroundTheme(selectedBackgroundTheme);
         backgroundThemeControl.value = selectedBackgroundTheme;
-        volumeControl.value = String(audioVolume);
         bgmTypeControl.value = bgmType;
-        bgmAutoNextControl.checked = bgmAutoNext;
-        bgmTransitionControl.value = bgmTransition;
         explorerModeControl.checked = explorerMode;
+        [
+            'bubblebreaker.fov',
+            'bubblebreaker.warpSpeed',
+            'bubblebreaker.warpStops',
+            'bubblebreaker.motionBlur',
+            'bubblebreaker.motionBlurStrength',
+            'bubblebreaker.panelSize',
+            'bubblebreaker.bubbleColorTheme',
+            'bubblebreaker.volume',
+            'bubblebreaker.bgm',
+            'bubblebreaker.bgmAutoNext',
+            'bubblebreaker.bgmTransition'
+        ].forEach(key => localStorage.removeItem(key));
         const bgmAudioElement = document.getElementById('bgm-audio');
         bgmAudioElement.addEventListener('error', () => {
             console.warn('[BubbleBreaker][Audio] BGMファイルを読み込めません', { src: bgmAudioElement.currentSrc || bgmAudioElement.src });
         });
         bgmAudioElement.addEventListener('canplay', () => {
             console.info('[BubbleBreaker][Audio] BGMを再生可能になりました', { src: bgmAudioElement.currentSrc || bgmAudioElement.src });
-        });
-        bgmAudioElement.addEventListener('ended', () => {
-            if (!bgmAutoNext) return;
-            bgmTrackIndex = (bgmTrackIndex + 1) % bgmTracks.length;
-            startBackgroundMusic();
-        });
-        bgmToggle.addEventListener('change', () => {
-            bgmEnabled = bgmToggle.checked;
-            localStorage.setItem('bubblebreaker.bgm', bgmEnabled ? 'on' : 'off');
-            if (bgmEnabled) startBackgroundMusic(); else stopBackgroundMusic();
         });
         ngc3324Toggle.addEventListener('change', () => {
             const visible = ngc3324Toggle.checked;
@@ -394,13 +315,6 @@
             updateWarpHazeLayer();
             showToast(warpHazeEnabled ? 'ワープ中の靄を表示します' : 'ワープ中の靄を非表示にします');
         });
-        panelSizeButtons.forEach(button => {
-            button.addEventListener('click', () => {
-                explorationPanelSize = applyExplorationPanelSize(button.dataset.panelSize);
-                localStorage.setItem('bubblebreaker.panelSize', explorationPanelSize);
-                showToast(`探索パネルを${explorationPanelSize === 'small' ? '小' : explorationPanelSize === 'large' ? '大' : '中'}サイズに変更しました`);
-            });
-        });
         bubbleVisualModeButtons.forEach(button => {
             button.addEventListener('click', () => {
                 selectedBubbleVisualMode = typeof setBubbleVisualMode === 'function'
@@ -412,24 +326,9 @@
                     option.setAttribute('aria-pressed', String(isSelected));
                     option.classList.toggle('is-selected', isSelected);
                 });
-                const visualLabel = selectedBubbleVisualMode === 'network'
-                    ? '装飾あり'
-                    : selectedBubbleVisualMode === 'classic'
-                        ? '装飾なし'
-                        : selectedBubbleVisualMode === 'cosmic'
-                            ? '宇宙テーマ'
-                            : selectedBubbleVisualMode === 'deepSea'
-                                ? '深海テーマ'
-                                : 'データ空間テーマ';
+                const visualLabel = selectedBubbleVisualMode === 'network' ? '装飾あり' : selectedBubbleVisualMode === 'deepSea' ? '深海テーマ' : 'データ空間テーマ';
                 showToast(`${visualLabel}を表示しました`);
             });
-        });
-        bubbleColorThemeControl.addEventListener('change', () => {
-            selectedBubbleColorTheme = typeof setBubbleColorTheme === 'function'
-                ? setBubbleColorTheme(bubbleColorThemeControl.value)
-                : bubbleColorThemeControl.value;
-            localStorage.setItem('bubblebreaker.bubbleColorTheme', selectedBubbleColorTheme);
-            showToast(`球色テーマを「${bubbleColorThemeControl.options[bubbleColorThemeControl.selectedIndex].text}」へ変更しました`);
         });
         backgroundThemeControl.addEventListener('change', () => {
             selectedBackgroundTheme = typeof setBackgroundTheme === 'function'
@@ -438,25 +337,10 @@
             localStorage.setItem('bubblebreaker.backgroundTheme', selectedBackgroundTheme);
             showToast(`背景テーマを「${backgroundThemeControl.options[backgroundThemeControl.selectedIndex].text}」へ変更しました`);
         });
-        volumeControl.addEventListener('input', () => {
-            audioVolume = Number(volumeControl.value);
-            localStorage.setItem('bubblebreaker.volume', String(audioVolume));
-            if (bgmEnabled) startBackgroundMusic();
-        });
         bgmTypeControl.addEventListener('change', () => {
             bgmType = bgmTypeControl.value;
-            bgmTrackIndex = Math.max(0, bgmTracks.indexOf(bgmType));
             localStorage.setItem('bubblebreaker.bgmType', bgmType);
-            if (bgmEnabled) startBackgroundMusic();
-        });
-        bgmAutoNextControl.addEventListener('change', () => {
-            bgmAutoNext = bgmAutoNextControl.checked;
-            localStorage.setItem('bubblebreaker.bgmAutoNext', bgmAutoNext ? 'on' : 'off');
-            if (bgmEnabled) startBackgroundMusic();
-        });
-        bgmTransitionControl.addEventListener('change', () => {
-            bgmTransition = bgmTransitionControl.value;
-            localStorage.setItem('bubblebreaker.bgmTransition', bgmTransition);
+            if (bgmType === 'none') stopBackgroundMusic(); else startBackgroundMusic();
         });
         explorerModeControl.addEventListener('change', () => {
             explorerMode = explorerModeControl.checked;
@@ -540,7 +424,7 @@
                 if (e.ctrlKey) e.preventDefault(); // Ctrlキー押下時のブラウザの文字拡大は防ぐ
                 return;
             }
-            const scrollable = e.target.closest('.overflow-y-auto');
+            const scrollable = e.target.closest('.exploration-panel, .overflow-y-auto');
             if(scrollable && state.screen !== 'SINGLE' && state.screen !== 'ANALYSIS') {
                 if(e.ctrlKey) e.preventDefault(); // Ctrlキー押下時のブラウザの文字拡大は防ぐ
                 return;

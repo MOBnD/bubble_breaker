@@ -1,17 +1,16 @@
         let soundEnabled = localStorage.getItem('bubblebreaker.sound') !== 'off';
-        let audioVolume = Number(localStorage.getItem('bubblebreaker.volume') || 0.45);
-        let bgmEnabled = localStorage.getItem('bubblebreaker.bgm') !== 'off';
+        const audioVolume = 0.45;
+        const FIXED_BGM_VOLUME = audioVolume * 0.55;
         const EDGEWORTH_BGM = 'edgeworth-kuiper-belt.mp3';
         const LEGACY_EDGEWORTH_BGM = 'エッジワース・カイパーベルト.mp3';
+        const bgmTracks = ['宇宙遊泳.mp3', '星間宇宙.mp3', EDGEWORTH_BGM, 'Far_away_from_the_Earth.mp3'];
         const storedBgmType = localStorage.getItem('bubblebreaker.bgmType');
-        let bgmType = storedBgmType === LEGACY_EDGEWORTH_BGM ? EDGEWORTH_BGM : (storedBgmType || EDGEWORTH_BGM);
-        if (storedBgmType === LEGACY_EDGEWORTH_BGM) localStorage.setItem('bubblebreaker.bgmType', EDGEWORTH_BGM);
-        let bgmAutoNext = localStorage.getItem('bubblebreaker.bgmAutoNext') === 'on';
-        let bgmTransition = localStorage.getItem('bubblebreaker.bgmTransition') || 'persist';
+        const legacyBgmDisabled = localStorage.getItem('bubblebreaker.bgm') === 'off';
+        const migratedBgmType = storedBgmType === LEGACY_EDGEWORTH_BGM ? EDGEWORTH_BGM : storedBgmType;
+        let bgmType = legacyBgmDisabled ? 'none' : (bgmTracks.includes(migratedBgmType) ? migratedBgmType : EDGEWORTH_BGM);
+        if (storedBgmType !== bgmType) localStorage.setItem('bubblebreaker.bgmType', bgmType);
         let audioContext = null;
         let bgmAudio = null;
-        const bgmTracks = ['宇宙遊泳.mp3', '星間宇宙.mp3', EDGEWORTH_BGM, 'Far_away_from_the_Earth.mp3'];
-        let bgmTrackIndex = Math.max(0, bgmTracks.indexOf(bgmType));
         let zoomSound = null;
         function ensureAudioContext() {
             audioContext = audioContext || new (window.AudioContext || window.webkitAudioContext)();
@@ -74,20 +73,22 @@
             bgmAudio.currentTime = 0;
         }
         function startBackgroundMusic() {
-            if (!bgmEnabled) return;
+            if (bgmType === 'none') {
+                stopBackgroundMusic();
+                return;
+            }
             try {
                 bgmAudio = bgmAudio || document.getElementById('bgm-audio');
-                const typeIndex = Math.max(0, bgmTracks.indexOf(bgmType));
-                if (bgmTrackIndex === 0 && typeIndex !== 0) bgmTrackIndex = typeIndex;
-                const selected = `BGM/${encodeURIComponent(bgmTracks[bgmTrackIndex % bgmTracks.length])}`;
+                const selectedTrack = bgmTracks.includes(bgmType) ? bgmType : EDGEWORTH_BGM;
+                const selected = `BGM/${encodeURIComponent(selectedTrack)}`;
                 const selectedUrl = new URL(selected, document.baseURI).href;
                 if (bgmAudio.src !== selectedUrl) {
                     bgmAudio.src = selectedUrl;
                     bgmAudio.load();
                 }
-                bgmAudio.volume = Math.max(0, Math.min(1, audioVolume * 0.55));
-                bgmAudio.loop = !bgmAutoNext;
-                bgmAudio.play().catch(error => console.warn('[BubbleBreaker][Audio] BGM再生に失敗しました', { file: bgmTracks[bgmTrackIndex % bgmTracks.length], error }));
+                bgmAudio.volume = FIXED_BGM_VOLUME;
+                bgmAudio.loop = true;
+                bgmAudio.play().catch(error => console.warn('[BubbleBreaker][Audio] BGM再生に失敗しました', { file: selectedTrack, error }));
             } catch (error) {
                 console.warn('[BubbleBreaker][Audio] BGM初期化に失敗しました', error);
                 bgmAudio = null;
