@@ -130,6 +130,14 @@ assert.match(indexHtml, /data-reopen-panel="panel-single"/, 'the single panel sh
 assert.doesNotMatch(indexHtml, /detail-sidebar/, 'detail windows should no longer use a right sidebar');
 assert.match(indexHtml, /detail-toolbar/, 'detail controls should move into a top toolbar');
 assert.match(styles, /--hud-edge:/, 'right-side panels should share one edge offset');
+assert.match(styles, /\.bubble-label\s*\{[^}]*-webkit-text-stroke:\s*1\.2px\s+rgba\(0,\s*0,\s*0/, '3D bubble labels should have a dark outline for contrast');
+assert.match(styles, /\.group-composition-label-name\s*\{[^}]*font-size:\s*14px/, 'composition names should be large enough to read');
+assert.match(styles, /\.group-composition-label-value\s*\{[^}]*font-size:\s*11px/, 'composition percentages should remain legible');
+assert.match(scene, /formatBubbleDisplayName\(bData\.name\)/, '3D leaf labels should use the compact display form');
+assert.match(twoDSource, /formatBubbleDisplayName\(bubble\.name\)/, '2D leaf labels should use the same compact display form');
+assert.match(scene, /label\.title = bData\.name/, '3D leaf labels should retain the full name on hover');
+assert.match(twoDSource, /createTwoDSvgElement\('title', \{\}, bubble\.name\)/, '2D leaf labels should retain the full name as an SVG title');
+assert.match(indexHtml, /viewBox="0 0 392 250"/, 'composition chart should provide room for larger side labels');
 assert.match(storageSource, /event\.target !== inputScreen/, 'input history overlay should close only on backdrop clicks');
 assert.match(scene, /画像出典:/, 'external images should expose attribution links');
 assert.match(scene, /referrerPolicy = 'no-referrer'/, 'external images should not send the page referrer');

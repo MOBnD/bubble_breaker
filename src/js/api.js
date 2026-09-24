@@ -994,7 +994,7 @@
             const repairInstruction = options.repair
                 ? '\n- 前回のleaf応答を検証できませんでした。指定されたcentralバブルだけを親として、leaf groupを1つ再生成してください。'
                 : '';
-            const prompt = `ユーザーの意見: ${input}\ncentralカテゴリ: ${centralGroup.title}（${centralGroup.id}）\n展開対象のcentralバブル: ${centralBubble.name}（${centralBubble.id}）\n探索軸: ${JSON.stringify(explorationAxes)}\n\nWeb Searchを使って、指定されたcentralバブルを掘り下げるleafカテゴリを1つだけ生成してください。\n- groupsはleaf 1つだけにし、levelはleaf、parentIdは${centralGroup.id}、parentBubbleIdは${centralBubble.id}と完全一致させてください。\n- leafのバブルは2〜${OPENAI_STRUCTURE_MAX_BUBBLES}個の、具体的な対象・選択肢・方式・製品・作品・派閥・主張・事例などにしてください。各childIdはnullにしてください。\n- ${OPENAI_GROUP_TYPE_GUIDANCE}\n- centralバブルをそのまま言い換えず、比較・対立・背景を含め、その関係を入力から説明できる具体項目を生成してください。\n- 入力意見の経路だけを特別扱いせず、すべてのcentralバブルを同じ調査深度・具体性で生成してください。関係の薄い連想、テンプレート名、親名への機械的な接尾辞、汎用ラベルは禁止です。\n- 全IDは一意な短いASCII文字列にし、analysis、metrics、sourcesは生成しないでください。JSON Schema以外の文章は出力しないでください。${repairInstruction}`;
+            const prompt = `ユーザーの意見: ${input}\ncentralカテゴリ: ${centralGroup.title}（${centralGroup.id}）\n展開対象のcentralバブル: ${centralBubble.name}（${centralBubble.id}）\n探索軸: ${JSON.stringify(explorationAxes)}\n\nWeb Searchを使って、指定されたcentralバブルを掘り下げるleafカテゴリを1つだけ生成してください。\n- groupsはleaf 1つだけにし、levelはleaf、parentIdは${centralGroup.id}、parentBubbleIdは${centralBubble.id}と完全一致させてください。\n- leafのバブルは2〜${OPENAI_STRUCTURE_MAX_BUBBLES}個の、具体的な対象・選択肢・方式・製品・作品・派閥・主張・事例などにしてください。各childIdはnullにしてください。\n- 各バブルのnameは内容を特定できる短い名詞句（目安12文字程度）にし、説明文・長い修飾句・複数の論点の列挙にしないでください。必要な背景説明はバブル名に詰め込まず、親との関係から伝わるようにしてください。\n- ${OPENAI_GROUP_TYPE_GUIDANCE}\n- centralバブルをそのまま言い換えず、比較・対立・背景を含め、その関係を入力から説明できる具体項目を生成してください。\n- 入力意見の経路だけを特別扱いせず、すべてのcentralバブルを同じ調査深度・具体性で生成してください。関係の薄い連想、テンプレート名、親名への機械的な接尾辞、汎用ラベルは禁止です。\n- 全IDは一意な短いASCII文字列にし、analysis、metrics、sourcesは生成しないでください。JSON Schema以外の文章は出力しないでください。${repairInstruction}`;
             return {
                 model: OPENAI_MODEL, store: false, reasoning: { effort: 'low' }, max_output_tokens: 7000,
                 tool_choice: 'required',
@@ -1108,6 +1108,20 @@
             }
             return `${name.slice(0, limit - 1)}…`;
         }
+
+        function formatBubbleDisplayName(value, limit = 12) {
+            const name = String(value || '').replace(/\s+/g, ' ').trim();
+            if (!name) return name;
+            const segments = typeof Intl !== 'undefined' && typeof Intl.Segmenter === 'function'
+                ? Array.from(new Intl.Segmenter('ja', { granularity: 'grapheme' }).segment(name), item => item.segment)
+                : Array.from(name);
+            const safeLimit = Math.max(2, Math.floor(Number(limit) || 12));
+            return segments.length > safeLimit
+                ? `${segments.slice(0, safeLimit - 1).join('')}…`
+                : name;
+        }
+
+        window.BubbleBreakerText = Object.assign(window.BubbleBreakerText || {}, { formatBubbleDisplayName });
 
         function validateStageGroup(group, expectedLevel, expectedParentId, expectedParentBubbleId) {
             if (!group || !String(group.id || '').trim() || !String(group.title || '').trim() || !group.level) throw new Error(`${expectedLevel}カテゴリの構造が空です`);

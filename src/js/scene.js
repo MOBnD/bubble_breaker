@@ -1859,9 +1859,9 @@
 
         function distributeGroupChartLabels(items) {
             if (!items.length) return;
-            const minimumY = 27;
-            const maximumY = 223;
-            const gap = items.length > 1 ? Math.min(42, (maximumY - minimumY) / (items.length - 1)) : 0;
+            const minimumY = 21;
+            const maximumY = 229;
+            const gap = items.length > 1 ? Math.min(45, (maximumY - minimumY) / (items.length - 1)) : 0;
             items.sort((left, right) => left.targetY - right.targetY);
             items.forEach((item, index) => {
                 item.labelY = Math.max(item.targetY, index === 0 ? minimumY : items[index - 1].labelY + gap);
@@ -1891,10 +1891,10 @@
             fallback.hidden = true;
             chart.setAttribute('aria-label', `${state.groupData?.title || '現在のバブル群'}の構成要素と占有率`);
             chart.appendChild(createGroupChartElement('title', {}, '構成要素を選択すると対応するバブルへズームします'));
-            const centerX = 180;
+            const centerX = 196;
             const centerY = 125;
-            const radius = 53;
-            const outerRadius = 72;
+            const radius = 48;
+            const outerRadius = 64;
             const circumference = 2 * Math.PI * radius;
             chart.appendChild(createGroupChartElement('circle', {
                 class: 'group-composition-track', cx: centerX, cy: centerY, r: radius
@@ -1952,14 +1952,14 @@
                     y: centerY + Math.sin(item.angle) * percentageRadius + 3,
                     'text-anchor': 'middle',
                     'aria-hidden': 'true',
-                    style: value < 5 ? 'font-size:7px' : value < 9 ? 'font-size:8px' : ''
+                    style: value < 5 ? 'font-size:8px' : value < 9 ? 'font-size:9px' : ''
                 }, `${value.toLocaleString('ja-JP')}%`));
 
                 const startX = centerX + Math.cos(item.angle) * outerRadius;
                 const startY = centerY + Math.sin(item.angle) * outerRadius;
                 const rightSide = item.side === 'right';
-                const elbowX = rightSide ? 238 : 122;
-                const labelEdgeX = rightSide ? 252 : 108;
+                const elbowX = rightSide ? 248 : 144;
+                const labelEdgeX = rightSide ? 258 : 134;
                 chart.appendChild(createGroupChartElement('polyline', {
                     class: 'group-composition-leader',
                     points: `${startX.toFixed(1)},${startY.toFixed(1)} ${elbowX},${item.labelY.toFixed(1)} ${labelEdgeX},${item.labelY.toFixed(1)}`,
@@ -1969,7 +1969,10 @@
                     class: 'group-composition-endpoint', cx: labelEdgeX, cy: item.labelY, r: 3.5, fill: bubble.htmlColor
                 }));
 
-                const labelX = rightSide ? 252 : 4;
+                const labelX = rightSide ? 258 : 2;
+                const displayName = window.BubbleBreakerText
+                    ? window.BubbleBreakerText.formatBubbleDisplayName(bubble.name, 8)
+                    : bubble.name;
                 const label = createGroupChartElement('g', {
                     class: `group-composition-label-button${isFocus ? ' is-focus' : ''}${isCurrent ? ' is-current' : ''}`,
                     role: 'button',
@@ -1981,23 +1984,21 @@
                 label.appendChild(createGroupChartElement('title', {}, bubble.name));
                 label.appendChild(createGroupChartElement('rect', {
                     x: labelX,
-                    y: item.labelY - 16,
-                    width: 104,
-                    height: 32,
+                    y: item.labelY - 19,
+                    width: 132,
+                    height: 38,
                     rx: 8
                 }));
-                const nameCharacters = Array.from(String(bubble.name || ''));
-                const shortName = nameCharacters.length > 10 ? `${nameCharacters.slice(0, 9).join('')}…` : nameCharacters.join('');
                 label.appendChild(createGroupChartElement('text', {
                     class: 'group-composition-label-name',
-                    x: labelX + 52,
-                    y: item.labelY - 2,
+                    x: labelX + 66,
+                    y: item.labelY - 3,
                     'text-anchor': 'middle'
-                }, shortName));
+                }, displayName));
                 label.appendChild(createGroupChartElement('text', {
                     class: 'group-composition-label-value',
-                    x: labelX + 52,
-                    y: item.labelY + 11,
+                    x: labelX + 66,
+                    y: item.labelY + 14,
                     'text-anchor': 'middle'
                 }, `${value.toLocaleString('ja-JP')}%${isCurrent ? '・現在' : isFocus ? '・入力意見' : ''}`));
                 chart.appendChild(label);
@@ -2123,7 +2124,10 @@
                 const label = document.createElement('div');
                 label.className = 'bubble-label' + (isLowestLayer ? ' is-leaf-label' : '');
                 label.dataset.level = data.level || '';
-                label.innerText = bData.name;
+                label.textContent = isLowestLayer && window.BubbleBreakerText
+                    ? window.BubbleBreakerText.formatBubbleDisplayName(bData.name)
+                    : bData.name;
+                label.title = bData.name;
                 // ラベルがクリックされたら、そのバブルの個別画面に飛ぶ
                 label.onclick = (e) => {
                     e.stopPropagation(); // 貫通して裏のバブルもクリックされるのを防ぐ

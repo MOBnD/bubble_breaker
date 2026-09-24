@@ -124,12 +124,13 @@
                 'aria-label': `${bubble.name}を開く`,
                 style: `--bubble-color: ${getTwoDColor(bubble)}`
             });
+            group.appendChild(createTwoDSvgElement('title', {}, bubble.name));
             group.appendChild(createTwoDSvgElement('circle', { class: 'bubble-2d-ring', r: item.radius * 1.08 }));
             group.appendChild(createTwoDSvgElement('circle', { class: 'bubble-2d-shell', r: item.radius }));
             appendTwoDChildPreview(group, bubble, item.radius);
-            const characters = Array.from(String(bubble.name || ''));
-            const limit = options.single ? 24 : options.level === 'leaf' ? 12 : 16;
-            const label = characters.length > limit ? `${characters.slice(0, limit - 1).join('')}…` : characters.join('');
+            const label = options.level === 'leaf' && window.BubbleBreakerText
+                ? window.BubbleBreakerText.formatBubbleDisplayName(bubble.name)
+                : String(bubble.name || '');
             group.appendChild(createTwoDSvgElement('text', { class: 'bubble-2d-label', y: options.single ? item.radius + 35 : 0 }, label));
             const activate = event => {
                 if (event.type === 'keydown' && !['Enter', ' '].includes(event.key)) return;

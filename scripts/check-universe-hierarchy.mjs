@@ -30,7 +30,7 @@ const context = {
     fetch
 };
 vm.createContext(context);
-vm.runInContext(`${dataSource}\n${apiSource}\nglobalThis.__bubbleBreakerTest = { normalizeGeneratedUniverse, normalizeFallbackUniverse, normalizeBubblePercentages, normalizeAnalysis, compactHierarchyBubbleName, buildOpenAIRootRequest, buildOpenAICentralGroupRequest, buildOpenAILeafGroupRequest, requestBubbleAnalysis, requestBubbleGroupAnalyses, arrangeBubblePositions };`, context);
+vm.runInContext(`${dataSource}\n${apiSource}\nglobalThis.__bubbleBreakerTest = { normalizeGeneratedUniverse, normalizeFallbackUniverse, normalizeBubblePercentages, normalizeAnalysis, compactHierarchyBubbleName, formatBubbleDisplayName, buildOpenAIRootRequest, buildOpenAICentralGroupRequest, buildOpenAILeafGroupRequest, requestBubbleAnalysis, requestBubbleGroupAnalyses, arrangeBubblePositions };`, context);
 
 const bubble = (id, childId = null) => ({
     id, name: id, size: 1, color: 0x4488ff, htmlColor: '#4488ff',
@@ -80,6 +80,15 @@ assert.equal(legacyAnalysis.evaluation.opposition.comments[0].text, '旧論点',
 assert.deepEqual(Array.from(legacyAnalysis.evaluation.opposition.comments[0].sourceIds), ['source-1']);
 assert.equal(context.__bubbleBreakerTest.compactHierarchyBubbleName('選択肢A・選択肢B・選択肢C', 'central'), '選択肢A・選択肢Bなど', 'hierarchy bubble names should not enumerate every lower option');
 assert.ok(context.__bubbleBreakerTest.compactHierarchyBubbleName('これは非常に長い上位カテゴリ名称です', 'root').length <= 24, 'hierarchy bubble names should have a safe display length');
+const longLeafName = 'フィルターバブルの形成と情報環境に関する非常に長い説明的なタイトル';
+const compactLeafName = context.__bubbleBreakerTest.formatBubbleDisplayName(longLeafName);
+assert.ok(compactLeafName.endsWith('…'), 'long leaf names should be shortened for display');
+assert.ok(Array.from(compactLeafName).length <= 12, 'leaf display labels should fit the twelve-character display budget');
+assert.equal(context.__bubbleBreakerTest.formatBubbleDisplayName('きのこの山'), 'きのこの山', 'short names should remain unchanged');
+const longNameGroups = structuredClone(groups);
+longNameGroups[3].bubbles[0].name = longLeafName;
+const longNameUniverse = normalize({ groups: longNameGroups, entryGroupId: 'central1', entryBubbleId: 'entry' });
+assert.equal(longNameUniverse.db.leaf1.bubbles[0].name, longLeafName, 'display compaction must preserve the stored full leaf name');
 const rootRequest = context.__bubbleBreakerTest.buildOpenAIRootRequest('テスト意見');
 assert.equal(rootRequest.reasoning.effort, 'low', 'root generation should use low reasoning effort');
 assert.equal(rootRequest.tools[0].search_context_size, 'medium', 'root generation should keep medium web search context');
@@ -102,6 +111,7 @@ assert.match(nonEntryCentralRequest.input[1].content[0].text, /entryBubbleIdは�
 const leafRequest = context.__bubbleBreakerTest.buildOpenAILeafGroupRequest('テスト意見', { id: 'central_test', title: '中央カテゴリ' }, bubble('parent_a'));
 assert.equal(leafRequest.text.format.name, 'bubble_universe_leaf_group', 'leaf schema should be used');
 assert.match(leafRequest.input[1].content[0].text, /parent_a/);
+assert.match(leafRequest.input[1].content[0].text, /短い名詞句（目安12文字程度）/, 'leaf generation should prefer concise bubble names');
 let analysisResearchCount = 0;
 const analysisContext = {
     ...context,
