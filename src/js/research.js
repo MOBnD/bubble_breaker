@@ -139,19 +139,26 @@
                 };
             }
 
-            function buildImageSearchRequest(plan, model) {
+            const IMAGE_PANEL_SPECS = [
+                { id: 'overview', label: '概要', focus: '主要概念を理解する助けとなる代表的な画像' },
+                { id: 'history', label: '形成の歴史', focus: 'テーマの歴史・時系列に関連する画像や資料' },
+                { id: 'demographic', label: '構成層・情報源', focus: '研究・統計・情報源の構成を示す図表や資料' },
+                { id: 'evaluation', label: '内外からの意見', focus: 'テーマの賛否・議論・異なる立場に関連する画像' }
+            ];
+
+            function buildImageSearchRequest(plan, model, panel = IMAGE_PANEL_SPECS[0]) {
                 return {
                     model, store: false, reasoning: { effort: 'low' }, max_output_tokens: 500,
                     tool_choice: 'required',
                     tools: [{
                         type: 'web_search', search_content_types: ['image', 'text'],
-                        image_settings: { max_results: 8, caption: true },
+                        image_settings: { max_results: 3, caption: true },
                         user_location: { type: 'approximate', country: 'JP', timezone: 'Asia/Tokyo' }
                     }],
                     include: ['web_search_call.results'],
                     input: [
                         { role: 'system', content: [{ type: 'input_text', text: 'あなたはBubbleBreakerの画像調査器です。画像を生成せず、必ずWeb Image Searchを実行してください。検索完了後はcompletedだけを返してください。' }] },
-                        { role: 'user', content: [{ type: 'input_text', text: `対象: ${plan.topic}\n文脈: ${plan.context}\n概要、形成史の出来事、情報源の種類、賛成・反対双方を理解する助けになる画像を探してください。対象と直接関係があり、出典ページを確認できる画像を優先してください。適切な画像がなければ無理に選ばないでください。` }] }
+                        { role: 'user', content: [{ type: 'input_text', text: `対象: ${plan.topic}\n文脈: ${plan.context}\n表示先: ${panel.label}\n検索する画像の焦点: ${panel.focus}\n対象との関連性が高く、出典ページを確認できる画像を優先してください。検索語は対象と表示先の焦点を組み合わせてください。無関係な画像を選ばないでください。` }] }
                     ],
                     text: { format: { type: 'json_schema', name: 'bubble_image_search', strict: true, schema: IMAGE_SEARCH_SCHEMA } }
                 };
@@ -169,7 +176,7 @@
                 return sources;
             }
 
-            function imageResultsFromPayload(payload) {
+            function imageResultsFromPayload(payload, panelId) {
                 const images = [];
                 const seen = new Set();
                 (Array.isArray(payload && payload.output) ? payload.output : []).forEach(item => {
@@ -184,11 +191,22 @@
                         images.push({
                             imageId: `img_${stableHash(`${imageUrl}|${sourceWebsiteUrl}`)}`,
                             imageUrl, thumbnailUrl: thumbnailUrl || null, sourceWebsiteUrl,
-                            sourceDomain: sourceDomain(sourceWebsiteUrl), caption: normalizeText(result.caption).slice(0, 300)
+                            sourceDomain: sourceDomain(sourceWebsiteUrl), caption: normalizeText(result.caption).slice(0, 300),
+                            panelIds: [panelId]
                         });
                     });
                 });
-                return images.slice(0, 8);
+                return images.slice(0, 3);
+            }
+
+            function mergePanelImageResults(results) {
+                const byId = new Map();
+                results.forEach(image => {
+                    const current = byId.get(image.imageId);
+                    if (current) current.panelIds = Array.from(new Set([...current.panelIds, ...image.panelIds]));
+                    else byId.set(image.imageId, { ...image, panelIds: [...image.panelIds] });
+                });
+                return [...byId.values()].slice(0, 12);
             }
 
             function selectBalancedSources(allSources, plan) {
@@ -462,6 +480,12 @@
                 const history = analysis.history || {};
                 const demographic = analysis.demographic || {};
                 const evaluation = analysis.evaluation || {};
+                const panelImageRefs = (section, panelId, maximum = 2) => {
+                    const requested = refs(section && section.imageIds, allowedImageIds, maximum)
+                        .filter(id => images.some(image => image.imageId === id && (!Array.isArray(image.panelIds) || image.panelIds.includes(panelId))));
+                    if (requested.length) return requested;
+                    return images.filter(image => Array.isArray(image.panelIds) && image.panelIds.includes(panelId)).slice(0, maximum).map(image => image.imageId);
+                };
                 const perspective = (section, unavailable) => {
                     const sourceIds = refs(section && section.sourceIds, allowedSourceIds, 8);
                     const comments = sourceIds.length && Array.isArray(section && section.comments)
@@ -489,16 +513,33 @@
                 return {
                     overview: {
                         summary: normalizeText(overview.summary), sourceIds: refs(overview.sourceIds, allowedSourceIds, 8),
-                        imageIds: refs(overview.imageIds, allowedImageIds, 2)
+                        imageIds: panelImageRefs(overview, 'overview')
                     },
-                    history: { summary: normalizeText(history.summary), events, sourceIds: refs(history.sourceIds, allowedSourceIds, 8) },
+                    history: {
+                        summary: normalizeText(history.summary), events, sourceIds: refs(history.sourceIds, allowedSourceIds, 8),
+                        imageIds: panelImageRefs(history, 'history')
+                    },
                     demographic: {
                         summary: normalizeText(demographic.summary), sourceIds: refs(demographic.sourceIds, allowedSourceIds, 8),
-                        imageIds: refs(demographic.imageIds, allowedImageIds, 2), segments: composition
+                        imageIds: panelImageRefs(demographic, 'demographic'), segments: composition
                     },
                     evaluation: {
                         opposition: perspective(evaluation.opposition, '反対派の根拠を確認できませんでした。'),
-                        support: perspective(evaluation.support, '賛成派の根拠を確認できませんでした。')
+                        support: perspective(evaluation.support, '賛成派の根拠を確認できませんでした。'),
+                        imageIds: panelImageRefs(evaluation, 'evaluation'),
+                        conversation: (() => {
+                            const rawTurns = Array.isArray(evaluation.conversation) ? evaluation.conversation : [];
+                            return rawTurns.slice(0, 6).reduce((normalized, turn, index) => {
+                                const id = normalizeText(turn && turn.id) || `turn-${index + 1}`;
+                                const sourceIds = refs(turn && turn.sourceIds, allowedSourceIds, 3);
+                                const side = turn && turn.side === 'support' ? 'support' : 'opposition';
+                                const previous = turn && normalized.find(item => item.id === String(turn.respondsTo));
+                                const respondsTo = previous && previous.side !== side ? String(turn.respondsTo) : null;
+                                const normalizedTurn = { id, side, text: normalizeText(turn && turn.text), respondsTo, sourceIds };
+                                if (normalizedTurn.text && normalizedTurn.sourceIds.length) normalized.push(normalizedTurn);
+                                return normalized;
+                            }, []);
+                        })()
                     }
                 };
             }
@@ -515,7 +556,7 @@
                     model, store: false, reasoning: { effort: 'low' }, max_output_tokens: 7000,
                     input: [
                         { role: 'system', content: [{ type: 'input_text', text: 'あなたはBubbleBreakerの統合分析器です。検索は完了しています。与えられたEvidenceと検証結果だけを使い、Evidence外の事実を検索済みであるかのように補完しないでください。' }] },
-                        { role: 'user', content: [{ type: 'input_text', text: `対象: ${plan.topic}\nEvidence: ${JSON.stringify(evidence)}\nClaims: ${JSON.stringify(claims)}\nContradictions: ${JSON.stringify(detailResearch.contradictions)}\nPerspective: ${JSON.stringify(detailResearch.perspective)}\n情報源構成: ${JSON.stringify(detailResearch.sourceComposition)}\nImage candidates: ${JSON.stringify(images)}\nLimitations: ${JSON.stringify(detailResearch.limitations)}\n\noverviewは概要、historyは根拠から年月を確認できる出来事だけを最大8件、demographicは今回収集したEvidenceの情報源構成について生成してください。history.sortKeyは年月日をYYYYMMDD整数で表し、不明な月日は00にしてください。evaluationは反対派と賛成派を分け、それぞれの実在Evidenceに基づく論点を示してください。各commentsは、その立場の人が自分の意見として自然に述べる匿名のパラフレーズにし、説明文や箇条書き調を避けてください。実在人物の直接引用や架空の発言者名は作らず、各コメントに根拠sourceIdを付けてください。反対派を藁人形化せず、賛成派もEvidenceなしに補完しないでください。各section・event・立場は根拠となるsourceIdを返し、関連性をcaptionから説明できる場合だけimageIdを返してください。画像は0件でも構いません。AIインサイトや架空の割合は生成しないでください。矛盾があれば一方を消さず明記してください。使用したsourceIdの和集合を最上位sourceIdsへ返してください。` }] }
+                        { role: 'user', content: [{ type: 'input_text', text: `対象: ${plan.topic}\nEvidence: ${JSON.stringify(evidence)}\nClaims: ${JSON.stringify(claims)}\nContradictions: ${JSON.stringify(detailResearch.contradictions)}\nPerspective: ${JSON.stringify(detailResearch.perspective)}\n情報源構成: ${JSON.stringify(detailResearch.sourceComposition)}\nImage candidates: ${JSON.stringify(images)}\nLimitations: ${JSON.stringify(detailResearch.limitations)}\n\noverviewは概要、historyは根拠から年月を確認できる出来事だけを最大8件、demographicは今回収集したEvidenceの情報源構成について生成してください。history.sortKeyは年月日をYYYYMMDD整数で表し、不明な月日は00にしてください。evaluationは賛成側と反対側のEvidenceに基づく論点を整理してください。conversationには立場を交互にした最大6ターンを作り、respondsToで直前の相手側の論点へ具体的に応答してください。これは実在人物の会話ではなく、Evidenceから再構成した匿名の立場ごとの主張です。各ターンは根拠となるsourceIdsを必ず付け、根拠が片側しかなければ会話を無理に成立させず、確認できた立場だけ返してください。commentsは説明文や箇条書き調を避け、自然な意見文にしてください。実在人物の直接引用や架空の発言者名は作らず、反対側を藁人形化せず、賛成側もEvidenceなしに補完しないでください。各section・event・立場は根拠となるsourceIdを返し、関連性をcaptionから説明できる場合だけimageIdを返してください。画像は0件でも構いません。AIインサイトや架空の割合は生成しないでください。矛盾があれば一方を消さず明記してください。使用したsourceIdの和集合を最上位sourceIdsへ返してください。` }] }
                     ],
                     text: { format: { type: 'json_schema', name: 'bubble_analysis_synthesis', strict: true, schema } }
                 };
@@ -566,9 +607,16 @@
                 if (cached && Date.now() - cached.createdAt <= CACHE_TTL_MS) return cached.promise;
                 const promise = (async () => {
                     log('詳細調査のQuery Planを確定しました', { bubbleId: bubble.id, intents: plan.intents.map(intent => intent.id) });
-                    const imageSearchPromise = withOneRetry(() => requestResponse(buildImageSearchRequest(plan, model), 45000, 'bubble-image-search'))
-                        .then(response => ({ response, error: null }))
-                        .catch(error => ({ response: null, error }));
+                    const imageSearchPromise = runLimited(IMAGE_PANEL_SPECS, 2, async panel => {
+                        try {
+                            const result = await withOneRetry(() => requestResponse(buildImageSearchRequest(plan, model, panel), 45000, `bubble-image-search-${panel.id}`));
+                            const panelImages = imageResultsFromPayload(result.payload, panel.id);
+                            return { panelId: panel.id, status: panelImages.length ? 'success' : 'no_results', images: panelImages, resultCount: panelImages.length };
+                        } catch (error) {
+                            warn('詳細パネル用の画像検索に失敗しました', { bubbleId: bubble.id, panelId: panel.id, code: error.code || null, status: error.status || null });
+                            return { panelId: panel.id, status: 'failed', images: [], resultCount: 0, errorCode: error.code || null, errorStatus: error.status || null };
+                        }
+                    });
                     const responses = await runLimited(plan.intents, 2, async intent => {
                         try {
                             const response = await withOneRetry(() => requestResponse(buildSearchRequest(plan, intent, model), 45000, `bubble-search-${intent.id}`));
@@ -578,8 +626,10 @@
                             return { intent, error };
                         }
                     });
-                    const imageSearch = await imageSearchPromise;
-                    const images = imageSearch.response ? imageResultsFromPayload(imageSearch.response.payload) : [];
+                    const imageQueries = await imageSearchPromise;
+                    const images = mergePanelImageResults(imageQueries.flatMap(result => result.images));
+                    const failedImageQueries = imageQueries.filter(result => result.status === 'failed').length;
+                    const emptyImageQueries = imageQueries.filter(result => result.status === 'no_results').length;
                     const normalized = normalizeSearchResponses(plan, responses);
                     const failedIntentCount = normalized.queryRuns.filter(run => run.status === 'failed').length;
                     const limitations = [];
@@ -587,14 +637,12 @@
                     if (normalized.sources.some(source => !source.publishedAt)) limitations.push('公開日または更新日が不明な情報源を含みます。');
                     if (normalized.sources.some(source => !source.relevantExcerpt)) limitations.push('本文抜粋を取得できない情報源を含みます。');
                     if (normalized.sources.some(source => source.independenceEstimated)) limitations.push('一部の情報源の独立性は推定です。');
-                    if (imageSearch.error) {
-                        limitations.push('画像検索を完了できなかったため、画像なしで表示します。');
-                        warn('詳細パネル用の画像検索に失敗しました', { bubbleId: bubble.id, code: imageSearch.error.code || null, status: imageSearch.error.status || null });
-                    }
+                    if (failedImageQueries) limitations.push(`${failedImageQueries}つの詳細パネルで画像検索に失敗しました。`);
+                    if (emptyImageQueries) limitations.push(`${emptyImageQueries}つの詳細パネルでは関連画像が見つかりませんでした。`);
                     if (!normalized.sources.length) {
                         const error = new Error('検索で検証可能なEvidenceを取得できませんでした');
                         error.code = 'RESEARCH_NO_EVIDENCE';
-                        error.detailResearch = { version: 2, status: 'failed', queries: normalized.queryRuns, imageQuery: { status: imageSearch.error ? 'failed' : 'success', resultCount: images.length }, images, sourceComposition: [], sources: [], claims: [], contradictions: [], perspective: { support: 0, neutral: 0, contradict: 0, basis: 'collected_independent_source_groups', groupCount: 0 }, limitations: [...limitations, '検証可能なEvidenceがありません。'], excluded: normalized.excluded };
+                        error.detailResearch = { version: 2, status: 'failed', queries: normalized.queryRuns, imageQuery: { status: failedImageQueries === IMAGE_PANEL_SPECS.length ? 'failed' : 'partial', resultCount: images.length }, imageQueries, images, sourceComposition: [], sources: [], claims: [], contradictions: [], perspective: { support: 0, neutral: 0, contradict: 0, basis: 'collected_independent_source_groups', groupCount: 0 }, limitations: [...limitations, '検証可能なEvidenceがありません。'], excluded: normalized.excluded };
                         throw error;
                     }
                     let verificationRaw; let verificationPartial = false;
@@ -614,8 +662,8 @@
                         version: 2, status: verificationPartial || failedIntentCount ? 'partial' : 'complete',
                         queries: normalized.queryRuns, sources: normalized.sources, claims: verified.claims,
                         contradictions: verified.contradictions, perspective: perspectiveFromClaims(verified.claims, normalized.sources),
-                        sourceComposition: composition, images,
-                        imageQuery: { status: imageSearch.error ? 'failed' : 'success', resultCount: images.length },
+                        sourceComposition: composition, images, imageQueries,
+                        imageQuery: { status: failedImageQueries === IMAGE_PANEL_SPECS.length ? 'failed' : failedImageQueries || emptyImageQueries ? 'partial' : 'success', resultCount: images.length },
                         limitations, excluded: normalized.excluded, collectedAt: new Date().toISOString()
                     };
                     let synthesis;
@@ -652,7 +700,8 @@
 
             global.BubbleResearch = {
                 INTENTS, SOURCE_TYPES, SEARCH_RESULT_SCHEMA, VERIFICATION_SCHEMA, IMAGE_SEARCH_SCHEMA,
-                createQueryPlan, buildSearchRequest, buildImageSearchRequest, consultedSourcesFromPayload, imageResultsFromPayload, canonicalizeUrl,
+                createQueryPlan, buildSearchRequest, buildImageSearchRequest, consultedSourcesFromPayload, imageResultsFromPayload, mergePanelImageResults, canonicalizeUrl,
+                imagePanelSpecs: IMAGE_PANEL_SPECS,
                 normalizeSearchResponses, buildVerificationRequest, fallbackVerification,
                 normalizeVerification, perspectiveFromClaims, sourceComposition, sanitizeSynthesisAnalysis, buildSynthesisRequest, runBubbleResearch,
                 clearCache() { researchCache.clear(); }

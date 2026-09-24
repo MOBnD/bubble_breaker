@@ -7,6 +7,7 @@
         const mouse = new THREE.Vector2();       // マウスの座標(2D)
 
         window.addEventListener('click', (event) => {
+            if (explorationViewMode === '2d') return;
             // UIパネルや文字ラベルをクリックした時は、裏の3D空間のクリック判定を無視する
             if (event.target.closest('.glass-panel') || event.target.closest('button') || event.target.closest('input') || event.target.closest('.bubble-label')) return;
 
@@ -140,6 +141,10 @@
 
         // --- 各種UIボタンのクリックイベント ---
         document.getElementById('btn-zoomout-group').addEventListener('click', () => {
+            if (explorationViewMode === '2d' && state.groupData && state.groupData.parentId) {
+                loadGroup(state.groupData.parentId);
+                return;
+            }
             if (state.groupData && state.groupData.parentId && typeof requestGroupZoomOut === 'function' && requestGroupZoomOut()) {
                 loadGroup(state.groupData.parentId);
             }
@@ -154,6 +159,8 @@
         const aboutOverlay = document.getElementById('about-overlay');
         const aboutOpenButton = document.getElementById('btn-open-about');
         const aboutCloseButton = document.getElementById('btn-close-about');
+        const aboutMenuButton = document.getElementById('btn-about-menu');
+        const aboutMenu = document.getElementById('about-menu');
         let aboutPreviousFocus = null;
         function setAboutOpen(open) {
             if (!aboutOverlay) return;
@@ -173,8 +180,57 @@
         }
         aboutOpenButton?.addEventListener('click', () => setAboutOpen(true));
         aboutCloseButton?.addEventListener('click', () => setAboutOpen(false));
+        aboutMenuButton?.addEventListener('click', () => {
+            const open = aboutMenuButton.getAttribute('aria-expanded') !== 'true';
+            aboutMenuButton.setAttribute('aria-expanded', String(open));
+            aboutMenu.hidden = !open;
+        });
+        aboutMenu?.addEventListener('click', event => {
+            if (!event.target.closest('a')) return;
+            aboutMenu.hidden = true;
+            aboutMenuButton?.setAttribute('aria-expanded', 'false');
+        });
+        document.addEventListener('click', event => {
+            if (!aboutMenu || aboutMenu.hidden || event.target.closest('#about-menu, #btn-about-menu')) return;
+            aboutMenu.hidden = true;
+            aboutMenuButton?.setAttribute('aria-expanded', 'false');
+        });
         aboutOverlay?.addEventListener('click', event => {
             if (event.target === aboutOverlay) setAboutOpen(false);
+        });
+        aboutOverlay?.addEventListener('wheel', event => event.stopPropagation(), { passive: true });
+        aboutOverlay?.addEventListener('touchmove', event => event.stopPropagation(), { passive: true });
+        const settingsOverlay = document.getElementById('settings-overlay');
+        const settingsOpenButton = document.getElementById('btn-open-settings');
+        const settingsCloseButton = document.getElementById('btn-close-settings');
+        let settingsPreviousFocus = null;
+        function setSettingsOpen(open) {
+            if (!settingsOverlay) return;
+            if (open) {
+                settingsPreviousFocus = document.activeElement;
+                settingsOverlay.hidden = false;
+                document.body.classList.add('settings-open');
+                settingsOpenButton?.setAttribute('aria-expanded', 'true');
+                settingsCloseButton?.focus();
+                return;
+            }
+            settingsOverlay.hidden = true;
+            document.body.classList.remove('settings-open');
+            settingsOpenButton?.setAttribute('aria-expanded', 'false');
+            if (settingsPreviousFocus && typeof settingsPreviousFocus.focus === 'function') settingsPreviousFocus.focus();
+        }
+        settingsOpenButton?.addEventListener('click', () => setSettingsOpen(true));
+        settingsCloseButton?.addEventListener('click', () => setSettingsOpen(false));
+        settingsOverlay?.addEventListener('click', event => {
+            if (event.target === settingsOverlay) setSettingsOpen(false);
+        });
+        settingsOverlay?.addEventListener('wheel', event => event.stopPropagation(), { passive: true });
+        settingsOverlay?.addEventListener('touchmove', event => event.stopPropagation(), { passive: true });
+        document.addEventListener('keydown', event => {
+            if (event.key === 'Escape' && settingsOverlay && !settingsOverlay.hidden) {
+                event.preventDefault();
+                setSettingsOpen(false);
+            }
         });
         window.addEventListener('keydown', event => {
             if (event.key === 'Escape' && aboutOverlay && !aboutOverlay.hidden) {
@@ -198,7 +254,7 @@
             const closesWholePanel = explorationPanelIds.has(panelId);
             panel.classList.toggle(closesWholePanel ? 'panel-is-closed' : 'panel-is-collapsed', collapsed);
             button.setAttribute('aria-expanded', String(!collapsed));
-            button.textContent = '−';
+            button.textContent = collapsed ? '+' : '−';
             button.title = closesWholePanel ? 'パネルを閉じる' : (collapsed ? 'パネルを展開' : 'パネルを畳む');
             const reopenButton = document.querySelector(`[data-reopen-panel="${panelId}"]`);
             if (reopenButton) {
@@ -217,7 +273,10 @@
             });
         });
         document.querySelectorAll('[data-reopen-panel]').forEach(button => {
-            button.addEventListener('click', () => setPanelCollapsed(button.dataset.reopenPanel, false));
+            button.addEventListener('click', () => {
+                if (selectedPanelSize === 'none') setPanelSize(lastVisiblePanelSize);
+                setPanelCollapsed(button.dataset.reopenPanel, false);
+            });
         });
         collapsiblePanelButtons.forEach(button => {
             const panelId = button.dataset.collapsePanel;
@@ -230,6 +289,28 @@
         const viewModeButtons = [...document.querySelectorAll('[data-view-mode]')];
         const backgroundThemeControl = document.getElementById('background-theme');
         const bgmTypeControl = document.getElementById('bgm-type');
+        const panelSizeControl = document.getElementById('right-panel-size');
+        const panelSizeOptions = new Set(['large', 'medium', 'small', 'none']);
+        const storedPanelSize = localStorage.getItem('bubblebreaker.rightPanelSize');
+        let selectedPanelSize = panelSizeOptions.has(storedPanelSize) ? storedPanelSize : 'medium';
+        let lastVisiblePanelSize = ['large', 'medium', 'small'].includes(storedPanelSize)
+            ? storedPanelSize
+            : (localStorage.getItem('bubblebreaker.rightPanelLastVisibleSize') || 'medium');
+        function setPanelSize(size, persist = true) {
+            selectedPanelSize = panelSizeOptions.has(size) ? size : 'medium';
+            if (selectedPanelSize !== 'none') lastVisiblePanelSize = selectedPanelSize;
+            document.querySelectorAll('#panel-group, #panel-single').forEach(panel => {
+                panel.dataset.panelSize = selectedPanelSize;
+                panel.classList.toggle('panel-size-none', selectedPanelSize === 'none');
+            });
+            if (panelSizeControl) panelSizeControl.value = selectedPanelSize;
+            if (persist) {
+                localStorage.setItem('bubblebreaker.rightPanelSize', selectedPanelSize);
+                localStorage.setItem('bubblebreaker.rightPanelLastVisibleSize', lastVisiblePanelSize);
+            }
+        }
+        panelSizeControl?.addEventListener('change', () => setPanelSize(panelSizeControl.value));
+        setPanelSize(selectedPanelSize, false);
         const movementKeys = window.__bubbleBreakerMovementKeys || new Set();
         window.__bubbleBreakerMovementKeys = movementKeys;
         function isTextEditingTarget(target) {
@@ -293,7 +374,6 @@
             'bubblebreaker.warpStops',
             'bubblebreaker.motionBlur',
             'bubblebreaker.motionBlurStrength',
-            'bubblebreaker.panelSize',
             'bubblebreaker.bubbleColorTheme',
             'bubblebreaker.volume',
             'bubblebreaker.bgm',
@@ -314,6 +394,7 @@
             const visible = ngc3324Toggle.checked;
             localStorage.setItem('bubblebreaker.ngc3324', visible ? 'on' : 'off');
             if (typeof setNGC3324BackgroundVisible === 'function') setNGC3324BackgroundVisible(visible);
+            if (typeof window.syncTwoDExplorationMode === 'function' && explorationViewMode === '2d') window.syncTwoDExplorationMode('2d', false);
             showToast(visible ? 'NGC 3324背景を表示しました' : 'NGC 3324背景を非表示にしました');
         });
         warpHazeToggle.addEventListener('change', () => {
@@ -341,6 +422,7 @@
         let selectedViewMode = typeof setExplorationViewMode === 'function'
             ? setExplorationViewMode(storedViewMode, false)
             : storedViewMode;
+        if (selectedViewMode === '2d' && window.innerWidth <= 720) setPanelCollapsed('panel-bgm', true, false);
         function updateViewModeButtons() {
             viewModeButtons.forEach(button => {
                 const selected = button.dataset.viewMode === selectedViewMode;
@@ -351,12 +433,21 @@
         updateViewModeButtons();
         viewModeButtons.forEach(button => {
             button.addEventListener('click', () => {
+                if (loadingAnimation || isGenerating) {
+                    showToast('情報宇宙の生成中は表示モードを変更できません');
+                    return;
+                }
                 selectedViewMode = typeof setExplorationViewMode === 'function'
                     ? setExplorationViewMode(button.dataset.viewMode, true)
                     : button.dataset.viewMode;
                 localStorage.setItem('bubblebreaker.viewMode', selectedViewMode);
+                if (selectedViewMode === '2d' && window.innerWidth <= 720) {
+                    setPanelCollapsed('panel-bgm', true, false);
+                } else {
+                    setPanelCollapsed('panel-bgm', localStorage.getItem('bubblebreaker.panel-bgm.collapsed') === 'on', false);
+                }
                 updateViewModeButtons();
-                showToast(selectedViewMode === '2d' ? '正面固定の2D表示へ切り替えました' : '奥行きのある3D表示へ切り替えました');
+                showToast(selectedViewMode === '2d' ? '2D探索表示へ切り替えました' : '奥行きのある3D表示へ切り替えました');
             });
         });
         backgroundThemeControl.addEventListener('change', () => {
@@ -387,7 +478,7 @@
                 else if (state.screen === 'GROUP' && state.groupData && state.groupData.parentId) {
                     // 最初の操作は現在のバブル群全体を収める俯瞰に使い、
                     // 俯瞰完了後の追加操作で親カテゴリへ戻る。
-                    if (typeof requestGroupZoomOut !== 'function' || requestGroupZoomOut()) {
+                    if (explorationViewMode === '2d' || typeof requestGroupZoomOut !== 'function' || requestGroupZoomOut()) {
                         loadGroup(state.groupData.parentId);
                     }
                 }
@@ -435,6 +526,7 @@
         }
 
         window.addEventListener('wheel', (e) => {
+            if (e.target.closest('#about-overlay')) return;
             if (e.target.closest('.detail-timeline')) return;
             // スクロール可能なUI領域（右側のリストなど）を操作している場合は、階層移動を発生させない
             const cosmicControl = e.target.closest('#panel-bgm');

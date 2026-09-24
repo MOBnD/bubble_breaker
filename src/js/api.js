@@ -69,11 +69,12 @@
         };
         const OPENAI_HISTORY_SCHEMA = {
             type: 'object', additionalProperties: false,
-            required: ['summary', 'events', 'sourceIds'],
+            required: ['summary', 'events', 'sourceIds', 'imageIds'],
             properties: {
                 summary: { type: 'string' },
                 events: { type: 'array', maxItems: 8, items: OPENAI_HISTORY_EVENT_SCHEMA },
-                sourceIds: OPENAI_SOURCE_REFS_SCHEMA
+                sourceIds: OPENAI_SOURCE_REFS_SCHEMA,
+                imageIds: OPENAI_IMAGE_REFS_SCHEMA
             }
         };
         const OPENAI_DEMOGRAPHIC_SCHEMA = {
@@ -103,8 +104,26 @@
         };
         const OPENAI_EVALUATION_SCHEMA = {
             type: 'object', additionalProperties: false,
-            required: ['opposition', 'support'],
-            properties: { opposition: OPENAI_PERSPECTIVE_SCHEMA, support: OPENAI_PERSPECTIVE_SCHEMA }
+            required: ['opposition', 'support', 'conversation', 'imageIds'],
+            properties: {
+                opposition: OPENAI_PERSPECTIVE_SCHEMA,
+                support: OPENAI_PERSPECTIVE_SCHEMA,
+                imageIds: OPENAI_IMAGE_REFS_SCHEMA,
+                conversation: {
+                    type: 'array', maxItems: 6,
+                    items: {
+                        type: 'object', additionalProperties: false,
+                        required: ['id', 'side', 'text', 'respondsTo', 'sourceIds'],
+                        properties: {
+                            id: { type: 'string', minLength: 1 },
+                            side: { type: 'string', enum: ['opposition', 'support'] },
+                            text: { type: 'string', minLength: 1 },
+                            respondsTo: { type: ['string', 'null'] },
+                            sourceIds: { type: 'array', minItems: 1, maxItems: 3, items: { type: 'string' } }
+                        }
+                    }
+                }
+            }
         };
         const OPENAI_ANALYSIS_SCHEMA = {
             type: 'object', additionalProperties: false,
@@ -188,11 +207,12 @@
         };
         const DEFAULT_ANALYSIS = {
             overview: { summary: 'このバブルを形成する主な意見の概要です。', sourceIds: [], imageIds: [] },
-            history: { summary: '形成時期を確認できる公開情報がありません。', events: [], sourceIds: [] },
+            history: { summary: '形成時期を確認できる公開情報がありません。', events: [], sourceIds: [], imageIds: [] },
             demographic: { summary: '構成層・情報源を確認できる公開情報がありません。', sourceIds: [], imageIds: [], segments: [] },
             evaluation: {
                 opposition: { summary: '反対派の見解を確認できる公開情報がありません。', comments: [], sourceIds: [], imageIds: [] },
-                support: { summary: '賛成派の見解を確認できる公開情報がありません。', comments: [], sourceIds: [], imageIds: [] }
+                support: { summary: '賛成派の見解を確認できる公開情報がありません。', comments: [], sourceIds: [], imageIds: [] },
+                conversation: [], imageIds: []
             }
         };
 
@@ -287,7 +307,7 @@
                             sourceIds: refs(event.sourceIds, 4), imageIds: refs(event.imageIds, 2)
                         }))
                         .sort((left, right) => left.sortKey - right.sortKey),
-                    sourceIds: refs(history.sourceIds)
+                    sourceIds: refs(history.sourceIds), imageIds: refs(history.imageIds, 2)
                 },
                 demographic: {
                     summary: String(demographic.summary || DEFAULT_ANALYSIS.demographic.summary),
@@ -302,7 +322,18 @@
                 },
                 evaluation: {
                     opposition: normalizePerspective(evaluation.opposition, DEFAULT_ANALYSIS.evaluation.opposition, evaluation.summary),
-                    support: normalizePerspective(evaluation.support, DEFAULT_ANALYSIS.evaluation.support)
+                    support: normalizePerspective(evaluation.support, DEFAULT_ANALYSIS.evaluation.support),
+                    imageIds: refs(evaluation.imageIds, 2),
+                    conversation: (Array.isArray(evaluation.conversation) ? evaluation.conversation : [])
+                        .map((turn, index) => ({
+                            id: String(turn && turn.id || `turn-${index + 1}`).trim(),
+                            side: turn && turn.side === 'support' ? 'support' : 'opposition',
+                            text: String(turn && turn.text || '').trim(),
+                            respondsTo: turn && turn.respondsTo ? String(turn.respondsTo) : null,
+                            sourceIds: refs(turn && turn.sourceIds, 3)
+                        }))
+                        .filter(turn => turn.text && turn.sourceIds.length)
+                        .slice(0, 6)
                 }
             };
         }
@@ -378,6 +409,9 @@
         function separateBubblePositions(bubbles, options = {}) {
             if (bubbles.length < 2) return;
             const lockedIds = new Set(options.lockedIds || []);
+            const radiusForBubble = typeof options.radiusForBubble === 'function'
+                ? options.radiusForBubble
+                : bubble => Math.max(1.15, Math.pow(Math.max(1, Number(bubble && bubble.size) || 1), 0.62)) * 1.5;
             const spread = bubbles.reduce((max, bubble, index) => {
                 return Math.max(max, Math.hypot(bubble.pos[0] - bubbles[0].pos[0], bubble.pos[1] - bubbles[0].pos[1], bubble.pos[2] - bubbles[0].pos[2]));
             }, 0);
@@ -388,7 +422,7 @@
                     bubble.pos = [Math.cos(angle) * radius, Math.sin(angle) * radius * 0.65, Math.sin(angle * 1.7) * 3];
                 });
             }
-            for (let iteration = 0; iteration < 24; iteration++) {
+            for (let iteration = 0; iteration < 96; iteration++) {
                 let changed = false;
                 for (let i = 0; i < bubbles.length; i++) {
                     for (let j = i + 1; j < bubbles.length; j++) {
@@ -402,8 +436,19 @@
                             const angle = (i + j + 1) * 1.618;
                             dx = Math.cos(angle); dy = Math.sin(angle); dz = Math.cos(angle * 0.7); distance = Math.hypot(dx, dy, dz);
                         }
-                        const required = Math.max(3, Math.pow(Math.max(1, a.size), 0.62) + Math.pow(Math.max(1, b.size), 0.62) + 1);
-                        if (distance >= required) continue;
+                        const required = Math.max(3, radiusForBubble(a) + radiusForBubble(b) + 1.25);
+                        const projectedDistance = Math.hypot(dx, dy);
+                        if (distance >= required && projectedDistance >= required) continue;
+                        if (projectedDistance < required) {
+                            if (projectedDistance < 0.001) {
+                                const angle = (i + j + 1) * 1.618;
+                                dx = Math.cos(angle); dy = Math.sin(angle); dz = 0;
+                                distance = Math.hypot(dx, dy);
+                            } else {
+                                distance = projectedDistance;
+                                dz = 0;
+                            }
+                        }
                         const push = (required - distance) / distance / 2;
                         const aLocked = lockedIds.has(a.id);
                         const bLocked = lockedIds.has(b.id);
@@ -420,7 +465,23 @@
                 }
                 if (!changed) break;
             }
-            bubbles.forEach(bubble => { bubble.pos = bubble.pos.map(value => Math.max(-90, Math.min(90, value))); });
+            bubbles.forEach(bubble => {
+                bubble.pos = bubble.pos.map(value => Number.isFinite(value) ? value : 0);
+            });
+        }
+
+        function layoutBubbleRadius(group, bubble) {
+            const sizeRadius = Math.max(1.15, Math.pow(Math.max(1, Number(bubble && bubble.size) || 1), 0.62));
+            const rank = (group && Array.isArray(group.bubbles) ? group.bubbles : [])
+                .slice().sort((a, b) => Number(b.size || 0) - Number(a.size || 0))
+                .findIndex(item => item.id === bubble.id);
+            let typeScale = 1.1;
+            if (group && group.type === '一極集中型') typeScale = rank === 0 ? 1.42 : 1.0;
+            else if (group && group.type === '双極対立型') typeScale = rank < 2 ? 1.24 : 1.04;
+            else if (group && group.type === '多極型') typeScale = rank < Math.min(4, group.bubbles.length) ? 1.14 : 0.91;
+            else if (group && group.type === '階層型') typeScale = rank === 0 ? 1.32 : Math.max(0.82, 1.05 - rank * 0.045);
+            else if (group && group.type === '連鎖型') typeScale = 1.08;
+            return sizeRadius * typeScale;
         }
 
         function createLayoutRandom(group) {
@@ -503,7 +564,7 @@
                     bubble.pos = [Math.cos(goldenAngle) * radius, Math.sin(goldenAngle) * radius * randomBetween(0.64, 0.9), randomBetween(-14, 14)];
                 });
             }
-            separateBubblePositions(bubbles, { lockedIds });
+            separateBubblePositions(bubbles, { lockedIds, radiusForBubble: bubble => layoutBubbleRadius(group, bubble) });
             lockedIds.forEach(id => {
                 const bubble = bubbles.find(item => item.id === id);
                 if (bubble && type === '一極集中型') bubble.pos = [0, 0, 0];

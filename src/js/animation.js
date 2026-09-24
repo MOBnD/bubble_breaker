@@ -4,6 +4,31 @@
         const clock = new THREE.Clock(); // 経過時間を計るためのクラス
         let lastAnimationTimestamp = performance.now();
         let universeRevealState = null;
+        let cosmicUpdateBucket = 0;
+        const cometForwardAxis = new THREE.Vector3(1, 0, 0);
+        const labelProjectionScratch = new THREE.Vector3();
+
+        function applyCachedVisualFade(visual, fade) {
+            if (!visual) return;
+            if (!visual.userData.fadeMaterials) {
+                const materials = [];
+                visual.traverse(child => {
+                    if (!child.material) return;
+                    (Array.isArray(child.material) ? child.material : [child.material]).forEach(material => {
+                        if (!materials.some(item => item.material === material)) {
+                            materials.push({ material, opacity: material.opacity });
+                        }
+                    });
+                });
+                visual.userData.fadeMaterials = materials;
+                visual.userData.lastFade = Number.NaN;
+            }
+            if (Math.abs((visual.userData.lastFade || 0) - fade) < 0.003) return;
+            visual.userData.fadeMaterials.forEach(item => {
+                item.material.opacity = item.opacity * fade;
+            });
+            visual.userData.lastFade = fade;
+        }
 
         function getLoadingBlackHoleTarget(index) {
             if (galaxyBlackHoleTargets[index]) {
@@ -45,7 +70,7 @@
                     type: 'stellar-system',
                     sourceIndex: index,
                     anchor: entry.system.getWorldPosition(new THREE.Vector3()),
-                    flybyRadius: Math.max(120, entry.scale * 3.6)
+                    flybyRadius: Math.max(320, entry.scale * 5)
                 });
             });
             const safeRadius = Math.max(680, obstacles.reduce((maximum, obstacle) => Math.max(maximum, obstacle.radius * 8), 0));
@@ -57,46 +82,60 @@
                 candidates: safeCandidates,
                 galaxyCandidates: safeCandidates.filter(candidate => candidate.type === 'galaxy'),
                 stellarCandidates: safeCandidates.filter(candidate => candidate.type === 'stellar-system'),
+                obstacles,
                 safeRadius
             };
         }
 
-        function routeAvoidsBlackHoles(route, destinationIndex, safeRadius) {
-            const obstacles = getWarpObstacleTargets();
+        function routeAvoidsBlackHoles(route, destinationIndex, safeRadius, preEntryProgress = 1, obstacles = getWarpObstacleTargets()) {
+            const destinationApproachStart = Math.max(
+                0.7,
+                preEntryProgress - Math.min(0.16, safeRadius * 1.5 / Math.max(1, route.getLength()))
+            );
             for (let sampleIndex = 0; sampleIndex <= 120; sampleIndex++) {
                 const point = route.getPoint(sampleIndex / 120);
                 for (const obstacle of obstacles) {
-                    if (obstacle.index === destinationIndex && sampleIndex >= 118) continue;
+                    // The route intentionally enters the destination event horizon.
+                    // Exempt only its final approach; earlier accidental passes remain unsafe.
+                    if (obstacle.index === destinationIndex && sampleIndex / 120 >= destinationApproachStart) continue;
                     if (point.distanceTo(obstacle.position) < safeRadius) return false;
                 }
             }
             return true;
         }
 
-        function selectWarpCandidates(candidatePools, desiredCount, start) {
+        function selectWarpCandidates(candidatePools, desiredCount, start, destination, variant = 0) {
             const selected = [];
             const used = new Set();
-            const stellarMinimum = Math.min(3, desiredCount, candidatePools.stellarCandidates.length);
             let cursor = start.clone();
             while (selected.length < desiredCount && used.size < candidatePools.candidates.length) {
-                const stellarSelected = selected.filter(candidate => candidate.type === 'stellar-system').length;
-                const mustSelectStellar = stellarSelected < stellarMinimum;
-                const pool = mustSelectStellar ? candidatePools.stellarCandidates : candidatePools.candidates;
-                let best = null;
-                let bestScore = -Infinity;
+                const needsGalaxy = selected.length === 1
+                    && candidatePools.galaxyCandidates.length
+                    && !selected.some(candidate => candidate.type === 'galaxy');
+                const needsStellar = (selected.length === 0 || selected.length === 2)
+                    && candidatePools.stellarCandidates.length > selected.filter(candidate => candidate.type === 'stellar-system').length;
+                const pool = needsGalaxy
+                    ? candidatePools.galaxyCandidates
+                    : needsStellar ? candidatePools.stellarCandidates : candidatePools.candidates;
+                const ranked = [];
+                const directDistance = Math.max(1, cursor.distanceTo(destination));
+                const directDirection = destination.clone().sub(cursor).normalize();
                 pool.forEach(candidate => {
                     const candidateIndex = candidatePools.candidates.indexOf(candidate);
                     if (candidateIndex < 0 || used.has(candidateIndex)) return;
-                    const nearestDistance = selected.length
-                        ? Math.min(...selected.map(stop => stop.anchor.distanceTo(candidate.anchor)))
-                        : candidate.anchor.distanceTo(cursor);
-                    const distanceFromStart = candidate.anchor.distanceTo(start);
-                    const score = nearestDistance * 0.78 + distanceFromStart * 0.2 + Math.random() * 2600;
-                    if (score > bestScore) {
-                        best = { candidate, index: candidateIndex };
-                        bestScore = score;
-                    }
+                    const toCandidate = candidate.anchor.clone().sub(cursor);
+                    const candidateDistance = Math.max(1, toCandidate.length());
+                    const detourRatio = (candidateDistance + candidate.anchor.distanceTo(destination)) / directDistance;
+                    const headingPenalty = 1 - directDirection.dot(toCandidate.normalize());
+                    const separationPenalty = selected.length
+                        ? Math.max(0, 4200 - Math.min(...selected.map(stop => stop.anchor.distanceTo(candidate.anchor)))) / 4200
+                        : 0;
+                    const score = detourRatio * 0.72 + headingPenalty * 0.2 + separationPenalty * 0.5
+                        + candidateIndex * 0.00001;
+                    ranked.push({ candidate, index: candidateIndex, score });
                 });
+                ranked.sort((a, b) => a.score - b.score);
+                const best = ranked[Math.min(variant, ranked.length - 1)];
                 if (!best) break;
                 used.add(best.index);
                 selected.push(best.candidate);
@@ -114,10 +153,6 @@
             return axis.normalize();
         }
 
-        function rotateRadial(radial, axis, angle) {
-            return radial.clone().applyQuaternion(new THREE.Quaternion().setFromAxisAngle(axis, angle)).normalize();
-        }
-
         function createSmoothBezierSegment(start, end, startTangent, endTangent) {
             const distance = start.distanceTo(end);
             if (distance < 0.001) return new THREE.LineCurve3(start.clone(), end.clone());
@@ -132,68 +167,32 @@
             return new THREE.CubicBezierCurve3(start.clone(), controlStart, controlEnd, end.clone());
         }
 
-        function createCircularArcCurves(anchor, radialStart, axis, sweepAngle, radius) {
-            const segmentCount = Math.max(1, Math.ceil(Math.abs(sweepAngle) / (Math.PI / 4)));
-            const segmentAngle = sweepAngle / segmentCount;
-            const curves = [];
-            const arcPoints = [];
-            for (let segmentIndex = 0; segmentIndex < segmentCount; segmentIndex++) {
-                const angleStart = segmentAngle * segmentIndex;
-                const angleEnd = segmentAngle * (segmentIndex + 1);
-                const radial0 = rotateRadial(radialStart, axis, angleStart);
-                const radial1 = rotateRadial(radialStart, axis, angleEnd);
-                const tangent0 = new THREE.Vector3().crossVectors(axis, radial0).normalize();
-                const tangent1 = new THREE.Vector3().crossVectors(axis, radial1).normalize();
-                const point0 = anchor.clone().addScaledVector(radial0, radius);
-                const point1 = anchor.clone().addScaledVector(radial1, radius);
-                const tangentLength = radius * (4 / 3) * Math.tan(Math.abs(segmentAngle) / 4);
-                curves.push(new THREE.CubicBezierCurve3(
-                    point0,
-                    point0.clone().addScaledVector(tangent0, tangentLength),
-                    point1.clone().addScaledVector(tangent1, -tangentLength),
-                    point1
-                ));
-                if (segmentIndex === 0) arcPoints.push(point0);
-                arcPoints.push(point1);
-            }
-            return { curves, arcPoints };
-        }
-
-        function createSwingByArc(candidate, previousPoint, nextPoint, radiusScale = 1) {
+        function createSwingByArc(candidate, previousPoint, nextPoint, radiusScale = 1, sideSign = 1) {
             const anchor = candidate.anchor;
             const incomingDirection = anchor.clone().sub(previousPoint).normalize();
             const outgoingDirection = nextPoint.clone().sub(anchor).normalize();
-            const radialStart = incomingDirection.clone().negate();
-            let axis = getSwingByAxis(incomingDirection, outgoingDirection);
-            const entryPointBeforeArc = anchor.clone().addScaledVector(radialStart, candidate.flybyRadius * radiusScale);
-            const entryTangent = new THREE.Vector3().crossVectors(axis, radialStart).normalize();
-            if (entryTangent.dot(entryPointBeforeArc.clone().sub(previousPoint).normalize()) < 0) {
-                axis.negate();
-            }
-            // 入射した半径の正反対へ抜ける180度スイングバイを基本にする。
-            // 次の目的地への方向調整は出口後のBezier接続で行い、出口地点は動かさない。
-            const sweepAngle = Math.PI;
+            const axis = getSwingByAxis(incomingDirection, outgoingDirection);
+            const turnAngle = Math.acos(THREE.MathUtils.clamp(incomingDirection.dot(outgoingDirection), -1, 1));
             const radius = candidate.flybyRadius * radiusScale;
-            const arc = createCircularArcCurves(anchor, radialStart, axis, sweepAngle, radius);
-            const entryPoint = arc.arcPoints[0].clone();
-            const exitRadial = radialStart.clone().negate();
-            const exitPoint = anchor.clone().addScaledVector(exitRadial, radius);
-            const exitTangent = new THREE.Vector3().crossVectors(axis, exitRadial).normalize();
-            const midpointRadial = rotateRadial(radialStart, axis, sweepAngle * 0.5);
-            const midpoint = anchor.clone().addScaledVector(midpointRadial, radius);
+            const flybyTangent = incomingDirection.clone().add(outgoingDirection);
+            if (flybyTangent.lengthSq() < 0.06) flybyTangent.copy(incomingDirection);
+            flybyTangent.normalize();
+            const side = new THREE.Vector3().crossVectors(axis, flybyTangent).normalize().multiplyScalar(sideSign);
+            const flybyPosition = anchor.clone().addScaledVector(side, radius * 1.22);
+            const entryPoint = flybyPosition.clone().addScaledVector(incomingDirection, -radius * 2.5);
+            const exitPoint = flybyPosition.clone().addScaledVector(outgoingDirection, radius * 2.5);
             return {
-                curves: arc.curves,
-                arcPoints: arc.arcPoints,
+                arcPoints: [entryPoint, flybyPosition, exitPoint],
                 entryPoint,
                 exitPoint,
-                exitRadial,
-                entryTangent: new THREE.Vector3().crossVectors(axis, radialStart).normalize(),
-                exitTangent,
+                exitRadial: exitPoint.clone().sub(anchor).normalize(),
+                entryTangent: incomingDirection,
+                exitTangent: outgoingDirection,
                 anchor: anchor.clone(),
-                flybyPosition: midpoint,
+                flybyPosition,
                 flybyRadius: radius,
-                swingByAngle: sweepAngle,
-                axis: axis.clone()
+                swingByAngle: turnAngle,
+                axis: axis.clone().multiplyScalar(sideSign)
             };
         }
 
@@ -234,18 +233,29 @@
             };
         }
 
-        function routeHasContinuousHeading(route, samples = 240) {
-            const sampler = createRouteDistanceSampler(route);
+        function getRouteHeadingDiagnostic(route) {
             let previousTangent = null;
-            for (let sampleIndex = 0; sampleIndex <= samples; sampleIndex++) {
-                const distance = sampler.totalLength * Math.min(0.999, sampleIndex / samples);
-                const tangent = sampler.getTangentAtDistance(distance);
-                if (!tangent || tangent.lengthSq() < 0.0001 || !Number.isFinite(tangent.x)) return false;
-                tangent.normalize();
-                if (previousTangent && previousTangent.dot(tangent) < 0.82) return false;
-                previousTangent = tangent;
-            }
-            return true;
+            let minimumDot = 1;
+            (route.curves || []).forEach(curve => {
+                const samples = Math.max(16, Math.ceil(curve.getLength() / 90));
+                for (let sampleIndex = 0; sampleIndex <= samples; sampleIndex++) {
+                    const tangent = curve.getTangent(sampleIndex / samples);
+                    if (!tangent || tangent.lengthSq() < 0.0001 || !Number.isFinite(tangent.x)) {
+                        minimumDot = -1;
+                        return;
+                    }
+                    tangent.normalize();
+                    if (previousTangent && previousTangent.dot(tangent) < minimumDot) {
+                        minimumDot = previousTangent.dot(tangent);
+                    }
+                    previousTangent = tangent;
+                }
+            });
+            return { minimumDot };
+        }
+
+        function routeHasContinuousHeading(route) {
+            return getRouteHeadingDiagnostic(route).minimumDot >= 0.82;
         }
 
         function getRouteLookTarget(route, progress, routeLength) {
@@ -306,10 +316,36 @@
             const slowdownDistance = Math.max(900, Math.min(3200, routeLength * 0.16));
             const normalizedDistance = Math.min(1, nearestStopDistance / slowdownDistance);
             const easedDistance = normalizedDistance * normalizedDistance * (3 - normalizedDistance * 2);
-            return 0.24 + easedDistance * 0.76;
+            return 0.62 + easedDistance * 0.38;
         }
 
-        function createLoadingRoute(target, direction, distance, destinationIndex, startPosition = null) {
+        function createSmoothWaypointRoute(points) {
+            const segmentDistances = points.slice(1).map((point, index) => Math.max(0.001, point.distanceTo(points[index])));
+            const tangents = points.map((point, index) => {
+                const previous = points[Math.max(0, index - 1)];
+                const next = points[Math.min(points.length - 1, index + 1)];
+                const tangent = next.clone().sub(previous);
+                if (tangent.lengthSq() < 0.0001) tangent.copy(next).sub(point);
+                return tangent.normalize();
+            });
+            const route = new THREE.CurvePath();
+            const cumulativeLengths = [0];
+            segmentDistances.forEach((distance, index) => {
+                const startHandle = Math.min(distance * 0.24, (segmentDistances[index - 1] || distance) * 0.24, 1000);
+                const endHandle = Math.min(distance * 0.24, (segmentDistances[index + 1] || distance) * 0.24, 1000);
+                const curve = new THREE.CubicBezierCurve3(
+                    points[index].clone(),
+                    points[index].clone().addScaledVector(tangents[index], startHandle),
+                    points[index + 1].clone().addScaledVector(tangents[index + 1], -endHandle),
+                    points[index + 1].clone()
+                );
+                route.add(curve);
+                cumulativeLengths.push(cumulativeLengths[cumulativeLengths.length - 1] + curve.getLength());
+            });
+            return { route, cumulativeLengths, totalLength: Math.max(1, cumulativeLengths[cumulativeLengths.length - 1]) };
+        }
+
+        function createLoadingRoute(target, direction, distance, destinationIndex, startPosition = null, candidatePools = getWarpCandidateStops(destinationIndex)) {
             const horizonRadius = getEventHorizonRadius(target);
             const start = startPosition
                 ? startPosition.clone()
@@ -317,73 +353,55 @@
             const preEntryDistance = horizonRadius + 420;
             const preEntry = target.position.clone().addScaledVector(direction, preEntryDistance);
             const end = target.position.clone().addScaledVector(direction, horizonRadius);
-            const candidatePools = getWarpCandidateStops(destinationIndex);
             const desiredCount = Math.max(0, Math.round(loadingAnimation?.stopCount ?? warpStopCount));
-            const selected = selectWarpCandidates(candidatePools, desiredCount, start);
+            let selected = [];
             let route = null;
             let swingByDiagnostics = [];
             let stopProgresses = [];
             let preEntryProgress = 0.96;
-            let fallbackCandidate = null;
-            for (const radiusScale of [1, 1.15, 1.35, 1.6]) {
-                const candidateRoute = new THREE.CurvePath();
-                const diagnostics = [];
-                const stopLengths = [];
-                let currentPoint = start.clone();
-                let currentTangent = target.position.clone().sub(start).normalize();
-                let accumulatedLength = 0;
-                selected.forEach((candidate, index) => {
-                    const nextPoint = index === selected.length - 1 ? preEntry : selected[index + 1].anchor;
-                    const arc = createSwingByArc(candidate, currentPoint, nextPoint, radiusScale);
-                    const connector = createSmoothBezierSegment(currentPoint, arc.entryPoint, currentTangent, arc.entryTangent);
-                    candidateRoute.add(connector);
-                    accumulatedLength += connector.getLength();
-                    const arcStartLength = accumulatedLength;
-                    arc.curves.forEach(curve => {
-                        candidateRoute.add(curve);
-                        accumulatedLength += curve.getLength();
-                    });
-                    stopLengths.push(arcStartLength + (accumulatedLength - arcStartLength) * 0.5);
-                    diagnostics.push(arc);
-                    currentPoint = arc.exitPoint.clone();
-                    currentTangent = arc.exitTangent.clone();
-                });
-                const finalTangent = preEntry.clone().sub(currentPoint).normalize();
-                const approachCurve = createSmoothBezierSegment(currentPoint, preEntry, currentTangent, finalTangent);
-                candidateRoute.add(approachCurve);
-                accumulatedLength += approachCurve.getLength();
-                const preEntryLength = accumulatedLength;
-                const entryCurve = new THREE.LineCurve3(preEntry.clone(), end.clone());
-                candidateRoute.add(entryCurve);
-                accumulatedLength += entryCurve.getLength();
-                const totalLength = Math.max(1, accumulatedLength);
-                const candidateStopProgresses = stopLengths.map(length => length / totalLength);
-                const candidatePreEntryProgress = preEntryLength / totalLength;
-                const arcClear = diagnostics.every(arc => getRouteMinimumDistance(candidateRoute, arc.anchor) >= arc.flybyRadius * 0.9);
-                const continuousHeading = routeHasContinuousHeading(candidateRoute);
-                const candidateSafe = routeAvoidsBlackHoles(candidateRoute, destinationIndex, candidatePools.safeRadius);
-                if (!fallbackCandidate || (arcClear && continuousHeading)) {
-                    fallbackCandidate = {
-                        route: candidateRoute,
-                        diagnostics,
-                        stopProgresses: candidateStopProgresses,
-                        preEntryProgress: candidatePreEntryProgress,
-                        safe: candidateSafe
-                    };
-                }
-                if (arcClear && continuousHeading && candidateSafe) {
-                    route = candidateRoute;
-                    swingByDiagnostics = diagnostics;
-                    stopProgresses = candidateStopProgresses;
-                    preEntryProgress = candidatePreEntryProgress;
-                    break;
+            for (let stopCount = desiredCount; stopCount >= 1 && !route; stopCount--) {
+                for (let variant = 0; variant < 8 && !route; variant++) {
+                    selected = selectWarpCandidates(candidatePools, stopCount, start, preEntry, Math.floor(variant / 2));
+                    for (const radiusScale of [1, 1.15, 1.35, 1.6]) {
+                        const diagnostics = [];
+                        const waypoints = [start.clone()];
+                        let currentPoint = start.clone();
+                        selected.forEach((candidate, index) => {
+                            const nextPoint = index === selected.length - 1 ? preEntry : selected[index + 1].anchor;
+                            const arc = createSwingByArc(candidate, currentPoint, nextPoint, radiusScale, variant % 2 ? -1 : 1);
+                            waypoints.push(...arc.arcPoints);
+                            diagnostics.push(arc);
+                            currentPoint = arc.exitPoint.clone();
+                        });
+                        waypoints.push(preEntry.clone(), end.clone());
+                        const generated = createSmoothWaypointRoute(waypoints);
+                        const candidateRoute = generated.route;
+                        const candidateStopProgresses = diagnostics.map((arc, index) => generated.cumulativeLengths[2 + index * 3] / generated.totalLength);
+                        const candidatePreEntryProgress = generated.cumulativeLengths[waypoints.length - 2] / generated.totalLength;
+                        const arcClear = diagnostics.every(arc => getRouteMinimumDistance(candidateRoute, arc.anchor) >= arc.flybyRadius * 0.9);
+                        const heading = getRouteHeadingDiagnostic(candidateRoute);
+                        const continuousHeading = heading.minimumDot >= 0.82;
+                        const candidateSafe = routeAvoidsBlackHoles(candidateRoute, destinationIndex, candidatePools.safeRadius, candidatePreEntryProgress, candidatePools.obstacles);
+                        if (arcClear && continuousHeading && candidateSafe) {
+                            route = candidateRoute;
+                            swingByDiagnostics = diagnostics;
+                            stopProgresses = candidateStopProgresses;
+                            preEntryProgress = candidatePreEntryProgress;
+                            break;
+                        }
+                    }
                 }
             }
-            if (!route && fallbackCandidate) {
-                route = fallbackCandidate.route;
-                swingByDiagnostics = fallbackCandidate.diagnostics;
-                stopProgresses = fallbackCandidate.stopProgresses;
-                preEntryProgress = fallbackCandidate.preEntryProgress;
+            if (!route) {
+                // No candidate flyby satisfied both heading and obstacle checks.
+                // Keep the flight continuous and let the caller retry another
+                // approach direction if this direct path also crosses a hazard.
+                selected = [];
+                route = new THREE.CurvePath();
+                const entryDirection = end.clone().sub(preEntry).normalize();
+                route.add(createSmoothBezierSegment(start, preEntry, preEntry.clone().sub(start).normalize(), entryDirection));
+                route.add(new THREE.LineCurve3(preEntry.clone(), end.clone()));
+                preEntryProgress = route.curves[0].getLength() / Math.max(1, route.getLength());
             }
             selected.forEach((candidate, index) => {
                 const diagnostic = swingByDiagnostics[index];
@@ -403,7 +421,8 @@
                 stopAnchors: selected.map(stop => stop.anchor.clone()),
                 preEntryProgress,
                 swingByDiagnostics,
-                safe: routeAvoidsBlackHoles(route, destinationIndex, candidatePools.safeRadius)
+                safe: routeAvoidsBlackHoles(route, destinationIndex, candidatePools.safeRadius, preEntryProgress, candidatePools.obstacles)
+                    && routeHasContinuousHeading(route)
             };
         }
 
@@ -469,14 +488,16 @@
             if (!loadingAnimation) return false;
             loadingAnimation.apiReady = true;
             loadingAnimation.universeReadyAt = performance.now();
+            if (loadingAnimation.mode === '2d') return true;
             if (!loadingAnimation.preEntryStartedAt && !loadingAnimation.entryStartedAt) beginReturnToDestination();
             return true;
         };
 
         function initializeLoadingRoute(target, startPosition = null) {
             let generated = null;
+            const candidatePools = getWarpCandidateStops(loadingAnimation.targetIndex);
             for (let attempt = 0; attempt < 8; attempt++) {
-                generated = createLoadingRoute(target, loadingAnimation.approachDirection, loadingAnimation.approachDistance, loadingAnimation.targetIndex, startPosition);
+                generated = createLoadingRoute(target, loadingAnimation.approachDirection, loadingAnimation.approachDistance, loadingAnimation.targetIndex, startPosition, candidatePools);
                 if (generated.safe) break;
                 loadingAnimation.approachDirection.copy(new THREE.Vector3(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).normalize());
             }
@@ -539,6 +560,11 @@
         }
 
         function startLoadingAnimation() {
+            if (explorationViewMode === '2d'
+                && typeof window.startTwoDLoadingAnimation === 'function'
+                && window.startTwoDLoadingAnimation()) {
+                return;
+            }
             // ひとつの銀河の中心ブラックホールだけを航路に固定する。
             // 入口・出口を大きく離し、周囲の意見（星）を横切る高速移動を見せる。
             const now = performance.now();
@@ -765,18 +791,19 @@
                 return clamped * clamped * (3 - 2 * clamped);
             };
             const eased = smooth(progress);
-            const zoomingIn = transitionState.type === 'zoomIn' && transitionState.diveCamera;
+            const zoomingIn = transitionState.type === 'zoomIn' && transitionState.portalCamera;
             const zoomingOut = transitionState.type === 'zoomOut';
-            const approach = zoomingIn ? smooth(progress / 0.46) : eased;
-            const reveal = zoomingIn ? smooth((progress - 0.46) / 0.54) : eased;
+            const usesPortal = Boolean(transitionState.portalCamera);
+            const approach = usesPortal ? smooth(progress / 0.5) : eased;
+            const reveal = usesPortal ? smooth((progress - 0.5) / 0.5) : eased;
             const parentReveal = zoomingOut ? smooth((progress - 0.22) / 0.78) : eased;
-            if (zoomingIn) {
-                if (progress <= 0.46) {
-                    camera.position.lerpVectors(transitionState.cameraStart, transitionState.diveCamera, approach);
-                    controls.target.lerpVectors(transitionState.controlStart, transitionState.diveTarget, approach);
+            if (usesPortal) {
+                if (progress <= 0.5) {
+                    camera.position.lerpVectors(transitionState.cameraStart, transitionState.portalCamera, approach);
+                    controls.target.lerpVectors(transitionState.controlStart, transitionState.portalTarget, approach);
                 } else {
-                    camera.position.lerpVectors(transitionState.diveCamera, transitionState.cameraEnd, reveal);
-                    controls.target.lerpVectors(transitionState.diveTarget, transitionState.controlEnd, reveal);
+                    camera.position.lerpVectors(transitionState.portalCamera, transitionState.cameraEnd, reveal);
+                    controls.target.lerpVectors(transitionState.portalTarget, transitionState.controlEnd, reveal);
                 }
             } else if (transitionState.cameraStart && transitionState.cameraEnd) {
                 camera.position.lerpVectors(transitionState.cameraStart, transitionState.cameraEnd, eased);
@@ -821,25 +848,6 @@
             }
         }
 
-        function updateViewModeCameraTransition() {
-            if (!viewModeCameraTransition) return;
-            const progress = Math.min(1, (performance.now() - viewModeCameraTransition.startedAt) / viewModeCameraTransition.duration);
-            const eased = progress * progress * (3 - 2 * progress);
-            camera.position.lerpVectors(viewModeCameraTransition.startPosition, viewModeCameraTransition.endPosition, eased);
-            controls.target.copy(viewModeCameraTransition.target);
-            camera.fov = THREE.MathUtils.lerp(viewModeCameraTransition.startFov, viewModeCameraTransition.endFov, eased);
-            camera.updateProjectionMatrix();
-            camera.lookAt(controls.target);
-            if (progress >= 1) {
-                camera.position.copy(viewModeCameraTransition.endPosition);
-                camera.fov = viewModeCameraTransition.endFov;
-                camera.updateProjectionMatrix();
-                viewModeCameraTransition = null;
-                controls.enabled = true;
-                applyExplorationViewControls();
-            }
-        }
-
         function updateGroupOverview() {
             if (!groupOverviewState) return;
             const elapsed = performance.now() - groupOverviewState.startedAt;
@@ -862,6 +870,7 @@
         }
 
         function updateCosmicEnvironment(time) {
+            cosmicUpdateBucket = (cosmicUpdateBucket + 1) % 4;
             starMesh.rotation.y += 0.000004;
             starMesh.rotation.x += 0.000001;
             galaxyStructures.forEach((entry, index) => {
@@ -882,7 +891,8 @@
                 if (entry.life <= 0 || entry.streak.position.length() > 9200) resetShootingStar(entry, index);
             });
             cosmicSystems.forEach((entry, index) => {
-                entry.system.rotation.y += 0.00018 + index * 0.00003;
+                if (index % 4 !== cosmicUpdateBucket) return;
+                entry.system.rotation.y += (0.00018 + index * 0.00003) * 4;
                 entry.planets.forEach(planet => {
                     const angle = planet.angle + time * planet.speed;
                     planet.mesh.position.set(Math.cos(angle) * planet.radius, Math.sin(angle * 1.7) * planet.radius * 0.08, Math.sin(angle) * planet.radius);
@@ -897,7 +907,7 @@
                 ).normalize();
                 entry.comet.userData.orbitVelocity = cometVelocity;
                 // 彗星の尾はローカル-X。+Xを軌道接線へ向ければ、尾は常に進行方向の反対になる。
-                entry.comet.quaternion.setFromUnitVectors(new THREE.Vector3(1, 0, 0), cometVelocity);
+                entry.comet.quaternion.setFromUnitVectors(cometForwardAxis, cometVelocity);
             });
             if (ngc3324Dome) {
                 ngc3324Dome.rotation.y += 0.000006;
@@ -921,7 +931,7 @@
         }
 
         function updateKeyboardNavigation(deltaSeconds) {
-            if (!controls.enabled || loadingAnimation || transitionState || groupOverviewState || viewModeCameraTransition || isZoomingIntoGroup) return;
+            if (!controls.enabled || loadingAnimation || transitionState || groupOverviewState || isZoomingIntoGroup) return;
             if (state.screen !== 'GROUP' && state.screen !== 'SINGLE') return;
             const movementKeys = window.__bubbleBreakerMovementKeys;
             if (!movementKeys || !movementKeys.size) return;
@@ -931,8 +941,8 @@
             if (forward.lengthSq() < 0.001) return;
             forward.normalize();
             const right = new THREE.Vector3().crossVectors(forward, worldUp).normalize();
-            if (movementKeys.has('w')) movement.add(explorationViewMode === '2d' ? worldUp : forward);
-            if (movementKeys.has('s')) movement.sub(explorationViewMode === '2d' ? worldUp : forward);
+            if (movementKeys.has('w')) movement.add(forward);
+            if (movementKeys.has('s')) movement.sub(forward);
             if (movementKeys.has('d')) movement.add(right);
             if (movementKeys.has('a')) movement.sub(right);
             if (movement.lengthSq() < 0.001) return;
@@ -952,6 +962,11 @@
             const now = performance.now();
             const deltaSeconds = Math.min(0.05, Math.max(0.001, (now - lastAnimationTimestamp) / 1000));
             lastAnimationTimestamp = now;
+            if (explorationViewMode === '2d') {
+                if (typeof window.updateTwoDLoadingAnimation === 'function') window.updateTwoDLoadingAnimation(now);
+                return;
+            }
+            if (document.hidden || document.body.classList.contains('about-open')) return;
             updateCosmicEnvironment(time);
 
             // --- 状態に応じたカメラ・演出の制御 ---
@@ -963,8 +978,6 @@
                 updateGroupOverview();
             } else if (universeRevealState) {
                 updateUniverseReveal();
-            } else if (viewModeCameraTransition) {
-                updateViewModeCameraTransition();
             } else if (isDiving) {
                 // 【ダイブアニメーション中】
                 // 経過時間(0~4秒)から進捗率(0~1)を計算
@@ -1023,6 +1036,13 @@
 
             // --- 現在表示されている各バブルごとの更新処理 ---
             currentBubbles.forEach(b => {
+                if (isAnalysisOrDetail && state.bubbleId !== b.data.id && !transitionState && b.mesh.material.opacity <= 0.015) {
+                    b.mesh.material.opacity = 0;
+                    b.mesh.visible = false;
+                    if (b.label.style.opacity !== '0') b.label.style.opacity = '0';
+                    if (b.label.style.pointerEvents !== 'none') b.label.style.pointerEvents = 'none';
+                    return;
+                }
                 // 初期Y座標を基準に絶対値で更新し、長時間実行時のdriftを防ぐ
                 const isHierarchyIncoming = transitionState && transitionState.incoming.includes(b);
                 if (!isHierarchyIncoming) b.mesh.position.y = b.baseY + Math.sin(time * 2 + b.baseX) * 0.005;
@@ -1087,14 +1107,7 @@
                         }
                     }
                     const fade = Math.max(0, Math.min(1, b.mesh.material.opacity / 0.95));
-                    networkVisual.traverse(child => {
-                        if (!child.material) return;
-                        const materials = Array.isArray(child.material) ? child.material : [child.material];
-                        materials.forEach(material => {
-                            if (!Number.isFinite(material.userData.networkBaseOpacity)) material.userData.networkBaseOpacity = material.opacity;
-                            material.opacity = material.userData.networkBaseOpacity * fade;
-                        });
-                    });
+                    applyCachedVisualFade(networkVisual, fade);
                 }
                 const deepSeaVisual = b.mesh.userData && b.mesh.userData.deepSeaVisual;
                 const deepSeaAnimation = deepSeaVisual && deepSeaVisual.userData.deepSeaAnimation;
@@ -1148,14 +1161,7 @@
                         }
                     }
                     const fade = Math.max(0, Math.min(1, b.mesh.material.opacity / 0.95));
-                    deepSeaVisual.traverse(child => {
-                        if (!child.material) return;
-                        const materials = Array.isArray(child.material) ? child.material : [child.material];
-                        materials.forEach(material => {
-                            if (!Number.isFinite(material.userData.deepSeaBaseOpacity)) material.userData.deepSeaBaseOpacity = material.opacity;
-                            material.opacity = material.userData.deepSeaBaseOpacity * fade;
-                        });
-                    });
+                    applyCachedVisualFade(deepSeaVisual, fade);
                 }
 
                 const dataVisual = b.mesh.userData && b.mesh.userData.dataVisual;
@@ -1184,9 +1190,11 @@
                         const scaled = packet.progress * segmentCount;
                         const segment = Math.min(segmentCount - 1, Math.floor(scaled));
                         const localProgress = scaled - segment;
-                        const start = new THREE.Vector3().fromBufferAttribute(positions, segment);
-                        const end = new THREE.Vector3().fromBufferAttribute(positions, segment + 1);
-                        packet.mesh.position.lerpVectors(start, end, localProgress);
+                        packet.startScratch = packet.startScratch || new THREE.Vector3();
+                        packet.endScratch = packet.endScratch || new THREE.Vector3();
+                        packet.startScratch.fromBufferAttribute(positions, segment);
+                        packet.endScratch.fromBufferAttribute(positions, segment + 1);
+                        packet.mesh.position.lerpVectors(packet.startScratch, packet.endScratch, localProgress);
                     });
                     dataAnimation.dataCubes.forEach((cube, index) => {
                         cube.rotation.x += 0.012 + index * 0.001;
@@ -1209,14 +1217,7 @@
                         }
                     }
                     const fade = Math.max(0, Math.min(1, b.mesh.material.opacity / 0.95));
-                    dataVisual.traverse(child => {
-                        if (!child.material) return;
-                        const materials = Array.isArray(child.material) ? child.material : [child.material];
-                        materials.forEach(material => {
-                            if (!Number.isFinite(material.userData.dataBaseOpacity)) material.userData.dataBaseOpacity = material.opacity;
-                            material.opacity = material.userData.dataBaseOpacity * fade;
-                        });
-                    });
+                    applyCachedVisualFade(dataVisual, fade);
                 }
                 
                 // --- 解析画面時の他バブル透過処理 ---
@@ -1233,7 +1234,7 @@
                 // バブル群画面で、かつ自動ズーム演出中でない時だけラベルを表示する
                 if (state.screen === 'GROUP' && !isAnalysisOrDetail && !isZoomingIntoGroup) {
                     // 3D空間の座標を、2Dの画面上の座標(-1〜1)に投影・変換する
-                    const pos = b.mesh.position.clone().project(camera);
+                    const pos = labelProjectionScratch.copy(b.mesh.position).project(camera);
                     // カメラの背後にバブルがある場合はラベルを非表示にする
                     if (pos.z > 1) { b.label.style.opacity = '0'; return; }
                     
@@ -1244,11 +1245,16 @@
                     // カメラからの距離に応じてラベルの大きさを変える（遠くにあると文字も小さくなる）
                     const dist = camera.position.distanceTo(b.mesh.position);
                     let scale = Math.max(0.5, 15 / dist) * (1 + b.mesh.scale.x * 0.1);
+                    if (b.level === 'leaf') scale = Math.min(0.78, scale * 0.66);
                     
                     // スタイルを適用してラベルを配置
-                    b.label.style.transform = `translate(-50%, -50%) translate(${x}px, ${y}px) scale(${scale})`;
-                    b.label.style.opacity = '1';
-                    b.label.style.pointerEvents = 'auto'; // クリックを受け付ける
+                    const transform = `translate(-50%, -50%) translate(${x.toFixed(1)}px, ${y.toFixed(1)}px) scale(${scale.toFixed(3)})`;
+                    if (b.label._lastTransform !== transform) {
+                        b.label.style.transform = transform;
+                        b.label._lastTransform = transform;
+                    }
+                    if (b.label.style.opacity !== '1') b.label.style.opacity = '1';
+                    if (b.label.style.pointerEvents !== 'auto') b.label.style.pointerEvents = 'auto';
                 } else {
                     // それ以外の画面ではラベルを消す
                     b.label.style.opacity = '0'; 

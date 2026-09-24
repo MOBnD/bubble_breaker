@@ -26,17 +26,29 @@
 
     <div id="canvas-container"></div>
     <div id="labels-container"></div>
+    <div id="exploration-2d" class="exploration-2d" aria-hidden="true" hidden>
+        <div class="exploration-2d-background" aria-hidden="true"></div>
+        <div class="exploration-2d-grid" aria-hidden="true"></div>
+        <svg id="exploration-2d-stage" class="exploration-2d-stage" viewBox="0 0 1000 700" role="img" aria-label="2Dバブル探索空間"></svg>
+        <div id="exploration-2d-loading" class="exploration-2d-loading" hidden>
+            <span class="exploration-2d-loading-kicker">SEARCH VOYAGE / 2D</span>
+            <h2>情報のつながりを航行中</h2>
+            <svg viewBox="0 0 900 300" aria-label="情報探索航路">
+                <path id="exploration-2d-route" class="exploration-2d-route" d="M40 230 C160 40 280 270 400 120 S650 40 860 150"></path>
+                <g class="exploration-2d-route-node" transform="translate(205 145)"><circle r="22"></circle><text y="43">恒星系</text></g>
+                <g class="exploration-2d-route-node is-galaxy" transform="translate(485 103)"><circle r="30"></circle><text y="52">銀河</text></g>
+                <g class="exploration-2d-route-node" transform="translate(710 105)"><circle r="22"></circle><text y="43">恒星系</text></g>
+                <circle id="exploration-2d-vessel" class="exploration-2d-vessel" r="9" cx="40" cy="230"></circle>
+            </svg>
+            <p id="exploration-2d-loading-status">複数の検索経路から情報源を収集中…</p>
+        </div>
+    </div>
 
     <div id="ui-layer" class="cosmic-ui">
-        <div id="panel-bgm" class="command-console absolute top-16 right-6 z-[80] glass-panel rounded-lg p-2 text-[10px] text-white pointer-events-auto flex flex-col gap-1">
-            <div class="console-heading">
-                <span class="console-kicker">COSMIC CONTROL</span>
-                <span class="console-heading-actions">
-                    <span class="console-signal">● LIVE</span>
-                    <button id="btn-collapse-panel-bgm" class="panel-collapse-button" data-collapse-panel="panel-bgm" aria-controls="panel-bgm-content" aria-expanded="true" type="button" title="設定を畳む">−</button>
-                </span>
-            </div>
-            <div id="panel-bgm-content" class="panel-collapsible-content">
+        <section id="settings-overlay" class="settings-overlay" role="dialog" aria-modal="true" aria-labelledby="settings-title" hidden>
+            <div id="panel-bgm" class="command-console settings-dialog glass-panel rounded-xl p-5 text-white pointer-events-auto flex flex-col gap-3">
+                <div class="console-heading"><div><span class="console-kicker">COSMIC CONTROL</span><h2 id="settings-title">探索設定</h2></div><span class="console-heading-actions"><span class="console-signal">● LIVE</span><button id="btn-close-settings" class="settings-close-button" type="button" aria-label="設定を閉じる">×</button></span></div>
+                <div id="panel-bgm-content" class="panel-collapsible-content">
                 <button id="btn-sound-toggle" class="sound-control" type="button">🔊 効果音ON</button>
                 <label class="flex items-center gap-2"><input id="ngc3324-toggle" type="checkbox" checked> NGC 3324背景</label>
                 <label class="flex items-center gap-2"><input id="warp-haze-toggle" type="checkbox" checked> ワープ中の靄</label>
@@ -62,6 +74,14 @@
                         <button type="button" data-view-mode="2d" aria-pressed="false">2D</button>
                     </div>
                 </div>
+                <label class="theme-select-row">右側パネルの表示サイズ
+                    <select id="right-panel-size" class="bg-black/60 rounded px-2 py-2">
+                        <option value="large">大</option>
+                        <option value="medium" selected>中</option>
+                        <option value="small">小</option>
+                        <option value="none">なし</option>
+                    </select>
+                </label>
                 <label class="theme-select-row">BGMの選択
                     <select id="bgm-type" class="bg-black/60 rounded px-1 py-0.5">
                         <option value="none">なし</option>
@@ -73,13 +93,17 @@
                 </label>
             </div>
         </div>
+        </section>
         <audio id="bgm-audio" loop preload="none"></audio>
         
         <!-- ヘッダー -->
         <div class="brand-hud absolute top-6 left-6 flex flex-col gap-1 z-50 pointer-events-none">
-            <button id="btn-open-about" class="brand-title-button pointer-events-auto" type="button" aria-haspopup="dialog" aria-controls="about-overlay">
-                <span class="text-2xl font-bold tracking-widest text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-purple-500">BubbleBreaker</span>
-            </button>
+            <div class="brand-heading-row">
+                <button id="btn-open-about" class="brand-title-button pointer-events-auto" type="button" aria-haspopup="dialog" aria-controls="about-overlay">
+                    <span class="text-2xl font-bold tracking-widest text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-purple-500">BubbleBreaker</span>
+                </button>
+                <button id="btn-open-settings" class="settings-open-button pointer-events-auto" type="button" aria-haspopup="dialog" aria-controls="settings-overlay" aria-expanded="false" title="設定を開く">⚙ 設定</button>
+            </div>
             <p class="text-xs text-gray-400">君の世界は、編集されている / NAVIGATE THE BUBBLE WEB</p>
             <div id="toast" class="mt-2 glass-panel px-4 py-2 rounded-lg text-xs text-blue-200 opacity-0 transition-opacity duration-500">
                 メッセージ
@@ -120,14 +144,26 @@
 
         <section id="about-overlay" class="about-overlay" role="dialog" aria-modal="true" aria-labelledby="about-title" hidden>
             <div class="about-stars" aria-hidden="true"></div>
-            <button id="btn-close-about" class="about-close" type="button" aria-label="サービス紹介を閉じる">← 探索へ戻る</button>
+            <div class="about-fixed-actions">
+                <button id="btn-about-menu" class="about-menu-button" type="button" aria-expanded="false" aria-controls="about-menu">☰ 目次</button>
+                <button id="btn-close-about" class="about-close" type="button" aria-label="サービス紹介を閉じる">← 探索へ戻る</button>
+                <nav id="about-menu" class="about-menu" aria-label="紹介ページの目次" hidden>
+                    <a href="#about-mission">Bubble Breakerとは</a>
+                    <a href="#about-filter-bubble">フィルターバブルとは</a>
+                    <a href="#about-collection">情報収集の仕組み</a>
+                    <a href="#about-formation">バブルの形成</a>
+                    <a href="#about-navigation">探索方法</a>
+                    <a href="#about-controls">操作方法</a>
+                    <a href="#about-impact">使うと何が変わるか</a>
+                </nav>
+            </div>
             <div class="about-scroll">
                 <header class="about-header">
                     <span class="about-kicker">BUBBLE BREAKER / SERVICE GUIDE</span>
                     <h2 id="about-title">フィルターバブルを脱し、<br>本来のインターネットを自由に旅する</h2>
                     <p>ひとつの意見から、比較・反対・背景・意外な接続まで。情報を「答え」ではなく、根拠のある宇宙として探索するサービスです。</p>
                 </header>
-                <section class="about-hero">
+                <section id="about-mission" class="about-hero">
                     <div>
                         <span class="about-section-number">00 / MISSION</span>
                         <h3>検索結果の列を、探索できる宇宙へ。</h3>
@@ -136,7 +172,7 @@
                     <div class="about-orbit" aria-hidden="true"><span></span><i></i><b></b></div>
                 </section>
 
-                <section class="about-section">
+                <section id="about-filter-bubble" class="about-section">
                     <div class="about-section-heading">
                         <span class="about-section-number">01 / THE PROBLEM</span>
                         <h3>フィルターバブルは、見えない境界線。</h3>
@@ -162,7 +198,7 @@
                     </article>
                 </section>
 
-                <section class="about-section about-pipeline-section">
+                <section id="about-collection" class="about-section about-pipeline-section">
                     <div class="about-section-heading">
                         <span class="about-section-number">02 / HOW IT COLLECTS</span>
                         <h3>生成する前に、探す方向を決める。</h3>
@@ -189,7 +225,7 @@
                     </div>
                 </section>
 
-                <section class="about-section">
+                <section id="about-formation" class="about-section">
                     <div class="about-section-heading">
                         <span class="about-section-number">03 / HOW BUBBLES FORM</span>
                         <h3>単語ではなく、関係がバブルになる。</h3>
@@ -204,15 +240,28 @@
                     </div>
                 </section>
 
-                <section class="about-grid">
+                <section id="about-navigation" class="about-grid">
                     <article><span>04 / CONNECTION</span><h3>なぜつながるかを残す</h3><p>近い、隣接、遠い、意外な接続を区別し、完全なランダムではなく、Evidenceから後で説明できるつながりを提示します。</p></article>
                     <article><span>05 / TRANSPARENCY</span><h3>説明と根拠を分離する</h3><p>詳細では出典、主張の支持・矛盾、独立性、不確実性を保持します。confidenceは真実の確率ではなく、今回のEvidenceでの裏付け強度です。</p></article>
                     <article><span>06 / NAVIGATION</span><h3>潜る、俯瞰する、戻る</h3><p>親バブルの内側に下位世界が存在する三階層構造を、同じ宇宙の中で行き来します。酔いを抑える正面固定の2D表示も選べます。</p></article>
                     <article><span>07 / MEMORY</span><h3>探索を持ち帰る</h3><p>三階層のバブル群と生成済み詳細をローカル保存し、意見入力画面から過去の探索宇宙を復元できます。</p></article>
                 </section>
 
-                <section class="about-outcome">
-                    <span class="about-section-number">08 / WHAT CHANGES</span>
+                <section id="about-controls" class="about-section about-controls-section">
+                    <div class="about-section-heading"><span class="about-section-number">08 / CONTROLS</span><h3>探索の操作方法</h3><p>情報を選ぶ、潜る、根拠を確かめる。画面ごとの操作は次の通りです。</p></div>
+                    <ol class="about-controls-list">
+                        <li><b>バブル群を見る</b><span>意見入力後、関連するテーマが三階層のバブル群として現れます。</span></li>
+                        <li><b>バブルを選ぶ</b><span>バブルをクリックすると個別画面へ移動します。右パネルの構成要素も選択できます。</span></li>
+                        <li><b>ズームイン／アウト</b><span>3Dではホイールとドラッグ、WASDで移動します。2Dではバブルを選んで移動します。</span></li>
+                        <li><b>上位・下位へ移動</b><span>個別画面の「中を見る」「俯瞰する」や階層ナビゲーションから移動します。</span></li>
+                        <li><b>詳細解析を開く</b><span>「このバブルを詳しく解析する」を押し、4つのカードから根拠や情報源を確認します。</span></li>
+                        <li><b>右パネルを使う</b><span>「−」で閉じ、再表示ボタンで開きます。設定からサイズや表示モードを変更できます。</span></li>
+                        <li><b>意見入力・保存履歴へ</b><span>右パネル下部のボタンで戻り、保存済みのバブル群を復元できます。</span></li>
+                    </ol>
+                </section>
+
+                <section id="about-impact" class="about-outcome">
+                    <span class="about-section-number">09 / WHAT CHANGES</span>
                     <h3>「与えられた答えを読む」から、<br>「情報環境を自分で旅する」へ。</h3>
                     <p>Bubble Breakerは正解を一つに決める道具ではありません。自分の視界に何が入り、何が欠け、どの根拠がどの主張を支えているかを確かめながら、次の一歩を自分で選ぶための探索装置です。</p>
                     <strong>BREAK THE FEED. EXPLORE THE WEB.</strong>
@@ -310,7 +359,11 @@
 
         <!-- ④ 個別バブル解析画面 -->
         <div id="screen-analysis" class="network-analysis screen-container screen-hidden flex items-center justify-center p-6 z-40">
-            <div class="relative w-full max-w-6xl h-[75vh] mt-10 pointer-events-none">
+            <div class="analysis-network-layout relative w-full max-w-[1500px] h-[84dvh] pointer-events-none">
+                <svg class="analysis-connectors" viewBox="0 0 1000 640" preserveAspectRatio="none" aria-hidden="true">
+                    <path d="M500 320 C400 250 300 160 185 125 M500 320 C400 390 300 480 185 515 M500 320 C600 250 700 160 815 125 M500 320 C600 390 700 480 815 515" />
+                    <circle cx="500" cy="320" r="8" />
+                </svg>
                 
                 <div id="analysis-center-title" class="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 text-2xl font-bold text-white text-shadow-lg cursor-pointer hover:scale-110 transition-transform pointer-events-auto text-center w-full z-10">
                     --
@@ -345,7 +398,7 @@
                     <div onclick="showDetail('demographic')" class="analysis-card w-64 glass-panel p-4 rounded-xl cursor-pointer hover:scale-105 hover:border-yellow-400 transition-all group">
                         <h3 class="text-sm font-bold text-yellow-300 mb-2 border-b border-yellow-500/30 pb-1">🎯 構成層・情報源</h3>
                         <div class="flex justify-center mb-2" aria-hidden="true">
-                            <div class="analysis-card-pie-preview"><span>Evidence</span></div>
+                    <div class="analysis-card-pie-preview"></div>
                         </div>
                         <p class="text-xs text-gray-300 line-clamp-2">今回収集した独立Evidenceの情報源構成を表示します。</p>
                     </div>
@@ -361,15 +414,15 @@
                     </div>
                 </div>
 
-                <div class="absolute -bottom-6 left-1/2 transform -translate-x-1/2 text-[10px] text-gray-500 pointer-events-auto bg-black/50 px-3 py-1 rounded-full backdrop-blur-sm">
+                <div class="analysis-help pointer-events-auto">
                     カードをクリックして詳細表示 / 下スクロールで戻る
                 </div>
             </div>
         </div>
 
         <!-- ⑤ 解析バブル詳細表示画面 -->
-        <div id="screen-detail" class="detail-screen screen-container screen-hidden bg-black/80 backdrop-blur-lg flex items-center justify-center p-10 z-50 pointer-events-auto">
-            <div class="detail-shell w-full max-w-6xl h-[84vh] bg-gray-900 border border-gray-700 rounded-2xl shadow-2xl relative overflow-hidden">
+        <div id="screen-detail" class="detail-screen screen-container screen-hidden bg-black/80 backdrop-blur-lg flex items-center justify-center p-6 z-50 pointer-events-auto">
+            <div class="detail-shell w-full max-w-7xl h-[90dvh] bg-gray-900 border border-gray-700 rounded-2xl shadow-2xl relative overflow-hidden">
                 <div class="detail-main p-10 overflow-y-auto">
                     <div class="detail-toolbar">
                         <div class="detail-origin">
@@ -406,6 +459,7 @@
     <script src="./js/audio.js"></script>
     <script src="./js/navigation.js"></script>
     <script src="./js/scene.js"></script>
+    <script src="./js/two-d.js"></script>
     <script src="./js/events.js"></script>
     <script src="./js/animation.js"></script>
 </body>

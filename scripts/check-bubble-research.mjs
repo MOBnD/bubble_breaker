@@ -62,13 +62,20 @@ const responses = [
 const normalized = research.normalizeSearchResponses(plan, responses);
 assert.equal(normalized.sources.length, 3, 'canonical URL duplicates must merge');
 assert.ok(normalized.excluded.some(item => item.reason === 'not_in_web_search_sources'), 'unconsulted model URLs must be rejected');
-const imageRequest = research.buildImageSearchRequest(plan, 'test');
+const imageRequest = research.buildImageSearchRequest(plan, 'test', research.imagePanelSpecs[0]);
 assert.deepEqual(Array.from(imageRequest.tools[0].search_content_types), ['image', 'text']);
-assert.equal(imageRequest.tools[0].image_settings.max_results, 8);
+assert.equal(imageRequest.tools[0].image_settings.max_results, 3, 'each focused panel image query is bounded');
 assert.deepEqual(Array.from(imageRequest.include), ['web_search_call.results']);
-const normalizedImages = research.imageResultsFromPayload(imagePayload(1, { invalid: true }));
+const normalizedImages = research.imageResultsFromPayload(imagePayload(1, { invalid: true }), 'overview');
 assert.equal(normalizedImages.length, 1, 'only HTTPS images with an attribution page should be accepted');
 assert.equal(normalizedImages[0].sourceWebsiteUrl, 'https://publisher.example/page-1');
+assert.deepEqual(Array.from(normalizedImages[0].panelIds), ['overview']);
+const mergedPanelImages = research.mergePanelImageResults([
+    { ...normalizedImages[0], panelIds: ['overview'] },
+    { ...normalizedImages[0], panelIds: ['history'] }
+]);
+assert.equal(mergedPanelImages.length, 1, 'the same image found by multiple focused searches should deduplicate');
+assert.deepEqual(Array.from(mergedPanelImages[0].panelIds).sort(), ['history', 'overview']);
 const government = normalized.sources.find(item => item.domain === 'government.example');
 assert.deepEqual(Array.from(government.queryIntents).sort(), ['primary', 'support']);
 
@@ -131,7 +138,7 @@ function sourceIdsFromPrompt(body) {
     return Array.from(new Set(Array.from(body.input[1].content[0].text.matchAll(/"sourceId":"([^"]+)"/g), match => match[1])));
 }
 
-async function runIntegration({ failIntent = null, failSynthesis = false, failImage = false, empty = false } = {}) {
+async function runIntegration({ failIntent = null, failSynthesis = false, failImage = false, noImageResults = false, empty = false } = {}) {
     research.clearCache();
     const calls = [];
     let searchIndex = 0;
@@ -139,7 +146,7 @@ async function runIntegration({ failIntent = null, failSynthesis = false, failIm
         calls.push({ body, stage });
         if (body.text.format.name === 'bubble_image_search') {
             if (failImage) { const error = new Error('image search failed'); error.status = 503; throw error; }
-            return { parsed: { completed: true }, payload: imagePayload(1) };
+            return { parsed: { completed: true }, payload: noImageResults ? { output: [{ type: 'web_search_call', results: [] }] } : imagePayload(1) };
         }
         if (body.text.format.name === 'bubble_evidence_search') {
             searchIndex += 1;
@@ -175,7 +182,11 @@ async function runIntegration({ failIntent = null, failSynthesis = false, failIm
                     ],
                     sourceIds: ids.slice(1, 2), imageIds: imageIds.slice(0, 1)
                 },
-                support: { summary: 'support', comments: [{ text: '賛成論点', sourceIds: ids.slice(0, 1) }], sourceIds: ids.slice(0, 1), imageIds: [] }
+                support: { summary: 'support', comments: [{ text: '賛成論点', sourceIds: ids.slice(0, 1) }], sourceIds: ids.slice(0, 1), imageIds: [] },
+                conversation: [
+                    { id: 'turn-1', side: 'opposition', text: '根拠付きの反対論点', respondsTo: null, sourceIds: ids.slice(1, 2) },
+                    { id: 'turn-2', side: 'support', text: 'その論点への根拠付き応答', respondsTo: 'turn-1', sourceIds: ids.slice(0, 1) }
+                ], imageIds: imageIds.slice(0, 1)
             }
         };
         return { parsed: { analysis, sourceIds: ids.slice(0, 4) }, payload: {} };
@@ -186,15 +197,24 @@ async function runIntegration({ failIntent = null, failSynthesis = false, failIm
 
 const integrated = await runIntegration();
 assert.equal(integrated.calls.filter(call => call.body.text.format.name === 'bubble_evidence_search').length, 4);
-assert.equal(integrated.calls.filter(call => call.body.text.format.name === 'bubble_image_search').length, 1);
-assert.equal(integrated.calls.length, 7, 'pipeline should use four evidence searches, one image search, one verification and one synthesis');
+assert.equal(integrated.calls.filter(call => call.body.text.format.name === 'bubble_image_search').length, 4);
+assert.equal(integrated.calls.length, 10, 'pipeline should use four evidence searches, four focused image searches, one verification and one synthesis');
 assert.equal(integrated.result.detailResearch.queries.length, 4);
 assert.ok(integrated.result.detailResearch.claims.length > 0);
 assert.equal(integrated.result.detailResearch.images.length, 1);
+assert.equal(integrated.result.detailResearch.imageQueries.length, 4, 'each analysis panel must track image-search outcome');
+assert.deepEqual(Array.from(integrated.result.detailResearch.images[0].panelIds).sort(), ['demographic', 'evaluation', 'history', 'overview']);
+assert.deepEqual(
+    Array.from(new Set(integrated.calls.filter(call => call.body.text.format.name === 'bubble_image_search').map(call => call.body.input[1].content[0].text.split('\n').find(line => line.startsWith('表示先: '))?.slice(5)))).sort(),
+    ['内外からの意見', '形成の歴史', '概要', '構成層・情報源'],
+    'image queries should be routed to all four detail panels with distinct focus'
+);
 assert.deepEqual(Array.from(integrated.result.analysis.history.events, event => event.sortKey), [20200000, 20250000], 'timeline should be chronological and omit invalid refs');
 assert.equal(Number(integrated.result.analysis.demographic.segments.reduce((sum, segment) => sum + segment.value, 0).toFixed(1)), 100);
 assert.equal(integrated.result.analysis.evaluation.opposition.comments.length, 1, 'comments without valid Evidence refs should be removed');
 assert.equal(integrated.result.analysis.evaluation.support.comments[0].text, '賛成論点');
+assert.equal(integrated.result.analysis.evaluation.conversation[1].respondsTo, 'turn-1', 'the discussion must keep evidence-backed reply relationships');
+assert.deepEqual(Array.from(integrated.result.analysis.history.imageIds), Array.from(integrated.result.analysis.evaluation.imageIds), 'focused panel images should be assigned to corresponding synthesis sections');
 
 const partialSearch = await runIntegration({ failIntent: 'contradict' });
 assert.equal(partialSearch.result.status, 'partial', 'one failed search intent should preserve partial results');
@@ -208,7 +228,14 @@ assert.ok(partialSynthesis.result.sources.length > 0, 'Evidence should survive s
 const noImages = await runIntegration({ failImage: true });
 assert.equal(noImages.result.status, 'complete', 'optional image search failure should not downgrade verified text analysis');
 assert.equal(noImages.result.detailResearch.images.length, 0);
+assert.equal(noImages.result.detailResearch.imageQueries.filter(query => query.status === 'failed').length, 4);
 assert.ok(noImages.result.detailResearch.limitations.some(item => item.includes('画像検索')));
+
+const emptyImages = await runIntegration({ noImageResults: true });
+assert.equal(emptyImages.result.status, 'complete', 'a no-image result should not break text analysis');
+assert.equal(emptyImages.result.detailResearch.images.length, 0);
+assert.equal(emptyImages.result.detailResearch.imageQueries.filter(query => query.status === 'no_results').length, 4);
+assert.ok(emptyImages.result.detailResearch.limitations.some(item => item.includes('関連画像が見つかりません')));
 
 await assert.rejects(() => runIntegration({ empty: true }), error => error.code === 'RESEARCH_NO_EVIDENCE');
 

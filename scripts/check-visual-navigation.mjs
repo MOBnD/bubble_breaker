@@ -4,7 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const [scene, animation, events, audio, indexHtml, styles, buildScript, apiSource, researchSource, storageSource] = await Promise.all([
+const [scene, animation, events, audio, indexHtml, styles, buildScript, apiSource, researchSource, storageSource, twoDSource] = await Promise.all([
     readFile(path.join(root, 'src', 'js', 'scene.js'), 'utf8'),
     readFile(path.join(root, 'src', 'js', 'animation.js'), 'utf8'),
     readFile(path.join(root, 'src', 'js', 'events.js'), 'utf8'),
@@ -14,7 +14,8 @@ const [scene, animation, events, audio, indexHtml, styles, buildScript, apiSourc
     readFile(path.join(root, 'scripts', 'build.mjs'), 'utf8'),
     readFile(path.join(root, 'src', 'js', 'api.js'), 'utf8'),
     readFile(path.join(root, 'src', 'js', 'research.js'), 'utf8'),
-    readFile(path.join(root, 'src', 'js', 'storage.js'), 'utf8')
+    readFile(path.join(root, 'src', 'js', 'storage.js'), 'utf8'),
+    readFile(path.join(root, 'src', 'js', 'two-d.js'), 'utf8')
 ]);
 
 const shapeMatch = scene.match(/const GALAXY_SHAPE_NAMES\s*=\s*\[([^\]]+)\]/);
@@ -94,12 +95,24 @@ assert.match(scene, /is-above[^\n]*is-below/, 'history events should alternate a
 assert.match(scene, /timeline\.addEventListener\('wheel'[\s\S]*?timeline\.scrollLeft \+= movement/, 'mouse wheel input should scroll the timeline horizontally');
 assert.match(scene, /detail-timeline-tick-label/, 'history timeline should render year interval labels');
 assert.match(scene, /function renderDemographicDetail\(/, 'source composition should have a dedicated pie renderer');
-assert.match(scene, /conic-gradient/, 'source composition should render a pie chart');
-assert.match(scene, /createPerspectivePanel\('反対派の意見'/, 'opposition should render on the comparison left side');
-assert.match(scene, /createPerspectivePanel\('賛成派の意見'/, 'support should render on the comparison right side');
-assert.match(scene, /detail-comments/, 'perspective additions should render as independent comments');
-assert.match(scene, /comment\.sourceIds/, 'each generated comment should expose its Evidence refs');
-assert.match(researchSource, /匿名のパラフレーズ/, 'synthesis should request natural evidence-grounded anonymous comments');
+assert.match(scene, /function createEvidenceCompositionChart\(/, 'source composition should use the shared SVG donut design');
+assert.match(scene, /detail-evidence-composition-chart/, 'source composition chart should expose accessible SVG labels');
+assert.match(scene, /detail-evidence-slice/, 'source composition should use segment slices rather than a CSS pie');
+assert.match(scene, /detail-conversation-turn is-\$\{side\}/, 'evaluation should display alternating opinion turns as a conversation');
+assert.match(scene, /turn\.respondsTo/, 'conversation turns should preserve response relationships');
+assert.match(scene, /detail-conversation-note/, 'legacy analyses should be labelled when no response relationships exist');
+assert.match(scene, /comment\.sourceIds|turn\.sourceIds/, 'each generated opinion should expose its Evidence refs');
+assert.match(researchSource, /匿名の立場ごとの主張/, 'synthesis should request natural evidence-grounded anonymous opinions');
+assert.match(researchSource, /respondsToで直前の相手側の論点へ具体的に応答/, 'synthesis should produce evidence-grounded reply relationships');
+assert.match(researchSource, /IMAGE_PANEL_SPECS/, 'image search should be routed separately for each analysis panel');
+assert.match(researchSource, /imageQueries/, 'image search status should be preserved per panel');
+assert.match(scene, /function appendPanelImages\(/, 'each analysis panel should show its own queried image or a clear reason');
+assert.match(scene, /function imageSearchStatusText\(/, 'failed and empty image searches should be explained to the user');
+assert.match(scene, /function createTimelineYearScale\(/, 'history timeline should compress long periods without events');
+assert.match(scene, /detail-timeline-break/, 'timeline compression should be marked with a visible wave break');
+assert.match(scene, /event\.respondsTo|turn\.respondsTo/, 'the displayed conversation should identify responses');
+assert.match(scene, /根拠から見える要点/, 'overview should provide evidence-linked key points');
+assert.match(scene, /画像を読み込めませんでした/, 'the UI should explain image delivery failures');
 assert.match(indexHtml, /id="group-breadcrumb"/, 'group panel should expose breadcrumb navigation');
 assert.match(indexHtml, /id="group-composition-chart"/, 'group panel should expose a composition pie chart');
 assert.match(scene, /function renderGroupBreadcrumb\(/, 'breadcrumb navigation should be rendered from the hierarchy');
@@ -120,7 +133,7 @@ assert.match(styles, /--hud-edge:/, 'right-side panels should share one edge off
 assert.match(storageSource, /event\.target !== inputScreen/, 'input history overlay should close only on backdrop clicks');
 assert.match(scene, /画像出典:/, 'external images should expose attribution links');
 assert.match(scene, /referrerPolicy = 'no-referrer'/, 'external images should not send the page referrer');
-assert.match(researchSource, /evaluationは反対派と賛成派を分け/, 'analysis synthesis should request both perspectives');
+assert.match(researchSource, /conversationには立場を交互/, 'analysis synthesis should request a dialogue with both perspectives');
 assert.match(researchSource, /藁人形/, 'analysis synthesis should avoid fabricated strawman criticism');
 assert.match(apiSource, /反対派の見解を確認できる公開情報がありません/, 'fallback analysis should describe missing opposition evidence');
 assert.match(apiSource, /賛成派の見解を確認できる公開情報がありません/, 'fallback analysis should describe missing support evidence');
@@ -139,20 +152,24 @@ assert.match(animation, /blackHole\.clone\(\)\.addScaledVector\(loadingAnimation
 assert.match(animation, /new THREE\.CurvePath/, 'warp should be assembled from continuous curve segments');
 assert.match(animation, /new THREE\.CubicBezierCurve3/, 'warp should use cubic Bezier segments');
 assert.doesNotMatch(animation, /new THREE\.CatmullRomCurve3/, 'warp should not use unstable point-spline interpolation');
-assert.match(scene, /const warpStopCount = 3;/, 'warp should use the fixed three-stop route');
+assert.match(scene, /const warpStopCount = 3;/, 'warp should aim for up to three flyby stops');
 assert.match(animation, /routeStops/, 'warp should retain generated galaxy and stellar-system stops');
 assert.match(animation, /selectWarpCandidates\(/, 'warp should select actual galaxy and stellar-system anchors');
 assert.match(animation, /candidate\.anchor/, 'warp candidates should be anchored to real world objects');
-assert.match(animation, /createSwingByArc\(/, 'warp should curve around each selected object');
-assert.match(animation, /getSwingByAxis\(/, 'warp should define an orbital plane around each selected object');
-assert.match(animation, /arcPoints/, 'warp should contain multiple points on the swing-by arc');
-assert.match(animation, /createCircularArcCurves\(/, 'warp should approximate each flyby with tangent-preserving circular Bezier arcs');
-assert.match(animation, /const sweepAngle = Math\.PI/, 'warp flybys should use a 180 degree sweep');
-assert.match(animation, /const exitRadial = radialStart\.clone\(\)\.negate\(\)/, 'warp flybys should exit from the side opposite the entry');
+assert.match(animation, /createSwingByArc\(/, 'warp should construct near-object flyby waypoints');
+assert.match(animation, /getSwingByAxis\(/, 'warp should define a flyby side around each selected object');
+assert.match(animation, /arcPoints: \[entryPoint, flybyPosition, exitPoint\]/, 'flybys should have entry, closest-pass, and exit points');
+assert.match(animation, /createSmoothWaypointRoute\(/, 'flybys should share smoothly connected waypoint tangents');
+assert.match(animation, /turnAngle/, 'warp diagnostics should retain the turn between approach and exit');
+assert.match(animation, /variant % 2 \? -1 : 1/, 'warp should try both sides of each flyby object');
+assert.match(animation, /flybyTangent/, 'flyby curves should blend the incoming and outgoing headings');
 assert.match(animation, /createSmoothBezierSegment\(/, 'warp should connect flybys with smooth tangent handles');
 assert.match(animation, /getRouteMinimumDistance\(/, 'warp should verify the route stays centered on the flyby radius');
 assert.match(animation, /function routeHasContinuousHeading\(/, 'warp should reject routes with abrupt heading changes');
-assert.match(animation, /previousTangent\.dot\(tangent\) < 0\.82/, 'warp should enforce a minimum heading continuity');
+assert.match(animation, /getRouteHeadingDiagnostic\(/, 'warp should measure local heading continuity');
+assert.match(animation, /minimumDot >= 0\.82/, 'warp should reject abrupt changes in heading');
+assert.match(animation, /stopCount >= 1 && !route/, 'warp should retry with fewer stops before using a direct fallback');
+assert.match(animation, /destinationApproachStart/, 'the destination event horizon should be exempted only during final approach');
 assert.match(animation, /flybyRadius/, 'warp should keep a safe flyby radius around each object');
 assert.match(animation, /function getRouteLookTarget\(/, 'warp camera should use a route look target');
 assert.match(animation, /getTangentAtDistance/, 'warp camera should follow the distance-sampled route tangent');
@@ -165,7 +182,7 @@ assert.doesNotMatch(animation, /bankAngle/, 'warp camera should not introduce a 
 assert.match(animation, /function getRouteStopSpeedFactor\(/, 'warp should calculate a slowdown zone around stops');
 assert.match(animation, /slowdownDistance/, 'warp should use a long slowdown zone around stops');
 assert.match(animation, /routeLength \* 0\.16/, 'warp slowdown should cover a long sixteen percent route zone');
-assert.match(animation, /return 0\.24 \+ easedDistance/, 'warp should retain a controlled minimum speed through stops');
+assert.match(animation, /return 0\.62 \+ easedDistance/, 'warp should retain momentum through swing-by stops');
 assert.doesNotMatch(animation, /targetControlTarget\.copy\(loadingAnimation\.routeStopAnchors\[/, 'warp camera should not look directly at swing-by anchors');
 assert.match(animation, /routeStopProgresses/, 'warp should slow down around each swing-by stop');
 assert.match(animation, /preEntryProgress/, 'warp should stop before entering the destination galaxy');
@@ -222,19 +239,33 @@ assert.doesNotMatch(indexHtml, />宇宙テーマ</, 'cosmic option label should 
 assert.match(indexHtml, /data-bubble-visual-mode="deepSea"[^>]*>深海/, 'deep sea mode should be labelled');
 assert.match(indexHtml, /data-bubble-visual-mode="data"[^>]*>データ空間/, 'data space mode should be labelled');
 assert.match(indexHtml, /data-view-mode="3d"[^>]*aria-pressed="true"/, '3D exploration should be the default');
-assert.match(indexHtml, /data-view-mode="2d"/, 'a flat camera exploration mode should be selectable');
+assert.match(indexHtml, /data-view-mode="2d"/, 'a dedicated 2D exploration mode should be selectable');
 assert.match(events, /localStorage\.setItem\('bubblebreaker\.viewMode'/, 'the selected exploration view should persist');
-assert.match(scene, /const flatFieldOfView = 22;/, '2D mode should reduce perspective with a narrow field of view');
-assert.match(scene, /controls\.enableRotate = !isFlat;/, '2D mode should lock camera rotation');
-assert.match(animation, /explorationViewMode === '2d' \? worldUp : forward/, '2D keyboard movement should remain in the screen plane');
+assert.match(indexHtml, /id="exploration-2d"/, '2D mode should provide a dedicated non-WebGL exploration layer');
+assert.match(indexHtml, /id="exploration-2d-stage"/, '2D mode should provide its own SVG bubble stage');
+assert.match(indexHtml, /id="exploration-2d-loading"/, '2D mode should provide its own loading route');
+assert.match(indexHtml, /src="\.\/js\/two-d\.js"/, 'the dedicated 2D renderer should be loaded');
+assert.match(styles, /\.mode-2d #canvas-container[\s\S]*?visibility: hidden/, '2D mode should hide the WebGL scene');
+assert.match(twoDSource, /window\.renderTwoDGroup/, '2D mode should render bubble groups independently');
+assert.match(twoDSource, /window\.renderTwoDSingle/, '2D mode should render individual bubbles independently');
+assert.match(twoDSource, /window\.renderTwoDAnalysis/, '2D mode should support analysis and detail screens');
+assert.match(twoDSource, /window\.startTwoDLoadingAnimation/, '2D mode should use a dedicated loading animation');
+assert.match(twoDSource, /window\.__NGC3324_TEXTURE__/, '2D mode should retain the NGC 3324 background');
+assert.match(twoDSource, /0 0 700 1200/, '2D mode should use a portrait viewport on narrow screens');
+assert.match(styles, /\.mode-2d #panel-group[\s\S]*?max-height: 32dvh/, 'mobile 2D should leave the bubble field visible above the information panel');
+assert.match(events, /setPanelCollapsed\('panel-bgm', true, false\)/, 'mobile 2D should compact Cosmic Control without changing its saved preference');
+assert.match(animation, /if \(explorationViewMode === '2d'\)[\s\S]*?return;/, 'the 3D render loop should stop while dedicated 2D mode is active');
+assert.doesNotMatch(scene, /flatFieldOfView|flatViewDirection/, 'the removed fixed-camera pseudo-2D mode should not remain');
 assert.match(indexHtml, /id="btn-sound-toggle"/, 'sound toggle should remain available');
 const cosmicControlStart = indexHtml.indexOf('id="panel-bgm"');
 const cosmicControlEnd = indexHtml.indexOf('<audio id="bgm-audio"');
 assert.ok(cosmicControlStart >= 0 && cosmicControlEnd > cosmicControlStart, 'Cosmic Control bounds should be present');
 assert.ok(indexHtml.slice(cosmicControlStart, cosmicControlEnd).includes('id="btn-sound-toggle"'), 'sound toggle should be inside Cosmic Control');
-assert.match(indexHtml, /data-collapse-panel="panel-bgm"/, 'Cosmic Control should have a collapse control');
-assert.match(indexHtml, /aria-controls="panel-bgm-content"/, 'collapse control should identify its content');
-assert.match(indexHtml, /id="panel-bgm-content"/, 'Cosmic Control should have a collapsible content region');
+assert.match(indexHtml, /id="settings-overlay"[^>]*role="dialog"/, 'settings should open in a centered modal overlay');
+assert.match(indexHtml, /id="btn-open-settings"/, 'settings should have a consistent opener beside the title');
+assert.match(indexHtml, /id="btn-close-settings"/, 'settings modal should have an explicit close control');
+assert.match(indexHtml, /id="panel-bgm-content"/, 'settings content should remain in the dialog');
+assert.doesNotMatch(indexHtml, /data-collapse-panel="panel-bgm"/, 'settings should use modal open/close rather than a competing collapse affordance');
 assert.doesNotMatch(indexHtml.slice(cosmicControlStart, cosmicControlEnd), /data-close-panel="panel-bgm"/, 'Cosmic Control should not close as a panel');
 assert.match(indexHtml, /data-collapse-panel="panel-group"/, 'group panel should be collapsible');
 assert.match(indexHtml, /data-collapse-panel="panel-single"/, 'single panel should be collapsible');
@@ -324,9 +355,10 @@ assert.match(scene, /while \(previewChildren\.length < 5\)/, 'each parent previe
 assert.match(scene, /function createHierarchyTransitionShell\(/, 'hierarchy transitions should reveal the containing bubble boundary');
 assert.match(scene, /function getNestedGroupWorldScale\(/, 'child groups should have a stable physical scale inside their parent bubble');
 assert.match(scene, /function buildNavigationEntries\(/, 'saved navigation paths should rebuild the same nested world positions');
-const groupTransitionSource = animation.match(/function updateGroupTransition\([\s\S]*?function updateViewModeCameraTransition/)?.[0] || '';
+const groupTransitionSource = animation.match(/function updateGroupTransition\([\s\S]*?function updateGroupOverview/)?.[0] || '';
 assert.doesNotMatch(groupTransitionSource, /bubble\.mesh\.(?:scale|position)/, 'category transitions must not resize or relocate bubble objects');
 assert.match(groupTransitionSource, /camera\.position\.lerpVectors/, 'category transitions should be expressed through camera movement');
+assert.match(groupTransitionSource, /usesPortal/, 'ascending and descending transitions should share the same portal path');
 assert.doesNotMatch(styles, /exploration-background-clear/, 'exploration screens should retain the main background overlay');
 assert.doesNotMatch(scene, /setExplorationBackgroundClarity|explorationBackgroundClear/, 'exploration screens should retain the main fog path');
 assert.match(scene, /scene\.fog\.density = colors\.density/, 'background fog density should use the main implementation');
@@ -342,9 +374,16 @@ assert.match(indexHtml, /Evidence[\s\S]*Claim[\s\S]*OpenAI[\s\S]*Bubble Universe
 assert.match(styles, /\.about-overlay\s*\{[\s\S]*?overflow-y: auto/, 'the complete introduction page should scroll vertically');
 assert.match(styles, /\.about-close\s*\{[^}]*position: fixed/, 'the return-to-exploration button should remain fixed');
 assert.match(events, /function setAboutOpen\(open\)/, 'the service introduction should preserve and restore the current exploration');
+assert.match(events, /aboutOverlay\?\.addEventListener\('wheel'[\s\S]*?stopPropagation/, 'the service introduction should own mouse-wheel scrolling');
+assert.match(styles, /\.about-close\s*\{[\s\S]*?min-width: 168px/, 'the fixed return button should be large enough to operate');
 assert.match(scene, /const BUBBLE_GROUP_WORLD_SCALE = 1\.75/, 'bubble groups should have a larger world-space scale');
-assert.match(animation, /progress \/ 0\.46/, 'descending transitions should approach the parent before revealing children');
+assert.match(animation, /progress \/ 0\.5/, 'descending transitions should approach the parent before revealing children');
 assert.match(animation, /parentReveal/, 'ascending transitions should reveal the fixed parent world around the child group');
+assert.match(scene, /is-leaf-label/, 'only lowest-level bubbles should receive compact labels');
+assert.match(animation, /b\.level === 'leaf'/, 'lowest-level label projection should apply a smaller scale');
+assert.match(animation, /cosmicUpdateBucket/, 'distant cosmic systems should use staggered updates');
+assert.match(animation, /applyCachedVisualFade/, 'bubble decoration material lists should be cached');
+assert.match(animation, /packet\.startScratch/, 'data-stream animation should reuse vector objects');
 assert.match(scene, /setFromUnitVectors\(new THREE\.Vector3\(0, 0, 1\), direction\.clone\(\)\.negate\(\)\)/, 'shooting-star tails should oppose their velocity');
 assert.match(animation, /orbitVelocity/, 'comet orientation should derive from its orbital velocity');
 

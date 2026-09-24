@@ -838,10 +838,7 @@
         let groupEntryCameraDistance = 25;
         let singleViewDirection = new THREE.Vector3(0, 0, 1);
         const configuredFieldOfView = 60;
-        const flatFieldOfView = 22;
-        const flatViewDirection = new THREE.Vector3(0, 0, 1);
         let explorationViewMode = localStorage.getItem('bubblebreaker.viewMode') === '2d' ? '2d' : '3d';
-        let viewModeCameraTransition = null;
         let last3DViewDirection = new THREE.Vector3(0, 0, 1);
         const warpSpeedFactor = 1;
         const warpStopCount = 3;
@@ -849,50 +846,81 @@
         camera.updateProjectionMatrix();
 
         function getExplorationFieldOfView() {
-            return explorationViewMode === '2d' ? flatFieldOfView : configuredFieldOfView;
+            return configuredFieldOfView;
         }
 
         function getExplorationViewDirection(candidate = null) {
-            if (explorationViewMode === '2d') return flatViewDirection.clone();
             const direction = candidate ? candidate.clone() : camera.position.clone().sub(controls.target);
             if (direction.lengthSq() < 0.01 || !Number.isFinite(direction.x)) direction.copy(last3DViewDirection);
             return direction.normalize();
         }
 
         function applyExplorationViewControls() {
-            const isFlat = explorationViewMode === '2d';
-            controls.enableRotate = !isFlat;
+            controls.enableRotate = true;
             controls.enablePan = true;
-            controls.screenSpacePanning = isFlat;
+            controls.screenSpacePanning = false;
+        }
+
+        function finishHierarchyTransitionForModeSwitch() {
+            if (!transitionState) return;
+            transitionState.outgoing.forEach(disposeBubble);
+            transitionState.incoming.forEach(bubble => {
+                bubble.mesh.material.opacity = 0.95;
+                bubble.mesh.visible = true;
+            });
+            if (transitionState.shell) {
+                scene.remove(transitionState.shell);
+                disposeObjectTree(transitionState.shell);
+            }
+            transitionState = null;
+            stopZoomSound();
+        }
+
+        function restoreThreeDViewForCurrentScreen() {
+            if (!state || !currentBubbles.length) return;
+            let center = null;
+            let distance = null;
+            if (state.screen === 'GROUP') {
+                const overview = getGroupOverviewTarget(last3DViewDirection);
+                if (overview) {
+                    center = overview.center;
+                    distance = overview.cameraPosition.distanceTo(center);
+                }
+            } else if (state.bubbleId) {
+                const current = currentBubbles.find(bubble => bubble.data.id === state.bubbleId);
+                if (current) {
+                    center = current.mesh.position;
+                    const radius = current.mesh.userData.finalScale || current.mesh.scale.x;
+                    distance = state.screen === 'SINGLE' ? getSingleBubbleViewingDistance(radius) : radius * 3.5;
+                }
+            }
+            if (!center || !Number.isFinite(distance)) return;
+            camera.position.copy(center).addScaledVector(last3DViewDirection, distance);
+            controls.target.copy(center);
+            targetCameraPos.copy(camera.position);
+            targetControlTarget.copy(center);
+            camera.lookAt(center);
+            controls.update();
         }
 
         window.setExplorationViewMode = function(mode = '3d', animate = true) {
             const nextMode = mode === '2d' ? '2d' : '3d';
-            const currentTarget = controls.target.clone();
-            const currentDirection = camera.position.clone().sub(currentTarget);
-            const currentDistance = Math.max(0.05, currentDirection.length());
+            const previousMode = explorationViewMode;
+            const currentDirection = camera.position.clone().sub(controls.target);
             if (explorationViewMode === '3d' && currentDirection.lengthSq() > 0.01) last3DViewDirection.copy(currentDirection).normalize();
-            const startFov = camera.fov;
-            explorationViewMode = nextMode;
-            const endFov = getExplorationFieldOfView();
-            const endDirection = getExplorationViewDirection(last3DViewDirection);
-            const compensatedDistance = Math.max(0.05, currentDistance * Math.tan(THREE.MathUtils.degToRad(startFov / 2)) / Math.tan(THREE.MathUtils.degToRad(endFov / 2)));
-            const endPosition = currentTarget.clone().add(endDirection.multiplyScalar(compensatedDistance));
-            applyExplorationViewControls();
-            if (animate && (state.screen === 'GROUP' || state.screen === 'SINGLE')) {
-                viewModeCameraTransition = {
-                    startedAt: performance.now(), duration: 450,
-                    startPosition: camera.position.clone(), endPosition,
-                    target: currentTarget, startFov, endFov
-                };
-                controls.enabled = false;
-            } else {
-                camera.position.copy(endPosition);
-                camera.fov = endFov;
-                camera.updateProjectionMatrix();
-                controls.target.copy(currentTarget);
-                camera.lookAt(currentTarget);
+            if (nextMode === '2d') {
+                finishHierarchyTransitionForModeSwitch();
+                groupOverviewState = null;
+                isZoomingIntoGroup = false;
             }
+            explorationViewMode = nextMode;
+            camera.fov = configuredFieldOfView;
+            camera.updateProjectionMatrix();
+            if (nextMode === '3d') {
+                applyExplorationViewControls();
+                if (previousMode === '2d') restoreThreeDViewForCurrentScreen();
+            }
+            if (typeof window.syncTwoDExplorationMode === 'function') window.syncTwoDExplorationMode(nextMode, animate);
             return explorationViewMode;
         };
         window.setExplorationViewMode(explorationViewMode, false);
@@ -1978,9 +2006,6 @@
             chart.appendChild(createGroupChartElement('circle', {
                 class: 'group-composition-center', cx: centerX, cy: centerY, r: 29
             }));
-            chart.appendChild(createGroupChartElement('text', {
-                class: 'group-composition-center-value', x: centerX, y: centerY + 4, 'text-anchor': 'middle'
-            }, '100%'));
         }
 
         // 【バブル群画面】 を読み込んで表示する関数
@@ -2061,6 +2086,7 @@
             }
             groupWorldOffset.copy(nextOffset);
             groupWorldScale = nextScale;
+            const useThreeDTransition = explorationViewMode === '3d' && transitionType !== 'instant';
             updateCosmicDepthVisual(Math.max(0, navigationStack.length - 1));
             relocateGalaxyUniverse(`category:${groupId}`);
             state.groupId = groupId;
@@ -2079,6 +2105,8 @@
             // 新しいバブル群を生成して配置
             // 固定DBとAPIデータのどちらでも、球体の半径を考慮して重なりを解消する。
             ensureDistinctBubbleColors(data.bubbles);
+            const isLowestLayer = data.level === 'leaf'
+                || (Boolean(data.parentId) && !data.bubbles.some(bubble => bubble.childId && activeDB[bubble.childId]));
             data.bubbles.forEach(bData => {
                 const worldPosition = new THREE.Vector3(...bData.pos).multiplyScalar(nextScale).add(nextOffset);
                 const isFocus = isFocusPathBubble(data, bData);
@@ -2086,14 +2114,15 @@
                 mesh.scale.multiplyScalar(nextScale * getTypeBubbleScale(data, bData));
                 const finalRadius = mesh.scale.x;
                 mesh.userData.finalScale = finalRadius;
-                if (transitionType !== 'instant') {
+                if (useThreeDTransition) {
                     mesh.material.opacity = 0.02;
                 }
                 scene.add(mesh);
 
                 // 3Dバブルに追従させるためのHTMLラベルを作成
                 const label = document.createElement('div');
-                label.className = 'bubble-label';
+                label.className = 'bubble-label' + (isLowestLayer ? ' is-leaf-label' : '');
+                label.dataset.level = data.level || '';
                 label.innerText = bData.name;
                 // ラベルがクリックされたら、そのバブルの個別画面に飛ぶ
                 label.onclick = (e) => {
@@ -2103,10 +2132,10 @@
                 labelsContainer.appendChild(label);
 
                 // 生成したデータを配列に保存
-                currentBubbles.push({ mesh, label, data: bData, level: data.level, isFocus, baseX: mesh.position.x, baseY: mesh.position.y });
+                currentBubbles.push({ mesh, label, data: bData, level: isLowestLayer ? 'leaf' : data.level, isFocus, baseX: mesh.position.x, baseY: mesh.position.y });
             });
 
-            if (transitionType === 'instant') {
+            if (!useThreeDTransition) {
                 outgoingBubbles.forEach(disposeBubble);
             } else {
                 let shell = null;
@@ -2131,7 +2160,7 @@
                     shell,
                     anchorBubbleId: previousBubbleData && previousBubbleData.id,
                     startedAt: performance.now(),
-                    duration: transitionType === 'zoomIn' ? 1800 : transitionType === 'zoomOut' ? 1600 : 1800,
+                    duration: 1800,
                     type: transitionType
                 };
             }
@@ -2168,18 +2197,18 @@
                 transitionState.controlStart = controls.target.clone();
                 transitionState.cameraEnd = desiredCameraPosition.clone();
                 transitionState.controlEnd = groupCenter.clone();
-                if (transitionState.type === 'zoomIn' && transitionState.shell) {
+                if (transitionState.shell) {
                     const limitingFov = Math.min(
                         THREE.MathUtils.degToRad(camera.fov),
                         2 * Math.atan(Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2) * Math.max(0.5, camera.aspect))
                     );
                     const shellCenter = transitionState.shell.position.clone();
                     const shellRadius = transitionState.shell.userData.baseScale || transitionState.shell.scale.x;
-                    transitionState.diveCamera = shellCenter.clone().add(preservedViewDirection.clone().multiplyScalar(Math.max(0.05, shellRadius / Math.sin(limitingFov / 2) * 0.9)));
-                    transitionState.diveTarget = shellCenter;
+                    transitionState.portalCamera = shellCenter.clone().add(preservedViewDirection.clone().multiplyScalar(Math.max(0.05, shellRadius / Math.sin(limitingFov / 2) * 0.68)));
+                    transitionState.portalTarget = shellCenter;
                 }
             }
-            if (isAfterDive) {
+            if (isAfterDive && explorationViewMode === '3d') {
                 // 銀河団の中心から中央カテゴリへ滑らかに接近する。
                 controls.enabled = false;
                 camera.position.copy(groupCenter).add(preservedViewDirection.clone().multiplyScalar(Math.max(70, viewingDistance * 2.8)));
@@ -2187,11 +2216,11 @@
                 isZoomingIntoGroup = true;
                 groupEntryCameraDistance = viewingDistance;
             } else {
-                controls.enabled = transitionType === 'instant';
-                if (transitionType === 'instant') camera.position.copy(desiredCameraPosition);
+                controls.enabled = explorationViewMode === '3d' && !useThreeDTransition;
+                if (!useThreeDTransition) camera.position.copy(desiredCameraPosition);
                 targetCameraPos.copy(desiredCameraPosition);
                 groupEntryCameraDistance = viewingDistance;
-                if (transitionType === 'instant') stopZoomSound();
+                if (!useThreeDTransition) stopZoomSound();
             }
             // 個別バブルから戻るときも、正面へリセットせず元の視線方向を維持する。
             controls.target.copy(groupCenter);
@@ -2199,6 +2228,7 @@
             controls.update();
             
             // 画面UIをバブル群画面(GROUP)に切り替え
+            if (typeof window.renderTwoDGroup === 'function') window.renderTwoDGroup(data, transitionType);
             switchScreen('GROUP');
             if (typeof window.scheduleCurrentBubbleSessionSave === 'function') window.scheduleCurrentBubbleSessionSave('group-navigation');
             showToast(`${groupDisplayTitle} の宇宙を観測中`);
@@ -2246,6 +2276,7 @@
                 activeBubbleId: bubbleData.id
             });
 
+            if (typeof window.renderTwoDSingle === 'function') window.renderTwoDSingle(bubbleData, state.groupData);
             switchScreen('SINGLE');
             showToast(`個別バブル「${bubbleData.name}」にズームしました`);
         }
@@ -2363,18 +2394,79 @@
 
         function appendDetailImages(container, imageIds, imageMap) {
             const images = Array.from(new Set(Array.isArray(imageIds) ? imageIds.map(String) : [])).map(id => imageMap.get(id)).filter(Boolean);
-            if (!images.length) return;
+            if (!images.length) return null;
             const gallery = createDetailElement('div', 'detail-image-gallery');
             images.forEach(image => {
                 const figure = createDetailImageFigure(image);
                 if (figure) gallery.appendChild(figure);
             });
             if (gallery.childElementCount) container.appendChild(gallery);
+            return gallery;
+        }
+
+        function imageSearchStatusText(panelId) {
+            const detailResearch = state.bubbleData && state.bubbleData.detailResearch;
+            const query = detailResearch && Array.isArray(detailResearch.imageQueries)
+                ? detailResearch.imageQueries.find(item => item.panelId === panelId) : null;
+            if (!query) return 'このパネル用の画像検索結果は保存されていません。画像検索の利用状況を確認してください。';
+            if (query.status === 'failed') {
+                const details = [query.errorCode, query.errorStatus ? `HTTP ${query.errorStatus}` : null].filter(Boolean).join(' / ');
+                return `関連画像を取得できませんでした。Web画像検索に失敗しました${details ? `（${details}）` : ''}。`;
+            }
+            if (query.status === 'no_results') return 'Web画像検索を実行しましたが、出典ページを確認できる関連画像は見つかりませんでした。';
+            return '検索結果に含まれる画像を読み込めませんでした。画像URLが期限切れ、または配信元が外部表示を許可していない可能性があります。';
+        }
+
+        function appendPanelImages(container, imageIds, imageMap, panelId) {
+            const requested = Array.from(new Set(Array.isArray(imageIds) ? imageIds.map(String) : []))
+                .map(id => imageMap.get(id)).filter(image => image && (!Array.isArray(image.panelIds) || image.panelIds.includes(panelId)));
+            const candidates = requested.length ? requested : [...imageMap.values()].filter(image => !Array.isArray(image.panelIds) || image.panelIds.includes(panelId)).slice(0, 2);
+            const wrap = createDetailElement('div', 'detail-panel-image-section');
+            const gallery = createDetailElement('div', 'detail-image-gallery');
+            candidates.forEach(image => {
+                const figure = createDetailImageFigure(image);
+                if (!figure) return;
+                const visual = figure.querySelector('img');
+                visual?.addEventListener('error', () => {
+                    window.setTimeout(() => {
+                        if (!gallery.querySelector('.detail-image-card')) {
+                            status.hidden = false;
+                            status.textContent = imageSearchStatusText(panelId);
+                        }
+                    }, 0);
+                });
+                gallery.appendChild(figure);
+            });
+            const status = createDetailElement('p', 'detail-image-unavailable', imageSearchStatusText(panelId));
+            status.hidden = gallery.childElementCount > 0;
+            if (gallery.childElementCount) wrap.appendChild(gallery);
+            wrap.appendChild(status);
+            container.appendChild(wrap);
+            return gallery.childElementCount > 0;
         }
 
         function renderOverviewDetail(container, section, sourceMap, imageMap) {
-            container.appendChild(createDetailElement('p', 'detail-summary', section.summary));
-            appendDetailImages(container, section.imageIds, imageMap);
+            const overview = createDetailElement('section', 'detail-overview-section');
+            overview.appendChild(createDetailElement('h3', '', 'このバブルを理解する'));
+            overview.appendChild(createDetailElement('p', 'detail-summary', section.summary));
+            appendPanelImages(overview, section.imageIds, imageMap, 'overview');
+            const research = state.bubbleData && state.bubbleData.detailResearch;
+            const claims = research && Array.isArray(research.claims) ? research.claims.slice(0, 4) : [];
+            if (claims.length) {
+                overview.appendChild(createDetailElement('h3', '', '根拠から見える要点'));
+                const points = createDetailElement('ul', 'detail-overview-points');
+                const statusLabels = { supported: '複数の根拠で支持', mixed: '支持と反証が混在', uncertain: '根拠が限定的', unsupported: '裏付け未確認' };
+                claims.forEach(claim => {
+                    const item = createDetailElement('li', 'detail-overview-claim');
+                    item.appendChild(createDetailElement('strong', 'detail-claim-status', statusLabels[claim.verification && claim.verification.status] || '検証結果'));
+                    item.appendChild(createDetailElement('p', '', claim.text));
+                    appendDetailSourceLinks(item, (claim.assessments || []).map(assessment => assessment.sourceId), sourceMap, '照合した情報源');
+                    points.appendChild(item);
+                });
+                overview.appendChild(points);
+                overview.appendChild(createDetailElement('p', 'detail-data-note', 'ここに表示する要点は、今回収集した情報源の主張照合結果です。真実性の保証ではありません。'));
+            }
+            container.appendChild(overview);
             appendDetailSourceLinks(container, section.sourceIds, sourceMap, '概要の参照ソース');
         }
 
@@ -2389,21 +2481,41 @@
         function createTimelineYearScale(events) {
             const eventYears = events.map(getTimelineEventYear).filter(Number.isFinite);
             if (!eventYears.length) return { start: 0, end: Math.max(1, events.length - 1), interval: 1, ticks: [], hasYears: false };
-            const minimum = Math.min(...eventYears);
-            const maximum = Math.max(...eventYears);
-            const rawSpan = Math.max(1, maximum - minimum);
-            const intervalOptions = [1, 2, 5, 10, 20, 50, 100, 200];
-            const interval = intervalOptions.find(value => rawSpan / value <= 6) || 500;
-            let start = Math.floor(minimum / interval) * interval;
-            let end = Math.ceil(maximum / interval) * interval;
-            if (start === end) { start -= interval; end += interval; }
-            const ticks = [];
-            for (let year = start; year <= end; year += interval) ticks.push(year);
-            return { start, end, interval, ticks, hasYears: true };
+            const years = Array.from(new Set(eventYears)).sort((left, right) => left - right);
+            if (years.length === 1) return { start: years[0] - 1, end: years[0] + 1, ticks: years, hasYears: true, positionFor: () => 0.5, breaks: [] };
+            const gaps = years.slice(1).map((year, index) => year - years[index]).filter(gap => gap > 0).sort((a, b) => a - b);
+            const medianGap = gaps[Math.floor(gaps.length / 2)] || 1;
+            const longGapThreshold = Math.max(12, Math.min(50, medianGap * 3));
+            const positions = new Map([[years[0], 0]]);
+            const breaks = [];
+            let compressedEnd = 0;
+            years.slice(1).forEach((year, index) => {
+                const previousYear = years[index];
+                const actualGap = year - previousYear;
+                const isLongGap = actualGap > longGapThreshold;
+                const displayedGap = isLongGap ? Math.max(4, Math.min(8, medianGap * 2)) : actualGap;
+                const previousPosition = compressedEnd;
+                compressedEnd += displayedGap;
+                positions.set(year, compressedEnd);
+                if (isLongGap) breaks.push({ from: previousYear, to: year, position: (previousPosition + compressedEnd) / 2 });
+            });
+            const stride = Math.max(1, Math.ceil(years.length / 6));
+            const ticks = years.filter((_, index) => index === 0 || index === years.length - 1 || index % stride === 0);
+            const positionFor = year => {
+                if (positions.has(year)) return positions.get(year);
+                let rightIndex = years.findIndex(item => item > year);
+                if (rightIndex <= 0) return year < years[0] ? 0 : compressedEnd;
+                const leftYear = years[rightIndex - 1];
+                const rightYear = years[rightIndex];
+                const ratio = (year - leftYear) / Math.max(1, rightYear - leftYear);
+                return positions.get(leftYear) + (positions.get(rightYear) - positions.get(leftYear)) * ratio;
+            };
+            return { start: 0, end: Math.max(1, compressedEnd), ticks, hasYears: true, positionFor, breaks };
         }
 
         function renderHistoryDetail(container, section, sourceMap, imageMap) {
             container.appendChild(createDetailElement('p', 'detail-summary', section.summary));
+            appendPanelImages(container, section.imageIds, imageMap, 'history');
             if (!section.events.length) {
                 container.appendChild(createDetailElement('div', 'detail-empty-state', '根拠付きの時系列イベントを確認できませんでした。'));
                 appendDetailSourceLinks(container, section.sourceIds, sourceMap, '形成史の参照ソース');
@@ -2413,19 +2525,28 @@
             timeline.setAttribute('aria-label', 'バブル形成の時系列');
             timeline.tabIndex = 0;
             const scale = createTimelineYearScale(section.events);
-            const trackWidth = Math.max(920, section.events.length * 330, scale.ticks.length * 190);
+            const trackWidth = Math.max(920, section.events.length * 330, scale.ticks.length * 190, (scale.breaks || []).length * 170 + 920);
             const horizontalPadding = 120;
             const track = createDetailElement('div', 'detail-timeline-track');
             track.style.width = `${trackWidth}px`;
             const axis = createDetailElement('div', 'detail-timeline-axis');
+            axis.style.left = `${horizontalPadding}px`;
+            axis.style.right = `${horizontalPadding}px`;
             if (scale.hasYears) {
                 scale.ticks.forEach(year => {
-                    const ratio = (year - scale.start) / Math.max(1, scale.end - scale.start);
+                    const ratio = scale.positionFor(year) / Math.max(1, scale.end - scale.start);
                     const tick = createDetailElement('div', 'detail-timeline-tick');
-                    tick.style.left = `${horizontalPadding + ratio * (trackWidth - horizontalPadding * 2)}px`;
+                    tick.style.left = `${ratio * (trackWidth - horizontalPadding * 2)}px`;
                     tick.appendChild(createDetailElement('span', 'detail-timeline-tick-mark'));
                     tick.appendChild(createDetailElement('time', 'detail-timeline-tick-label', `${year}年`));
                     axis.appendChild(tick);
+                });
+                (scale.breaks || []).forEach(gap => {
+                    const marker = createDetailElement('span', 'detail-timeline-break', '~~~~');
+                    marker.style.left = `${(gap.position / Math.max(1, scale.end - scale.start)) * (trackWidth - horizontalPadding * 2)}px`;
+                    marker.title = `${gap.from}年から${gap.to}年の間に、今回確認できる根拠付きイベントがありません`;
+                    marker.setAttribute('aria-label', marker.title);
+                    axis.appendChild(marker);
                 });
             }
             track.appendChild(axis);
@@ -2433,7 +2554,7 @@
             section.events.forEach((event, index) => {
                 const year = getTimelineEventYear(event);
                 const baseRatio = scale.hasYears && Number.isFinite(year)
-                    ? (year - scale.start) / Math.max(1, scale.end - scale.start)
+                    ? scale.positionFor(year) / Math.max(1, scale.end - scale.start)
                     : (index + 0.5) / Math.max(1, section.events.length);
                 const lane = index % 2;
                 const naturalX = horizontalPadding + Math.max(0, Math.min(1, baseRatio)) * (trackWidth - horizontalPadding * 2);
@@ -2460,40 +2581,84 @@
             container.appendChild(timeline);
         }
 
+        function createEvidenceCompositionChart(segments) {
+            const colors = ['#48e5ff', '#f6c85f', '#9b8cff', '#ff7f91', '#63d69f', '#f39c5a', '#6fa8ff', '#95a3b8'];
+            const usable = segments.map(segment => ({ ...segment, rawValue: Math.max(0, Number(segment.value) || 0) })).filter(segment => segment.rawValue > 0);
+            const total = usable.reduce((sum, segment) => sum + segment.rawValue, 0);
+            const chart = createGroupChartElement('svg', { class: 'group-composition-chart detail-evidence-composition-chart', viewBox: '0 0 360 250', role: 'img' });
+            chart.setAttribute('aria-label', usable.map(segment => `${segment.label} ${Math.round(segment.rawValue / total * 100)}%`).join('、'));
+            chart.appendChild(createGroupChartElement('title', {}, '今回収集した独立Evidence群の構成割合'));
+            const centerX = 180; const centerY = 125; const radius = 55; const outerRadius = 73;
+            chart.appendChild(createGroupChartElement('circle', { class: 'group-composition-track', cx: centerX, cy: centerY, r: radius }));
+            let cursor = 0;
+            const labels = usable.map((segment, index) => {
+                const value = segment.rawValue / total * 100;
+                const midpoint = cursor + value / 2;
+                const angle = (midpoint * 3.6 - 90) * Math.PI / 180;
+                const item = { segment, value, color: colors[index % colors.length], cursor, angle, side: Math.cos(angle) >= 0 ? 'right' : 'left', targetY: centerY + Math.sin(angle) * 92, labelY: centerY };
+                cursor += value;
+                return item;
+            });
+            distributeGroupChartLabels(labels.filter(item => item.side === 'left'));
+            distributeGroupChartLabels(labels.filter(item => item.side === 'right'));
+            labels.forEach(item => {
+                chart.appendChild(createGroupChartElement('circle', {
+                    class: 'group-composition-slice detail-evidence-slice', cx: centerX, cy: centerY, r: radius,
+                    pathLength: 100, 'stroke-dasharray': `${item.value} ${100 - item.value}`,
+                    'stroke-dashoffset': -item.cursor, stroke: item.color, transform: `rotate(-90 ${centerX} ${centerY})`
+                }));
+                const labelRadius = item.value < 7 ? 43 : 55;
+                chart.appendChild(createGroupChartElement('text', {
+                    class: 'group-composition-segment-value', x: centerX + Math.cos(item.angle) * labelRadius,
+                    y: centerY + Math.sin(item.angle) * labelRadius + 3, 'text-anchor': 'middle', 'aria-hidden': 'true',
+                    style: item.value < 5 ? 'font-size:7px' : item.value < 9 ? 'font-size:8px' : ''
+                }, `${Math.round(item.value)}%`));
+                const rightSide = item.side === 'right';
+                const startX = centerX + Math.cos(item.angle) * outerRadius;
+                const startY = centerY + Math.sin(item.angle) * outerRadius;
+                const elbowX = rightSide ? 238 : 122;
+                const labelEdgeX = rightSide ? 252 : 108;
+                chart.appendChild(createGroupChartElement('polyline', {
+                    class: 'group-composition-leader', points: `${startX.toFixed(1)},${startY.toFixed(1)} ${elbowX},${item.labelY.toFixed(1)} ${labelEdgeX},${item.labelY.toFixed(1)}`, stroke: item.color
+                }));
+                chart.appendChild(createGroupChartElement('circle', { class: 'group-composition-endpoint', cx: labelEdgeX, cy: item.labelY, r: 3.5, fill: item.color }));
+                const label = createGroupChartElement('g', { class: 'group-composition-label-button detail-evidence-label', 'aria-label': `${item.segment.label} ${Math.round(item.value)}%` });
+                const labelX = rightSide ? 252 : 4;
+                label.appendChild(createGroupChartElement('rect', { x: labelX, y: item.labelY - 16, width: 104, height: 32, rx: 8 }));
+                const name = Array.from(String(item.segment.label || '不明'));
+                label.appendChild(createGroupChartElement('text', { x: labelX + 52, y: item.labelY + 4, 'text-anchor': 'middle' }, name.length > 9 ? `${name.slice(0, 8).join('')}…` : name.join('')));
+                chart.appendChild(label);
+            });
+            chart.appendChild(createGroupChartElement('circle', { class: 'group-composition-center', cx: centerX, cy: centerY, r: 29 }));
+            return chart;
+        }
+
         function renderDemographicDetail(container, section, sourceMap, imageMap) {
             container.appendChild(createDetailElement('p', 'detail-summary', section.summary));
             const segments = Array.isArray(section.segments) && section.segments.length
                 ? section.segments
                 : (state.bubbleData.detailResearch && Array.isArray(state.bubbleData.detailResearch.sourceComposition) ? state.bubbleData.detailResearch.sourceComposition : []);
             if (segments.length) {
-                const colors = ['#48e5ff', '#f6c85f', '#9b8cff', '#ff7f91', '#63d69f', '#f39c5a', '#6fa8ff', '#95a3b8'];
-                let cursor = 0;
-                const stops = segments.map((segment, index) => {
-                    const start = cursor;
-                    cursor = Math.min(100, cursor + Math.max(0, Number(segment.value) || 0));
-                    return `${colors[index % colors.length]} ${start}% ${cursor}%`;
-                });
                 const chartLayout = createDetailElement('div', 'detail-composition-layout');
-                const chart = createDetailElement('div', 'detail-pie-chart');
-                chart.style.background = `conic-gradient(${stops.join(', ')})`;
-                chart.setAttribute('role', 'img');
-                chart.setAttribute('aria-label', segments.map(segment => `${segment.label} ${segment.value}%`).join('、'));
-                chart.appendChild(createDetailElement('span', 'detail-pie-center', 'Evidence'));
+                chartLayout.appendChild(createEvidenceCompositionChart(segments));
                 const legend = createDetailElement('div', 'detail-pie-legend');
+                const palette = ['#48e5ff', '#f6c85f', '#9b8cff', '#ff7f91', '#63d69f', '#f39c5a', '#6fa8ff', '#95a3b8'];
+                const total = segments.reduce((sum, segment) => sum + Math.max(0, Number(segment.value) || 0), 0) || 1;
                 segments.forEach((segment, index) => {
                     const item = createDetailElement('div', 'detail-pie-legend-item');
                     const swatch = createDetailElement('span', 'detail-pie-swatch');
-                    swatch.style.backgroundColor = colors[index % colors.length];
-                    item.append(swatch, createDetailElement('span', 'detail-pie-label', segment.label), createDetailElement('strong', '', `${segment.value}%`), createDetailElement('small', '', `${segment.count}独立群`));
+                    swatch.style.backgroundColor = palette[index % palette.length];
+                    const share = Math.round(Math.max(0, Number(segment.value) || 0) / total * 100);
+                    item.append(swatch, createDetailElement('span', 'detail-pie-label', segment.label), createDetailElement('strong', '', `${share}%`), createDetailElement('small', '', `${segment.count}独立群`));
                     legend.appendChild(item);
                 });
-                chartLayout.append(chart, legend);
+                chartLayout.appendChild(legend);
                 container.appendChild(chartLayout);
             } else {
                 container.appendChild(createDetailElement('div', 'detail-empty-state', '円グラフを作成できる情報源データがありません。'));
             }
             container.appendChild(createDetailElement('p', 'detail-data-note', 'この割合は今回収集した独立Evidence群の内訳であり、社会全体の世論や利用者属性の割合ではありません。'));
-            appendDetailImages(container, section.imageIds, imageMap);
+            appendPanelImages(container, section.imageIds, imageMap, 'demographic');
             appendDetailSourceLinks(container, section.sourceIds, sourceMap, '構成分析の参照ソース');
         }
 
@@ -2517,12 +2682,44 @@
         }
 
         function renderEvaluationDetail(container, section, sourceMap, imageMap) {
-            const comparison = createDetailElement('div', 'detail-perspective-grid');
-            comparison.append(
-                createPerspectivePanel('反対派の意見', section.opposition, 'opposition', sourceMap, imageMap),
-                createPerspectivePanel('賛成派の意見', section.support, 'support', sourceMap, imageMap)
-            );
-            container.appendChild(comparison);
+            const transcript = createDetailElement('div', 'detail-conversation');
+            transcript.setAttribute('aria-label', '賛成側と反対側の根拠に基づく主張のやり取り');
+            let turns = Array.isArray(section.conversation) ? section.conversation.filter(turn => turn && turn.text) : [];
+            const hasEvidenceConversation = turns.length > 0;
+            if (!hasEvidenceConversation) {
+                transcript.appendChild(createDetailElement('p', 'detail-conversation-note', '保存済み分析の主張を左右交互に表示しています。元データに発言への応答関係は記録されていません。'));
+                turns = [];
+                const opposition = section.opposition && section.opposition.comments || [];
+                const support = section.support && section.support.comments || [];
+                const maxTurns = Math.min(6, Math.max(opposition.length, support.length) * 2);
+                for (let index = 0; index < maxTurns; index += 1) {
+                    const side = index % 2 === 0 ? 'opposition' : 'support';
+                    const item = (side === 'opposition' ? opposition : support)[Math.floor(index / 2)];
+                    if (item) turns.push({ id: `legacy-${index}`, side, text: item.text, sourceIds: item.sourceIds || [], respondsTo: null });
+                }
+            }
+            const priorTurns = new Map();
+            turns.slice(0, 6).forEach(turn => {
+                const side = turn.side === 'support' ? 'support' : 'opposition';
+                const turnNode = createDetailElement('article', `detail-conversation-turn is-${side}`);
+                turnNode.appendChild(createDetailElement('div', 'detail-conversation-label', side === 'support' ? '賛成側の主張' : '反対側の主張'));
+                const reply = turn.respondsTo && priorTurns.get(String(turn.respondsTo));
+                if (hasEvidenceConversation && reply) {
+                    const excerpt = Array.from(reply.text).slice(0, 44).join('');
+                    turnNode.appendChild(createDetailElement('div', 'detail-comment-reply-context', `「${excerpt}${Array.from(reply.text).length > 44 ? '…' : ''}」への応答`));
+                }
+                const comment = createDetailElement('div', `detail-comment detail-comment-${side}`);
+                comment.appendChild(createDetailElement('p', '', turn.text));
+                appendDetailSourceLinks(comment, turn.sourceIds, sourceMap, 'この主張を支える情報源');
+                turnNode.appendChild(comment);
+                transcript.appendChild(turnNode);
+                priorTurns.set(String(turn.id), turn);
+            });
+            if (!turns.length) transcript.appendChild(createDetailElement('div', 'detail-empty-state', '比較できる根拠付きの意見を確認できませんでした。'));
+            container.appendChild(transcript);
+            appendPanelImages(container, section.imageIds, imageMap, 'evaluation');
+            const sourceIds = [...new Set([...(section.opposition.sourceIds || []), ...(section.support.sourceIds || []), ...turns.flatMap(turn => turn.sourceIds || [])])];
+            appendDetailSourceLinks(container, sourceIds, sourceMap, '内外からの意見の参照ソース');
         }
 
         // 【解析バブル詳細表示画面】(一番最後の詳細テキスト画面)を表示する関数
