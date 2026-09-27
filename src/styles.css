@@ -525,10 +525,16 @@
         .exploration-panel { min-height: 0; transition: width 220ms ease, max-height 220ms ease, padding 220ms ease, opacity 200ms ease, transform 260ms ease, visibility 200ms ease; }
 
         .input-screen {
-            background: radial-gradient(circle at 50% 46%, rgba(26, 69, 137, 0.17), transparent 42%), linear-gradient(180deg, rgba(1, 5, 16, 0.24), rgba(1, 5, 16, 0.72));
+            background:
+                radial-gradient(ellipse at 50% 48%, rgba(27, 72, 150, 0.2), transparent 46%),
+                radial-gradient(circle at 17% 23%, rgba(255, 255, 255, 0.78) 0 1px, transparent 1.6px) 0 0 / 137px 119px,
+                radial-gradient(circle at 73% 68%, rgba(144, 205, 255, 0.58) 0 1px, transparent 1.7px) 0 0 / 181px 167px,
+                linear-gradient(180deg, rgba(1, 5, 16, 0.24), rgba(1, 5, 16, 0.68)),
+                url("./assets/ngc-3324-nircam-clean-4000.png") center / cover no-repeat,
+                #050918;
         }
         #screen-input.warp-haze-active {
-            background: rgba(1, 5, 16, 0.46);
+            background-color: rgba(1, 5, 16, 0.46);
             backdrop-filter: blur(8px) saturate(0.78);
             -webkit-backdrop-filter: blur(8px) saturate(0.78);
         }
@@ -1056,7 +1062,7 @@
 .input-history-button:hover, .api-key-history-button:hover { border-color: #65dcff; background: rgba(24, 66, 94, .96); }
 
 .api-key-overlay, .saved-explorations-overlay, .first-run-guide { position: fixed; inset: 0; display: grid; place-items: center; padding: 24px; pointer-events: auto; }
-.api-key-overlay { z-index: 130; background: rgba(1, 5, 16, .82); backdrop-filter: blur(12px); }
+.api-key-overlay { z-index: 130; background: rgba(1, 5, 16, .58); backdrop-filter: blur(8px); }
 .api-key-overlay[hidden], .saved-explorations-overlay[hidden], .first-run-guide[hidden], .voyage-panel[hidden] { display: none; }
 .api-key-card { width: min(550px, 94vw); padding: clamp(24px, 4vw, 42px); border: 1px solid rgba(104, 196, 255, .42); border-radius: 22px; background: var(--ui-panel-strong); box-shadow: 0 28px 100px rgba(0, 0, 0, .58); }
 .api-key-card h2 { margin: 8px 0 10px; color: #f7fbff; font-size: clamp(24px, 3vw, 33px); }
@@ -1084,7 +1090,7 @@
 .saved-exploration-restore { color: white; border: 1px solid #4a8ad1; background: #24558d; }
 .saved-exploration-delete { color: #ffd8dc; border: 1px solid rgba(212, 110, 126, .45); background: rgba(99, 30, 47, .54); }
 
-.first-run-guide { z-index: 165; background: rgba(1, 4, 15, .74); backdrop-filter: blur(8px); }
+.first-run-guide { z-index: 165; background: rgba(1, 4, 15, .46); backdrop-filter: blur(5px); }
 .first-run-guide-card { position: relative; width: min(720px, 94vw); min-height: min(620px, 88dvh); padding: clamp(24px, 5vw, 52px); border: 1px solid rgba(117, 199, 255, .38); border-radius: 25px; background: radial-gradient(circle at 50% 38%, rgba(47, 87, 150, .25), transparent 44%), rgba(4, 10, 26, .97); text-align: center; overflow: hidden; }
 .guide-progress { position: relative; z-index: 1; display: flex; align-items: center; gap: 12px; color: #adc0d9; text-align: left; font-size: 12px; }
 .guide-progress > div { height: 5px; flex: 1; overflow: hidden; border-radius: 99px; background: #202c42; }
