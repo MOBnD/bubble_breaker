@@ -32,7 +32,7 @@ try {
     if (error.code !== 'ENOENT') throw error;
 }
 
-const model = String(process.env.OPENAI_MODEL || env.OPENAI_MODEL || 'gpt-5.6-luna').trim() || 'gpt-5.6-luna';
+const model = String(process.env.OPENAI_MODEL || env.OPENAI_MODEL || 'gpt-6-luna').trim() || 'gpt-6-luna';
 const source = await readFile(sourcePath, 'utf8');
 const styles = await readFile(path.join(sourceDir, 'styles.css'), 'utf8');
 const ngc3324Image = await readFile(path.join(sourceDir, 'assets', 'ngc-3324-nircam-clean-4000.png'));
@@ -48,7 +48,7 @@ const inlinedSource = source
 if (scriptIndex !== scripts.length) throw new Error('Not all local application scripts were inlined.');
 const output = inlinedSource
     .replace('window.__OPENAI_API_KEY__ = "__OPENAI_API_KEY__";', 'window.__OPENAI_API_KEY__ = "";')
-    .replace('window.__OPENAI_MODEL__ = "gpt-5.6-luna";', `window.__OPENAI_MODEL__ = ${JSON.stringify(model)};`)
+    .replace('window.__OPENAI_MODEL__ = "gpt-6-luna";', `window.__OPENAI_MODEL__ = ${JSON.stringify(model)};`)
     .replace('window.__NGC3324_TEXTURE__ = "./assets/ngc-3324-nircam-clean-4000.png";', `window.__NGC3324_TEXTURE__ = ${JSON.stringify(ngc3324Texture)};`);
 
 await mkdir(outputDir, { recursive: true });

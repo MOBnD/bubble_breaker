@@ -1,7 +1,7 @@
         const OPENAI_GROUP_TYPES = ['分散型', '一極集中型', '多極型', '双極対立型', '階層型', '連鎖型'];
         const OPENAI_GROUP_TYPE_GUIDANCE = `typeは次の6種類から、バブルの支持分布に最も合うものを1つ選んでください: 分散型（均等に散らばる）、一極集中型（最大勢力が1つ）、多極型（3つ以上の勢力）、双極対立型（2つの対立勢力）、階層型（上位から下位へ段階的）、連鎖型（隣接関係・流れが重要）。`;
         const OPENAI_GROUP_LEVELS = ['root', 'central', 'leaf'];
-        const OPENAI_MODEL = window.__OPENAI_MODEL__ || 'gpt-5.6-luna';
+        const OPENAI_MODEL = window.__OPENAI_MODEL__ || 'gpt-6-luna';
         function normalizeRuntimeApiKey(value) {
             const normalized = String(value || '').trim();
             return normalized && normalized !== '__OPENAI_API_KEY__' && normalized !== 'your_api_key_here' ? normalized : '';

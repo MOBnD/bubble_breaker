@@ -35,10 +35,10 @@ Copy-Item .env.example .env
 `.env`を編集し、モデル名を必要に応じて設定します。APIキーは公開HTMLへ埋め込まず、起動後に画面から入力します。
 
 ```dotenv
-OPENAI_MODEL=gpt-5.6-luna
+OPENAI_MODEL=gpt-6-luna
 ```
 
-`OPENAI_MODEL`は省略可能です。省略時は`gpt-5.6-luna`を使用します。
+`OPENAI_MODEL`は省略可能です。省略時は`gpt-6-luna`を使用します。
 
 環境変数を変更した場合は、必要に応じて`npm run build`を再実行してください。ブラウザで開くファイルは分割ソースの`src/index.html`ではなく、ビルド後の`dist/bb_proto4.html`です。
 
