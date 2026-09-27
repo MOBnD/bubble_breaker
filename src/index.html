@@ -14,6 +14,15 @@
         // The API key is entered in the app and kept only in page memory.
         window.__OPENAI_API_KEY__ = "__OPENAI_API_KEY__";
         window.__OPENAI_MODEL__ = "gpt-6-luna";
+        // Recover legacy display preferences once so the 3D cosmos is visible again.
+        (() => {
+            const recoveryKey = 'bubblebreaker.visualDefaultsRestored.v1';
+            if (localStorage.getItem(recoveryKey) === 'done') return;
+            localStorage.setItem('bubblebreaker.viewMode', '3d');
+            localStorage.setItem('bubblebreaker.backgroundTheme', 'space');
+            localStorage.setItem('bubblebreaker.ngc3324', 'on');
+            localStorage.setItem(recoveryKey, 'done');
+        })();
         window.__NGC3324_TEXTURE__ = new URL("./assets/ngc-3324-nircam-clean-4000.png", document.baseURI).href;
     </script>
 
