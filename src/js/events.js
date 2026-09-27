@@ -267,7 +267,10 @@
             const header = document.querySelector('.brand-hud');
             const loading = Boolean(window.__bubbleBreakerLoading || isDiving);
             const headerVisible = ['INPUT', 'GROUP'].includes(screenName) || loading;
-            if (header) header.classList.toggle('chrome-hidden', !headerVisible);
+            if (header) {
+                header.classList.toggle('chrome-hidden', !headerVisible);
+                header.classList.toggle('chrome-topmost', headerVisible);
+            }
             if (hintPanel) {
                 hintPanel.classList.toggle('hint-is-closed', !hintVisible);
                 document.getElementById('btn-open-hint').hidden = hintVisible;

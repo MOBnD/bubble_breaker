@@ -525,13 +525,26 @@
         .exploration-panel { min-height: 0; transition: width 220ms ease, max-height 220ms ease, padding 220ms ease, opacity 200ms ease, transform 260ms ease, visibility 200ms ease; }
 
         .input-screen {
+            isolation: isolate;
+            background: linear-gradient(180deg, rgba(1, 5, 16, 0.12), rgba(1, 5, 16, 0.4));
+        }
+        .input-screen::before {
+            content: "";
+            position: absolute;
+            inset: 0;
+            z-index: 0;
+            pointer-events: none;
+            opacity: 0.26;
             background:
-                radial-gradient(ellipse at 50% 48%, rgba(27, 72, 150, 0.2), transparent 46%),
-                radial-gradient(circle at 17% 23%, rgba(255, 255, 255, 0.78) 0 1px, transparent 1.6px) 0 0 / 137px 119px,
-                radial-gradient(circle at 73% 68%, rgba(144, 205, 255, 0.58) 0 1px, transparent 1.7px) 0 0 / 181px 167px,
-                linear-gradient(180deg, rgba(1, 5, 16, 0.24), rgba(1, 5, 16, 0.68)),
+                radial-gradient(ellipse at 50% 48%, rgba(27, 72, 150, 0.4), transparent 46%),
+                radial-gradient(circle at 17% 23%, rgba(255, 255, 255, 0.86) 0 1px, transparent 1.6px) 0 0 / 137px 119px,
+                radial-gradient(circle at 73% 68%, rgba(144, 205, 255, 0.68) 0 1px, transparent 1.7px) 0 0 / 181px 167px,
                 url("./assets/ngc-3324-nircam-clean-4000.png") center / cover no-repeat,
                 #050918;
+        }
+        .input-screen .portal-panel { position: relative; z-index: 1; }
+        .brand-hud.chrome-topmost {
+            z-index: 180;
         }
         #screen-input.warp-haze-active {
             background-color: rgba(1, 5, 16, 0.46);
