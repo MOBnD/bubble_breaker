@@ -2061,20 +2061,19 @@
         };
 
         window.getBubbleNavigationPath = function() {
-            const path = navigationStack.map(entry => entry.groupId).filter(groupId => activeDB && activeDB[groupId]);
-            if (state.groupId && activeDB && activeDB[state.groupId] && !path.includes(state.groupId)) path.push(state.groupId);
-            return path;
+            if (activeDB && state.groupId && activeDB[state.groupId]) {
+                return getRestorableGroupPath(state.groupId).map(group => group.id);
+            }
+            return navigationStack.map(entry => entry.groupId).filter(groupId => activeDB && activeDB[groupId]);
         };
 
         window.restoreBubbleNavigationPath = function(savedPath, lastGroupId) {
-            const candidates = Array.isArray(savedPath) ? savedPath.map(String) : [];
-            const path = [];
-            candidates.forEach(groupId => {
-                if (!activeDB || !activeDB[groupId] || path.includes(groupId)) return;
-                if (path.length > 0 && activeDB[groupId].parentId !== path[path.length - 1]) return;
-                path.push(groupId);
-            });
-            if (activeDB && activeDB[lastGroupId] && !path.includes(lastGroupId)) path.push(lastGroupId);
+            const targetGroupId = activeDB && activeDB[lastGroupId]
+                ? String(lastGroupId)
+                : (Array.isArray(savedPath) ? savedPath.map(String).find(groupId => activeDB && activeDB[groupId]) : null);
+            const path = targetGroupId
+                ? getRestorableGroupPath(targetGroupId).map(group => group.id)
+                : [];
             if (path.length === 0) return [];
 
             navigationStack = buildNavigationEntries(path);
@@ -2100,6 +2099,24 @@
                 visited.add(current.id);
                 path.unshift(current);
                 current = current.parentId ? activeDB[current.parentId] : null;
+            }
+            return path;
+        }
+
+        function getRestorableGroupPath(groupId) {
+            const path = [];
+            const visited = new Set();
+            let current = activeDB && activeDB[groupId];
+            while (current && !visited.has(current.id)) {
+                visited.add(current.id);
+                path.unshift(current);
+                const declaredParent = current.parentId && activeDB[current.parentId];
+                const declaredAnchor = declaredParent && declaredParent.bubbles && declaredParent.bubbles.some(bubble => String(bubble.childId || '') === String(current.id));
+                const linkedParent = declaredAnchor
+                    ? declaredParent
+                    : Object.values(activeDB || {}).find(group => Array.isArray(group.bubbles)
+                        && group.bubbles.some(bubble => String(bubble.childId || '') === String(current.id)));
+                current = linkedParent || null;
             }
             return path;
         }

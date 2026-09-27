@@ -406,8 +406,8 @@
                 if (typeof window.restoreBubbleNavigationPath === 'function') {
                     window.restoreBubbleNavigationPath(record.navigationPath, record.lastGroupId);
                 }
-                setSavedExplorationsOpen(false);
                 loadGroup(record.lastGroupId);
+                setSavedExplorationsOpen(false);
                 window.scheduleCurrentBubbleSessionSave('restored');
                 showToast('保存したバブル宇宙を復元しました');
             } catch (error) {
