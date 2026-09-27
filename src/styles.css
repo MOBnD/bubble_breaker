@@ -1045,7 +1045,13 @@
 
 .brand-hud.is-screen-hidden { display: none; }
 .brand-hud > p { max-width: 300px; }
-.input-screen { padding: 76px 24px 28px; }
+.input-screen {
+    padding: 76px 24px 28px;
+    background:
+        radial-gradient(circle at 50% 46%, rgba(26, 69, 137, 0.17), transparent 42%),
+        linear-gradient(180deg, rgba(1, 5, 16, 0.24), rgba(1, 5, 16, 0.72));
+}
+.input-screen::before { content: none; display: none; }
 #input-panel.portal-panel {
     display: grid; grid-template-columns: minmax(0, 1fr) 174px; grid-template-areas: "copy refresh" "label refresh" "field field" "actions actions" "history history";
     gap: 15px 24px; width: min(1080px, 94vw); max-width: 1080px; min-height: 510px; padding: clamp(24px, 4vw, 54px);
