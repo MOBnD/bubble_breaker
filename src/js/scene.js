@@ -658,7 +658,9 @@
             const dome = new THREE.Mesh(
                 new THREE.SphereGeometry(70000, 128, 80),
                 new THREE.MeshBasicMaterial({
-                    color: 0xffffff,
+                    // Keep the dome dark until the photo arrives so a failed image
+                    // request can never turn the entire scene into a white sphere.
+                    color: 0x10182d,
                     side: THREE.BackSide,
                     transparent: true,
                     opacity: 0.88,
@@ -678,9 +680,19 @@
             if (textureUrl) {
                 new THREE.TextureLoader().load(textureUrl, texture => {
                     texture.encoding = THREE.sRGBEncoding;
-                    dome.material.map = softenNGC3324Seam(texture);
+                    try {
+                        dome.material.map = softenNGC3324Seam(texture);
+                    } catch (error) {
+                        // Local-file origins can block canvas pixel reads. The source
+                        // image is still usable as a texture without seam processing.
+                        console.warn('[BubbleBreaker][Cosmos] NGC 3324の境界補正を省略しました', error);
+                        dome.material.map = texture;
+                    }
                     dome.material.needsUpdate = true;
-                }, undefined, error => console.warn('[BubbleBreaker][Cosmos] NGC 3324写真の読み込みに失敗しました', error));
+                }, undefined, error => {
+                    dome.visible = false;
+                    console.warn('[BubbleBreaker][Cosmos] NGC 3324写真の読み込みに失敗しました。星空背景を表示します', error);
+                });
             }
         }
 

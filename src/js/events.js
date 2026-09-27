@@ -108,6 +108,7 @@
         const guideOverlay = document.getElementById('first-run-guide');
         let guideSlideIndex = 0;
         let guideIsOpen = false;
+        let savedExplorationCountResolved = false;
         function renderGuideSlide() {
             const [title, copy] = guideSlides[guideSlideIndex];
             document.getElementById('guide-title').textContent = title;
@@ -129,8 +130,8 @@
             }
             else {
                 localStorage.setItem('bubblebreaker.firstGuideSeen', 'on');
-                if (typeof window.syncApiKeyPrompt === 'function') window.syncApiKeyPrompt();
             }
+            if (typeof window.syncApiKeyPrompt === 'function') window.syncApiKeyPrompt();
         }
         document.getElementById('btn-guide-next')?.addEventListener('click', () => {
             if (guideSlideIndex < guideSlides.length - 1) {
@@ -144,7 +145,9 @@
             setGuideOpen(true, true);
         });
         window.onSavedExplorationCountChanged = count => {
+            savedExplorationCountResolved = true;
             if (count === 0 && localStorage.getItem('bubblebreaker.firstGuideSeen') !== 'on') setGuideOpen(true, true);
+            else if (typeof window.syncApiKeyPrompt === 'function') window.syncApiKeyPrompt();
         };
 
         const hintByScreen = {
@@ -197,7 +200,7 @@
             if (!apiKeyOverlay) return;
             if (runtimeKeyConfigured) apiSetupExplicit = false;
             const shouldShow = !runtimeKeyConfigured && !isDiving && !guideIsOpen
-                && (state.screen === 'INPUT' || apiSetupExplicit);
+                && savedExplorationCountResolved && (state.screen === 'INPUT' || apiSetupExplicit);
             const wasHidden = apiKeyOverlay.hidden;
             apiKeyOverlay.hidden = !shouldShow;
             if (apiKeyCloseButton) apiKeyCloseButton.hidden = !apiSetupExplicit;
