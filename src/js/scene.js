@@ -949,18 +949,27 @@
             }
         }
 
+        function runCosmicSetupStep(label, setup) {
+            try {
+                return setup();
+            } catch (error) {
+                console.error(`[BubbleBreaker][Cosmos] ${label}の初期化に失敗しました`, error);
+                return null;
+            }
+        }
+
         function createCosmicEnvironment() {
-            createNGC3324PhotoDome();
-            createAdditionalBackgroundThemes();
-            galaxyClusterCenters.forEach((center, index) => addGalaxyGlow(center, 180 + index * 22, (0.58 + index * 0.047) % 1));
+            runCosmicSetupStep('NGC 3324背景', createNGC3324PhotoDome);
+            runCosmicSetupStep('データ背景', createAdditionalBackgroundThemes);
+            galaxyClusterCenters.forEach((center, index) => runCosmicSetupStep(`銀河光 ${index + 1}`, () => addGalaxyGlow(center, 180 + index * 22, (0.58 + index * 0.047) % 1)));
             const nebulaCount = 8 + Math.floor(cosmicRandom(1441) * 6);
             Array.from({ length: nebulaCount }, (_, index) => {
                 const seed = 1301 + index * 37;
-                addProceduralNebula(
+                runCosmicSetupStep(`星雲 ${index + 1}`, () => addProceduralNebula(
                     createSphericalBackgroundPosition(index, nebulaCount, 2200, 14800, seed),
                     380 + cosmicRandom(seed + 1) * 1180,
                     seed
-                );
+                ));
             });
             const externalSystemCount = galaxyClusterCenters.length * GALAXIES_PER_CLUSTER;
             Array.from({ length: externalSystemCount }, (_, index) => {
@@ -970,11 +979,11 @@
                     26 + (index % 7) * 3,
                     601 + index * 17
                 ];
-            }).forEach(([center, scale, seed]) => addSolarSystem(center, scale, seed));
-            createShootingStars();
+            }).forEach(([center, scale, seed], index) => runCosmicSetupStep(`恒星系 ${index + 1}`, () => addSolarSystem(center, scale, seed)));
+            runCosmicSetupStep('流れ星', createShootingStars);
         }
 
-        createCosmicEnvironment();
+        runCosmicSetupStep('宇宙背景一式', createCosmicEnvironment);
 
         function updateCosmicDepthVisual(depth) {
             const variant = (depth * 0.217 + 0.11) % 1;
@@ -1004,8 +1013,8 @@
             cosmicBackgroundGroup.scale.setScalar(1 + Math.min(0.2, depth * 0.025));
         }
 
-        galaxyClusterCenters.forEach((center, index) => createGalaxyCluster(center, index));
-        setBackgroundTheme(backgroundTheme);
+        galaxyClusterCenters.forEach((center, index) => runCosmicSetupStep(`銀河団 ${index + 1}`, () => createGalaxyCluster(center, index)));
+        runCosmicSetupStep('背景テーマ', () => setBackgroundTheme(backgroundTheme));
 
         // --- 個別のバブル（球体）を生成・管理する仕組み ---
         let currentBubbles = []; // 現在画面に表示されているバブルの配列を保存
@@ -1028,7 +1037,6 @@
         let groupEntryCameraDistance = 25;
         let singleViewDirection = new THREE.Vector3(0, 0, 1);
         const configuredFieldOfView = 60;
-        let explorationViewMode = localStorage.getItem('bubblebreaker.viewMode') === '2d' ? '2d' : '3d';
         let last3DViewDirection = new THREE.Vector3(0, 0, 1);
         const warpSpeedFactor = 1;
         const warpStopCount = 3;

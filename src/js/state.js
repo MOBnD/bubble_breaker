@@ -1,6 +1,8 @@
         // ==========================================
         // === 2. 状態管理 (変数の定義) ===
         // ==========================================
+        // Shared before scene setup so the animation loop never sees this in a TDZ.
+        let explorationViewMode = localStorage.getItem('bubblebreaker.viewMode') === '2d' ? '2d' : '3d';
         let state = {
             screen: 'INPUT',       // 現在表示している画面名（INPUT, GROUP, SINGLE, ANALYSIS, DETAIL）
             groupId: null,         // 現在表示しているバブル群（親）のID

@@ -336,12 +336,18 @@
             startBackgroundMusic();
 
             // API応答をワープ演出と並行して取得する。API失敗時は既存モックDBへ戻す。
-            const universePromise = requestDynamicUniverse(input, window.updateVoyageProgress).then(result => {
+            let generationDeadlineReached = false;
+            const universePromise = requestDynamicUniverse(input, progress => {
+                if (progress && progress.code === 'API_UNIVERSE_DEADLINE') generationDeadlineReached = true;
+                window.updateVoyageProgress(progress);
+            }).then(result => {
                 if (result) {
                     showToast('関連する情報を集めて、探索する世界をつくりました');
                     return result;
                 }
-                showToast('すべての情報を集められなかったため、用意済みの世界を表示します');
+                showToast(generationDeadlineReached
+                    ? '生成に時間がかかったため、用意済みの世界へ切り替えます'
+                    : 'すべての情報を集められなかったため、用意済みの世界を表示します');
                 return normalizeFallbackUniverse(input);
             }).catch(error => {
                 apiError('Dynamic BubbleBreaker data generation failed。固定データを使用します', { status: error.status || null, requestId: error.requestId || null, message: redactApiLog(error.message), body: error.body || null });
@@ -350,7 +356,12 @@
             });
             universePromise.then(universe => {
                 pendingUniverse = universe;
-                window.updateVoyageProgress({ step: 2, message: '世界の準備ができました。中心のバブルへ向かっています…' });
+                window.updateVoyageProgress({
+                    step: 2,
+                    message: generationDeadlineReached
+                        ? '用意済みの世界ができました。中心のバブルへ向かっています…'
+                        : '世界の準備ができました。中心のバブルへ向かっています…'
+                });
                 if (typeof window.markLoadingUniverseReady === 'function') window.markLoadingUniverseReady();
             });
 

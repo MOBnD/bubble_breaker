@@ -10,6 +10,7 @@
         const OPENAI_STRUCTURE_TIMEOUT_MS = 90000;
         const OPENAI_STRUCTURE_MAX_ATTEMPTS = 2;
         const OPENAI_STRUCTURE_MAX_BUBBLES = 5;
+        const OPENAI_UNIVERSE_DEADLINE_MS = 5 * 60 * 1000;
         const OPENAI_LOG_PREFIX = '[BubbleBreaker][OpenAI]';
         let activeAnalysisInput = '';
         const bubbleAnalysisRequests = new Map();
@@ -1007,25 +1008,45 @@
             };
         }
 
-        async function fetchWithTimeout(url, options, timeoutMs = OPENAI_STRUCTURE_TIMEOUT_MS) {
+        async function fetchWithTimeout(url, options, timeoutMs = OPENAI_STRUCTURE_TIMEOUT_MS, parentSignal = null, consumeResponse = response => response) {
             const controller = new AbortController();
+            let parentAbortHandler = null;
+            if (parentSignal) {
+                if (parentSignal.aborted) controller.abort();
+                else {
+                    parentAbortHandler = () => controller.abort();
+                    parentSignal.addEventListener('abort', parentAbortHandler, { once: true });
+                }
+            }
             const timer = setTimeout(() => controller.abort(), timeoutMs);
             try {
-                return await fetch(url, { ...options, signal: controller.signal });
-            } catch (error) {
-                if (controller.signal.aborted) {
-                    const timeoutError = new Error(`OpenAI APIが${timeoutMs / 1000}秒以内に応答しませんでした`);
-                    timeoutError.code = 'API_TIMEOUT';
-                    timeoutError.timeoutMs = timeoutMs;
-                    timeoutError.cause = error;
-                    throw timeoutError;
+                let response;
+                try {
+                    response = await fetch(url, { ...options, signal: controller.signal });
+                } catch (error) {
+                    if (parentSignal && parentSignal.aborted) {
+                        const abortError = new Error('APIによる世界生成の全体待ち時間を超過しました');
+                        abortError.code = 'API_GENERATION_ABORTED';
+                        abortError.cause = error;
+                        throw abortError;
+                    }
+                    if (controller.signal.aborted) {
+                        const timeoutError = new Error(`OpenAI APIが${timeoutMs / 1000}秒以内に応答しませんでした`);
+                        timeoutError.code = 'API_TIMEOUT';
+                        timeoutError.timeoutMs = timeoutMs;
+                        timeoutError.cause = error;
+                        throw timeoutError;
+                    }
+                    const networkError = new Error(error && error.message ? error.message : 'OpenAI APIへのネットワーク接続に失敗しました');
+                    networkError.code = 'API_NETWORK_ERROR';
+                    networkError.cause = error;
+                    throw networkError;
                 }
-                const networkError = new Error(error && error.message ? error.message : 'OpenAI APIへのネットワーク接続に失敗しました');
-                networkError.code = 'API_NETWORK_ERROR';
-                networkError.cause = error;
-                throw networkError;
+                return await consumeResponse(response);
+            } finally {
+                clearTimeout(timer);
+                if (parentSignal && parentAbortHandler) parentSignal.removeEventListener('abort', parentAbortHandler);
             }
-            finally { clearTimeout(timer); }
         }
 
         function extractResponseText(response) {
@@ -1037,52 +1058,53 @@
                 .join('');
         }
 
-        async function requestOpenAIJson(requestBody, timeoutMs, stage) {
+        async function requestOpenAIJson(requestBody, timeoutMs, stage, signal = null) {
             const startedAt = performance.now();
-            const response = await fetchWithTimeout('https://api.openai.com/v1/responses', {
+            return fetchWithTimeout('https://api.openai.com/v1/responses', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${activeOpenAIKey}` },
                 body: JSON.stringify(requestBody)
-            }, timeoutMs);
-            const requestId = response.headers.get('x-request-id');
-            const elapsedMs = Math.round(performance.now() - startedAt);
-            if (!response.ok) {
-                const errorBody = redactApiLog(truncateApiLog(await response.text()));
-                const error = new Error(`OpenAI API ${response.status}`);
-                error.status = response.status;
-                error.requestId = requestId;
-                error.body = errorBody;
-                error.stage = stage;
-                throw error;
-            }
-            const payload = await response.json();
-            const text = extractResponseText(payload);
-            const incompleteReason = payload.incomplete_details && payload.incomplete_details.reason ? payload.incomplete_details.reason : null;
-            if (payload.status === 'incomplete' || incompleteReason) {
-                const error = new Error(`OpenAI APIの${stage}出力が未完了です${incompleteReason ? `（${incompleteReason}）` : ''}`);
-                error.code = 'API_INCOMPLETE_OUTPUT';
-                error.reason = incompleteReason;
-                error.stage = stage;
-                throw error;
-            }
-            if (!text) {
-                const error = new Error(`OpenAI APIの${stage}出力が空です`);
-                error.code = 'API_EMPTY_OUTPUT';
-                error.stage = stage;
-                throw error;
-            }
-            let parsed;
-            try {
-                parsed = JSON.parse(text);
-            } catch (parseError) {
-                const error = new Error(`${stage} JSON解析に失敗しました: ${parseError.message}`);
-                error.code = 'API_JSON_PARSE_ERROR';
-                error.cause = parseError;
-                error.stage = stage;
-                throw error;
-            }
-            apiLog('API構造化応答を受信しました', { stage, status: response.status, requestId, elapsedMs, outputTextLength: text.length });
-            return { parsed, payload, requestId, elapsedMs };
+            }, timeoutMs, signal, async response => {
+                const requestId = response.headers.get('x-request-id');
+                const elapsedMs = Math.round(performance.now() - startedAt);
+                if (!response.ok) {
+                    const errorBody = redactApiLog(truncateApiLog(await response.text()));
+                    const error = new Error(`OpenAI API ${response.status}`);
+                    error.status = response.status;
+                    error.requestId = requestId;
+                    error.body = errorBody;
+                    error.stage = stage;
+                    throw error;
+                }
+                const payload = await response.json();
+                const text = extractResponseText(payload);
+                const incompleteReason = payload.incomplete_details && payload.incomplete_details.reason ? payload.incomplete_details.reason : null;
+                if (payload.status === 'incomplete' || incompleteReason) {
+                    const error = new Error(`OpenAI APIの${stage}出力が未完了です${incompleteReason ? `（${incompleteReason}）` : ''}`);
+                    error.code = 'API_INCOMPLETE_OUTPUT';
+                    error.reason = incompleteReason;
+                    error.stage = stage;
+                    throw error;
+                }
+                if (!text) {
+                    const error = new Error(`OpenAI APIの${stage}出力が空です`);
+                    error.code = 'API_EMPTY_OUTPUT';
+                    error.stage = stage;
+                    throw error;
+                }
+                let parsed;
+                try {
+                    parsed = JSON.parse(text);
+                } catch (parseError) {
+                    const error = new Error(`${stage} JSON解析に失敗しました: ${parseError.message}`);
+                    error.code = 'API_JSON_PARSE_ERROR';
+                    error.cause = parseError;
+                    error.stage = stage;
+                    throw error;
+                }
+                apiLog('API構造化応答を受信しました', { stage, status: response.status, requestId, elapsedMs, outputTextLength: text.length });
+                return { parsed, payload, requestId, elapsedMs };
+            });
         }
 
         function markHierarchyError(error, stage) {
@@ -1207,11 +1229,11 @@
             return normalized;
         }
 
-        async function requestStage(stage, buildRequest, validate) {
+        async function requestStage(stage, buildRequest, validate, signal = null) {
             let lastError = null;
             for (let attempt = 0; attempt < OPENAI_STRUCTURE_MAX_ATTEMPTS; attempt++) {
                 try {
-                    const result = await requestOpenAIJson(buildRequest({ repair: attempt > 0 }), OPENAI_STRUCTURE_TIMEOUT_MS, stage);
+                    const result = await requestOpenAIJson(buildRequest({ repair: attempt > 0 }), OPENAI_STRUCTURE_TIMEOUT_MS, stage, signal);
                     try {
                         return validate(result.parsed);
                     } catch (error) {
@@ -1219,6 +1241,7 @@
                     }
                 } catch (error) {
                     lastError = error;
+                    if (signal && signal.aborted) throw error;
                     const retryable = isRetryableHierarchyError(error);
                     apiWarn('階層生成API試行に失敗しました', { stage, attempt: attempt + 1, maxAttempts: OPENAI_STRUCTURE_MAX_ATTEMPTS, code: error.code || null, message: redactApiLog(error.message), retryable });
                     if (!retryable || attempt === OPENAI_STRUCTURE_MAX_ATTEMPTS - 1) break;
@@ -1228,7 +1251,7 @@
             throw lastError || new Error(`${stage}カテゴリを生成できませんでした`);
         }
 
-        async function requestRootGroup(input) {
+        async function requestRootGroup(input, signal = null) {
             const result = await requestStage('root', options => buildOpenAIRootRequest(input, options), parsed => {
                 if (!parsed || !Array.isArray(parsed.groups) || parsed.groups.length !== 1) throw new Error('rootカテゴリは1つだけ必要です');
                 const group = validateStageGroup(parsed.groups[0], 'root', null, null);
@@ -1243,7 +1266,7 @@
                     entryRootBubbleId: canonicalized.modelToCanonicalBubbleId.get(entryRootBubbleId),
                     explorationAxes
                 };
-            });
+            }, signal);
             apiLog('rootカテゴリを確定しました', {
                 groupId: result.group.id,
                 bubbleCount: result.group.bubbles.length,
@@ -1253,7 +1276,7 @@
             return result;
         }
 
-        async function requestCentralGroup(input, rootGroup, rootBubble, isEntryBranch, explorationAxes = []) {
+        async function requestCentralGroup(input, rootGroup, rootBubble, isEntryBranch, explorationAxes = [], signal = null) {
             const relevantAxes = explorationAxes.filter(axis => axis.rootBubbleId === rootBubble.id);
             const result = await requestStage('central', options => buildOpenAICentralGroupRequest(input, rootGroup, rootBubble, { ...options, isEntryBranch, explorationAxes: relevantAxes }), parsed => {
                 if (!parsed || !Array.isArray(parsed.groups) || parsed.groups.length !== 1) throw new Error('centralカテゴリは1つだけ必要です');
@@ -1267,17 +1290,17 @@
                     group: canonicalized.group,
                     entryBubbleId: entryBubbleId ? canonicalized.modelToCanonicalBubbleId.get(entryBubbleId) : null
                 };
-            });
+            }, signal);
             apiLog('centralカテゴリを確定しました', { groupId: result.group.id, parentBubbleId: rootBubble.id, bubbleCount: result.group.bubbles.length, isEntryBranch, hasEntryBubble: Boolean(result.entryBubbleId) });
             return result;
         }
 
-        async function requestLeafGroup(input, centralGroup, centralBubble, explorationAxes = []) {
+        async function requestLeafGroup(input, centralGroup, centralBubble, explorationAxes = [], signal = null) {
             const result = await requestStage('leaf', options => buildOpenAILeafGroupRequest(input, centralGroup, centralBubble, { ...options, explorationAxes }), parsed => {
                 if (!parsed || !Array.isArray(parsed.groups) || parsed.groups.length !== 1) throw new Error('leafカテゴリは1つだけ必要です');
                 const group = validateStageGroup(parsed.groups[0], 'leaf', centralGroup.id, centralBubble.id);
                 return canonicalizeStageGroupIds(group, `leaf_${centralBubble.id}`, centralGroup.id, centralBubble.id).group;
-            });
+            }, signal);
             apiLog('leafカテゴリを確定しました', { groupId: result.id, parentBubbleId: centralBubble.id, bubbleCount: result.bubbles.length });
             return result;
         }
@@ -1304,14 +1327,20 @@
                 return null;
             }
             const generationProgress = { root: false, centralCount: 0, leafCount: 0 };
-            const report = (step, message) => {
-                if (typeof onProgress === 'function') onProgress({ step, message });
+            const generationController = new AbortController();
+            let generationDeadlineReached = false;
+            const deadlineTimer = setTimeout(() => {
+                generationDeadlineReached = true;
+                generationController.abort();
+            }, OPENAI_UNIVERSE_DEADLINE_MS);
+            const report = (step, message, metadata = {}) => {
+                if (typeof onProgress === 'function') onProgress({ step, message, ...metadata });
             };
             try {
                 // 依存関係を固定する: root確定 → rootの各バブルのcentral確定
                 // → 各centralバブルのleaf確定。siblingsだけを並列化する。
                 report(0, '入力したテーマから、話題の中心を整理しています…');
-                const rootResult = await requestRootGroup(activeAnalysisInput);
+                const rootResult = await requestRootGroup(activeAnalysisInput, generationController.signal);
                 generationProgress.root = true;
                 report(1, '近い考えや、違う立場から見た情報を集めています…');
                 const root = rootResult.group;
@@ -1320,7 +1349,8 @@
                     root,
                     rootBubble,
                     rootBubble.id === rootResult.entryRootBubbleId,
-                    rootResult.explorationAxes
+                    rootResult.explorationAxes,
+                    generationController.signal
                 ));
                 generationProgress.centralCount = centralResults.length;
                 const entryResults = centralResults.filter(result => result.entryBubbleId);
@@ -1334,7 +1364,7 @@
                 const leafGroups = await runWithConcurrency(leafRequests, 3, ({ centralGroup, centralBubble }) => {
                     const branchRoot = root.bubbles.find(bubble => bubble.childId === centralGroup.id);
                     const relevantAxes = rootResult.explorationAxes.filter(axis => branchRoot && axis.rootBubbleId === branchRoot.id);
-                    return requestLeafGroup(activeAnalysisInput, centralGroup, centralBubble, relevantAxes);
+                    return requestLeafGroup(activeAnalysisInput, centralGroup, centralBubble, relevantAxes, generationController.signal);
                 });
                 generationProgress.leafCount = leafGroups.length;
                 const leafByParentBubble = new Map(leafRequests.map((request, index) => [request.centralBubble.id, leafGroups[index]]));
@@ -1354,6 +1384,14 @@
                 apiLog('root → central → leafの段階生成と検証に成功しました', { groupCount: Object.keys(universe.db).length, centralGroupCount: centralGroups.length, leafGroupCount: leafGroups.length });
                 return universe;
             } catch (error) {
+                if (generationDeadlineReached) {
+                    report(2, '生成に時間がかかったため、用意済みの世界へ切り替えています…', { code: 'API_UNIVERSE_DEADLINE' });
+                    apiWarn('世界生成の全体待ち時間が上限に達しました。進行中のAPI通信を中断します', {
+                        timeoutMs: OPENAI_UNIVERSE_DEADLINE_MS,
+                        generationProgress
+                    });
+                    return null;
+                }
                 apiWarn('段階生成したカテゴリを確定できないため固定DBへフォールバックします', {
                     stage: error.stage || 'hierarchy-merge',
                     code: error.code || 'API_INVALID_UNIVERSE',
@@ -1363,6 +1401,8 @@
                     generationProgress
                 });
                 return null;
+            } finally {
+                clearTimeout(deadlineTimer);
             }
         }
 
