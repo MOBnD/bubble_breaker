@@ -19,7 +19,7 @@
             raycaster.setFromCamera(mouse, camera);
             
             // 画面に現在表示(visible)されているバブルだけを判定対象にする（透明になって消えているバブルをクリックさせないため）
-            const visibleBubbles = currentBubbles.filter(b => b.mesh.visible);
+            const visibleBubbles = currentBubbles.filter(b => b.mesh.visible && b.interactive);
             const intersects = raycaster.intersectObjects(visibleBubbles.map(b => b.mesh));
 
             // もし光線が何かのバブルとぶつかったら
@@ -86,7 +86,24 @@
             ['休日にしてみたいことは？', '例：知らない駅で降りて散歩する'],
             ['好きな動物は？', '例：ラッコの食事風景を見るのが好き'],
             ['最近、考え方が変わったことは？', '例：休むことも大切な予定だと思う'],
-            ['身近な人と話してみたい話題は？', '例：子どものころ好きだった遊び']
+            ['身近な人と話してみたい話題は？', '例：子どものころ好きだった遊び'],
+            ['つい人にすすめたくなるものは？', '例：駅前の小さな喫茶店'],
+            ['最近、驚いたことは？', '例：近所でホタルを見つけた'],
+            ['なくなってほしくない習慣は？', '例：夕食のあとに家族で話す時間'],
+            ['自分と違う意見で気になるものは？', '例：給食の無償化について'],
+            ['これから試してみたいことは？', '例：週末に陶芸を体験する'],
+            ['好きな作品のどこが好き？', '例：登場人物が少しずつ成長するところ'],
+            ['もっと便利になってほしいことは？', '例：病院の予約を簡単にしたい'],
+            ['子どものころ不思議だったことは？', '例：月がついてくるように見える理由'],
+            ['最近、考え続けているテーマは？', '例：便利さとプライバシーの両立'],
+            ['行ってみたい場所は？', '例：アイスランドの温泉'],
+            ['大切にしている考え方は？', '例：まず相手の話を最後まで聞く'],
+            ['身近な困りごとは？', '例：自転車を安全に置く場所が少ない'],
+            ['好きなスポーツの魅力は？', '例：最後まで逆転が起きるところ'],
+            ['気になっている社会の変化は？', '例：町の本屋が減っていること'],
+            ['今、誰かに聞いてみたい質問は？', '例：仕事を選ぶとき何を大切にした？'],
+            ['お気に入りの道具は？', '例：書き心地のいい万年筆'],
+            ['大人になって好きになったものは？', '例：苦いコーヒー']
         ];
         let activePromptIndex = -1;
         function setRandomPrompt() {
@@ -100,10 +117,10 @@
         document.getElementById('btn-refresh-prompt')?.addEventListener('click', setRandomPrompt);
 
         const guideSlides = [
-            ['ひとつの意見から、世界が広がる', '気になることや好きなものを入力すると、関連する考えを集めて、探索できる世界をつくります。'],
-            ['近い考えも、違う考えも見つかる', 'テーマを小さなバブルに分けて表示します。大きなまとまりから気になる話題へ、少しずつ進めます。'],
-            ['4つの窓から、テーマを読み解く', '概要、できごとの流れ、情報源、賛成・反対の見方を比べて、テーマの全体像をつかめます。'],
-            ['あなたの好奇心から、さあ行こう', '正解を出す場所ではなく、問いを広げる場所です。まずは気になることをひとつ、宇宙へ放ってみましょう。']
+            ['おすすめの外へ、冒険に出よう', 'SNSでは、過去に見た投稿に似た情報がおすすめされがちです。気になる一言から、いつものタイムラインの外へ出発します。'],
+            ['賛成・反対・背景を同じ地図で', '話題の丸を選ぶと、関連する考えへ進めます。自分と近い意見だけでなく、違う立場や話題の背景も見つけられます。'],
+            ['4つの窓で、見え方を比べる', '概要・歴史・情報源・内外の論争を開き、出典も確認できます。おすすめを受け取るだけでなく、次に見る視点を自分で選べます。'],
+            ['準備はできました。フィルターバブルを突破しよう', '好きな食べ物でも、気になるニュースでも大丈夫。あなたの一言を地図にして、まだ知らない視点へ出発しましょう。']
         ];
         const guideOverlay = document.getElementById('first-run-guide');
         let guideSlideIndex = 0;
@@ -140,6 +157,13 @@
             } else setGuideOpen(false);
         });
         document.getElementById('btn-close-guide')?.addEventListener('click', () => setGuideOpen(false));
+        guideOverlay?.addEventListener('click', event => {
+            if (event.target === guideOverlay) setGuideOpen(false);
+        });
+        guideOverlay?.addEventListener('wheel', event => {
+            if (event.target === guideOverlay) setGuideOpen(false);
+            else event.stopPropagation();
+        }, { passive: true });
         document.getElementById('btn-reopen-guide')?.addEventListener('click', () => {
             setSettingsOpen(false);
             setGuideOpen(true, true);
@@ -151,26 +175,38 @@
         };
 
         const hintByScreen = {
-            INPUT: ['意見をひとつ、世界の入口に', '例をヒントに短く書くだけで大丈夫です。「別のお題」で質問を変えられます。前の探索は下の「今まで探索した世界」から開けます。'],
-            LOADING: ['テーマを調べて世界を準備中', '入力されたテーマを整理し、関連する視点や情報を集めて、たどれるまとまりにしています。目安は約3分です。'],
-            GROUP: ['バブルを選んで、話題を深く見る', '丸は話題のまとまりです。気になる丸を選ぶと内容を読み、上部の道順を押すと前のまとまりへ戻れます。'],
-            SINGLE: ['このバブルの内容を確認する', '説明を読み、解析を見ると概要・歴史・情報源・意見の違いを比べられます。子テーマがある場合は上の道順から進めます。'],
-            ANALYSIS: ['4つの窓からテーマを読み解く', '気になるカードを選ぶと詳しい内容と出典を確認できます。対象のバブルに戻るには中央のタイトルを選びます。'],
-            DETAIL: ['内容と出典を一緒に確認する', '要約、時系列、情報源、意見を読み、気になった点はカード内の出典から確かめられます。']
+            INPUT: ['自分のおすすめ欄の外を探検する', 'SNSや検索サービスは、あなたがよく見る話題を優先して表示します。気になっていることをひとつ入力すると、関連する話題や違う立場を並べて見られます。例をまねて短く書けば大丈夫です。'],
+            LOADING: ['テーマのまわりを調査中', '入力されたテーマについて、基本情報・歴史・情報源・異なる立場を集め、探索できる世界を準備しています。画面の手順バーで進み具合を確認できます。目安は約3分です。'],
+            GROUP: ['話題のまとまりから、次の視点へ', '大きな丸は話題のまとまりです。丸の中へ進むと、その話題に集まる小さな視点を見られます。WASDまたは画面のドラッグで移動し、E/Qで上下へ進みます。Shiftを押しながら移動すると速くなります。'],
+            SINGLE: ['この話題ができた背景を見る', '中央の説明で話題の要点を読み、「詳しい分析を見る」から根拠・歴史・情報源・賛否を比べられます。親の話題へ戻るには、上部の道順かマウスホイールを使います。'],
+            ANALYSIS: ['4つの窓から、同じ話題を見比べる', 'カードを選ぶと詳しい内容と、その説明を支える出典を読めます。対象の話題へ戻るには中央のタイトルを選びます。\n・概要：何が話題なのか、要点を読む\n・形成の歴史：出来事を時間順にたどる\n・情報源：資料や発信元の種類を確かめる\n・内外の論争：賛成・反対の根拠を比べる'],
+            DETAIL: ['根拠と一緒に、分析を確かめる', '要約や資料のリンクを見て、どこまで確認できた内容なのか確かめましょう。カードの外をクリックするか、ホイールを動かすと4つの分析へ戻ります。']
         };
         const hintPanel = document.getElementById('contextual-hint');
         let hintVisible = localStorage.getItem('bubblebreaker.hintVisible') !== 'off';
         let apiSetupExplicit = false;
         function renderHint(screenName) {
             const key = hintByScreen[screenName] ? screenName : 'INPUT';
-            const [title, copy] = hintByScreen[key];
+            const [defaultTitle, copy] = hintByScreen[key];
+            const detailHelp = {
+                overview: ['概要を読む', '話題の要点と主な根拠を短くまとめています。出典リンクを開き、説明が資料の内容に沿っているか確かめられます。'],
+                history: ['形成の歴史をたどる', '確認できた出来事を古い順に並べています。年表の下にあるカードを読んで、話題がどう広がったかを追いましょう。'],
+                demographic: ['情報源の構成を確かめる', '今回集めた資料の種類や発信元をまとめています。円グラフと発信元の一覧で、どんな資料に基づく分析かを確認できます。'],
+                evaluation: ['内外の論争を比べる', '賛成側と反対側の主張を、根拠となる資料と一緒に表示しています。左右の吹き出しを読み、異なる理由を比べましょう。']
+            };
+            const activeDetailHelp = key === 'DETAIL' ? detailHelp[state.analysisCardType] : null;
+            const title = activeDetailHelp ? activeDetailHelp[0] : defaultTitle;
+            const contextualCopy = activeDetailHelp ? activeDetailHelp[1] : copy;
             document.getElementById('hint-screen-label').textContent = key === 'LOADING' ? '探索中' : ({ INPUT: 'スタート', GROUP: 'バブル群', SINGLE: 'バブル', ANALYSIS: '解析', DETAIL: '解析の詳細' }[key] || 'スタート');
             document.getElementById('hint-title').textContent = title;
             const action = document.getElementById('btn-hint-action');
             const needsKey = !runtimeKeyConfigured && key !== 'INPUT';
-            document.getElementById('hint-copy').textContent = needsKey ? `${copy} 未生成の解析を調べるには API Key を入力してください。` : copy;
+            document.getElementById('hint-copy').textContent = needsKey ? `${contextualCopy}\n\nAPI Key が未設定です。保存済みの解析は読めますが、新しい解析を取得するには API Key を入力してください。` : contextualCopy;
             action.hidden = !needsKey;
             action.textContent = 'API Key を入力する';
+            if (needsKey) hintVisible = true;
+            hintPanel?.classList.toggle('hint-is-closed', !hintVisible);
+            document.getElementById('btn-open-hint').hidden = hintVisible;
         }
         document.getElementById('btn-close-hint')?.addEventListener('click', () => {
             hintVisible = false;
@@ -184,6 +220,13 @@
             hintPanel.classList.remove('hint-is-closed');
             document.getElementById('btn-open-hint').hidden = true;
         });
+        document.addEventListener('click', event => {
+            if (!hintVisible || !hintPanel || hintPanel.contains(event.target)) return;
+            hintVisible = false;
+            localStorage.setItem('bubblebreaker.hintVisible', 'off');
+            hintPanel.classList.add('hint-is-closed');
+            document.getElementById('btn-open-hint').hidden = false;
+        });
         window.openApiKeySetup = () => {
             apiSetupExplicit = true;
             if (typeof window.syncApiKeyPrompt === 'function') window.syncApiKeyPrompt();
@@ -195,6 +238,18 @@
             if (apiKeyOverlay) apiKeyOverlay.hidden = true;
             if (typeof window.syncApiKeyPrompt === 'function') window.syncApiKeyPrompt();
         });
+        apiKeyOverlay?.addEventListener('click', event => {
+            if (event.target !== apiKeyOverlay || !apiSetupExplicit) return;
+            apiSetupExplicit = false;
+            apiKeyOverlay.hidden = true;
+            window.syncApiKeyPrompt?.();
+        });
+        apiKeyOverlay?.addEventListener('wheel', event => {
+            if (event.target !== apiKeyOverlay || !apiSetupExplicit) return;
+            apiSetupExplicit = false;
+            apiKeyOverlay.hidden = true;
+            window.syncApiKeyPrompt?.();
+        }, { passive: true });
         document.getElementById('btn-hint-action')?.addEventListener('click', () => window.openApiKeySetup());
         window.syncApiKeyPrompt = () => {
             if (!apiKeyOverlay) return;
@@ -336,6 +391,25 @@
         document.getElementById('btn-analyze').addEventListener('click', () => loadAnalysis());
         document.getElementById('analysis-center-title').addEventListener('click', () => loadSingle(state.bubbleData));
         document.getElementById('btn-back-detail').addEventListener('click', () => switchScreen('ANALYSIS'));
+        const analysisScreen = document.getElementById('screen-analysis');
+        const detailScreen = document.getElementById('screen-detail');
+        const detailShell = document.querySelector('.detail-shell');
+        analysisScreen?.addEventListener('click', event => {
+            if (event.target.closest('.analysis-card, #analysis-center-title, #analysis-status, .contextual-hint-content, .brand-hud, #panel-bgm')) return;
+            loadSingle(state.bubbleData);
+        });
+        detailScreen?.addEventListener('click', event => {
+            if (detailShell && detailShell.contains(event.target)) return;
+            switchScreen('ANALYSIS');
+        });
+        window.addEventListener('wheel', event => {
+            if (state.screen !== 'ANALYSIS') return;
+            if (event.target.closest('.analysis-card, #analysis-center-title, #analysis-status, .contextual-hint-content, .brand-hud, #panel-bgm')) return;
+            loadSingle(state.bubbleData);
+        }, { passive: true });
+        window.addEventListener('wheel', event => {
+            if (state.screen === 'DETAIL' && detailShell && !detailShell.contains(event.target)) switchScreen('ANALYSIS');
+        }, { passive: true });
         const aboutOverlay = document.getElementById('about-overlay');
         const aboutOpenButton = document.getElementById('btn-open-about');
         const aboutCloseButton = document.getElementById('btn-close-about');
@@ -360,6 +434,8 @@
         }
         aboutOpenButton?.addEventListener('click', () => setAboutOpen(true));
         aboutCloseButton?.addEventListener('click', () => setAboutOpen(false));
+        document.getElementById('btn-about-start')?.addEventListener('click', () => setAboutOpen(false));
+        document.querySelectorAll('[data-open-about]').forEach(button => button.addEventListener('click', () => setAboutOpen(true)));
         aboutMenuButton?.addEventListener('click', () => {
             const open = aboutMenuButton.getAttribute('aria-expanded') !== 'true';
             aboutMenuButton.setAttribute('aria-expanded', String(open));
@@ -378,7 +454,10 @@
         aboutOverlay?.addEventListener('click', event => {
             if (event.target === aboutOverlay) setAboutOpen(false);
         });
-        aboutOverlay?.addEventListener('wheel', event => event.stopPropagation(), { passive: true });
+        aboutOverlay?.addEventListener('wheel', event => {
+            if (event.target === aboutOverlay) setAboutOpen(false);
+            else event.stopPropagation();
+        }, { passive: true });
         aboutOverlay?.addEventListener('touchmove', event => event.stopPropagation(), { passive: true });
         const settingsOverlay = document.getElementById('settings-overlay');
         const settingsOpenButton = document.getElementById('btn-open-settings');
@@ -404,7 +483,10 @@
         settingsOverlay?.addEventListener('click', event => {
             if (event.target === settingsOverlay) setSettingsOpen(false);
         });
-        settingsOverlay?.addEventListener('wheel', event => event.stopPropagation(), { passive: true });
+        settingsOverlay?.addEventListener('wheel', event => {
+            if (event.target === settingsOverlay) setSettingsOpen(false);
+            else event.stopPropagation();
+        }, { passive: true });
         settingsOverlay?.addEventListener('touchmove', event => event.stopPropagation(), { passive: true });
         document.addEventListener('keydown', event => {
             if (event.key === 'Escape' && settingsOverlay && !settingsOverlay.hidden) {
@@ -515,7 +597,7 @@
             if (isTextEditingTarget(event.target)) return;
             window.__bubbleBreakerShiftDown = event.shiftKey || event.key === 'Shift';
             const key = event.key.toLowerCase();
-            if (['w', 'a', 's', 'd'].includes(key)) {
+            if (['w', 'a', 's', 'd', 'e', 'q'].includes(key)) {
                 movementKeys.add(key);
                 event.preventDefault();
             }
@@ -690,37 +772,94 @@
         }
 
         const canvasElement = document.querySelector('#canvas-container canvas');
-        const touchZoomState = { lastDistance: null, handled: false };
-        function getTouchDistance(touches) {
-            if (!touches || touches.length < 2) return null;
+        const touchFlight = { points: [], lastCenter: null, lastDistance: null, lastAngle: null, controlsWereEnabled: true };
+        function getTouchGeometry(touches) {
+            if (!touches || !touches.length) return null;
             const first = touches[0];
-            const second = touches[1];
-            return Math.hypot(second.clientX - first.clientX, second.clientY - first.clientY);
+            const second = touches[1] || first;
+            return {
+                centerX: (first.clientX + second.clientX) / 2,
+                centerY: (first.clientY + second.clientY) / 2,
+                distance: touches.length > 1 ? Math.hypot(second.clientX - first.clientX, second.clientY - first.clientY) : 0,
+                angle: touches.length > 1 ? Math.atan2(second.clientY - first.clientY, second.clientX - first.clientX) : 0
+            };
         }
         if (canvasElement) {
             canvasElement.addEventListener('touchstart', event => {
-                if (event.touches.length !== 2) return;
-                touchZoomState.lastDistance = getTouchDistance(event.touches);
-                touchZoomState.handled = false;
+                if (explorationViewMode === '2d' || (state.screen !== 'GROUP' && state.screen !== 'SINGLE')) return;
+                const geometry = getTouchGeometry(event.touches);
+                if (!geometry) return;
                 event.preventDefault();
-            }, { passive: false });
+                touchFlight.points = Array.from(event.touches).map(touch => ({ x: touch.clientX, y: touch.clientY }));
+                touchFlight.lastCenter = { x: geometry.centerX, y: geometry.centerY };
+                touchFlight.lastDistance = geometry.distance;
+                touchFlight.lastAngle = geometry.angle;
+                touchFlight.controlsWereEnabled = controls.enabled;
+                controls.enabled = false;
+            }, { capture: true, passive: false });
             canvasElement.addEventListener('touchmove', event => {
-                if (event.touches.length !== 2) return;
-                const currentDistance = getTouchDistance(event.touches);
-                if (currentDistance === null || touchZoomState.lastDistance === null) return;
-                const distanceDelta = currentDistance - touchZoomState.lastDistance;
-                touchZoomState.lastDistance = currentDistance;
+                if (!touchFlight.lastCenter || !event.touches.length || explorationViewMode === '2d') return;
                 event.preventDefault();
-                if (touchZoomState.handled || Math.abs(distanceDelta) < 8) return;
-                touchZoomState.handled = true;
-                handleZoomNavigation(distanceDelta > 0 ? 'zoomIn' : 'zoomOut');
-            }, { passive: false });
-            const resetTouchZoom = () => {
-                touchZoomState.lastDistance = null;
-                touchZoomState.handled = false;
+                const geometry = getTouchGeometry(event.touches);
+                if (!geometry) return;
+                const dx = geometry.centerX - touchFlight.lastCenter.x;
+                const dy = geometry.centerY - touchFlight.lastCenter.y;
+                const viewDistance = Math.max(0.001, camera.position.distanceTo(controls.target));
+                const worldPerPixel = Math.max(0.000002, viewDistance * 0.0034);
+                const forward = controls.target.clone().sub(camera.position).normalize();
+                const right = new THREE.Vector3().crossVectors(forward, new THREE.Vector3(0, 1, 0)).normalize();
+                const up = new THREE.Vector3(0, 1, 0);
+                const movement = new THREE.Vector3();
+                if (event.touches.length === 1) {
+                    movement.addScaledVector(right, dx * worldPerPixel);
+                    movement.addScaledVector(forward, -dy * worldPerPixel);
+                } else {
+                    movement.addScaledVector(up, -dy * worldPerPixel);
+                    const zoomFactor = Math.exp(-Math.max(-80, Math.min(80, geometry.distance - touchFlight.lastDistance)) * 0.003);
+                    const cameraOffset = camera.position.clone().sub(controls.target).multiplyScalar(zoomFactor);
+                    camera.position.copy(controls.target).add(cameraOffset);
+                    const angleDelta = geometry.angle - touchFlight.lastAngle;
+                    if (Number.isFinite(angleDelta) && Math.abs(angleDelta) < Math.PI) {
+                        const orbit = camera.position.clone().sub(controls.target).applyAxisAngle(up, angleDelta);
+                        camera.position.copy(controls.target).add(orbit);
+                    }
+                    touchFlight.lastDistance = geometry.distance;
+                    touchFlight.lastAngle = geometry.angle;
+                }
+                camera.position.add(movement);
+                controls.target.add(movement);
+                targetCameraPos.add(movement);
+                targetControlTarget.add(movement);
+                touchFlight.lastCenter = { x: geometry.centerX, y: geometry.centerY };
+            }, { capture: true, passive: false });
+            const resetTouchFlight = () => {
+                if (touchFlight.lastCenter && (state.screen === 'GROUP' || state.screen === 'SINGLE')) {
+                    controls.enabled = true;
+                    controls.update();
+                }
+                touchFlight.points = [];
+                touchFlight.lastCenter = null;
+                touchFlight.lastDistance = null;
+                touchFlight.lastAngle = null;
             };
-            canvasElement.addEventListener('touchend', resetTouchZoom, { passive: false });
-            canvasElement.addEventListener('touchcancel', resetTouchZoom, { passive: false });
+            canvasElement.addEventListener('touchend', event => {
+                if (event.touches.length && touchFlight.lastCenter) {
+                    const geometry = getTouchGeometry(event.touches);
+                    if (geometry) {
+                        touchFlight.points = Array.from(event.touches).map(touch => ({ x: touch.clientX, y: touch.clientY }));
+                        touchFlight.lastCenter = { x: geometry.centerX, y: geometry.centerY };
+                        touchFlight.lastDistance = geometry.distance;
+                        touchFlight.lastAngle = geometry.angle;
+                    }
+                    event.preventDefault();
+                    return;
+                }
+                resetTouchFlight();
+            }, { capture: true, passive: false });
+            canvasElement.addEventListener('touchcancel', resetTouchFlight, { capture: true, passive: false });
+            canvasElement.addEventListener('pointerdown', () => {
+                if (state.screen === 'GROUP' || state.screen === 'SINGLE') window.interruptSceneMotion?.();
+            }, true);
         }
 
         window.addEventListener('wheel', (e) => {
@@ -745,5 +884,6 @@
             // 一度スクロール判定したら、1秒間は次の判定を受け付けない（誤作動防止）
             if(wheelTimeout) return;
             wheelTimeout = setTimeout(() => { wheelTimeout = null; }, 1000);
+            if (state.screen === 'GROUP' || state.screen === 'SINGLE') window.interruptSceneMotion?.();
             if (e.deltaY !== 0) handleZoomNavigation(e.deltaY > 0 ? 'zoomOut' : 'zoomIn');
         }, { passive: false }); // e.preventDefault()を機能させるために必要

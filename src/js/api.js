@@ -1428,5 +1428,9 @@
 
         async function requestBubbleGroupAnalyses(group, input = activeAnalysisInput) {
             if (!group || !Array.isArray(group.bubbles) || !isOpenAIKeyConfigured()) return [];
+            group.bubbles.forEach(bubble => {
+                if (!bubble || (bubble.analysisStatus === 'ready' && bubble.detailResearch)) return;
+                bubble.analysisStatus = 'queued';
+            });
             return runWithConcurrency(group.bubbles, 2, bubble => requestBubbleAnalysis(bubble, group, input));
         }

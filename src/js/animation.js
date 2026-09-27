@@ -794,11 +794,19 @@
             const eased = smooth(progress);
             const zoomingIn = transitionState.type === 'zoomIn' && transitionState.portalCamera;
             const zoomingOut = transitionState.type === 'zoomOut';
-            const usesPortal = Boolean(transitionState.portalCamera);
+            const usesPortal = Boolean(transitionState.portalCamera) && transitionState.type === 'zoomIn';
             const approach = usesPortal ? smooth(progress / 0.5) : eased;
             const reveal = usesPortal ? smooth((progress - 0.5) / 0.5) : eased;
             const parentReveal = zoomingOut ? smooth((progress - 0.22) / 0.78) : eased;
-            if (usesPortal) {
+            if (zoomingIn && transitionState.cameraStart && transitionState.cameraEnd) {
+                camera.position.lerpVectors(transitionState.cameraStart, transitionState.cameraEnd, eased);
+                const route = transitionState.cameraEnd.clone().sub(transitionState.cameraStart);
+                const bend = new THREE.Vector3().crossVectors(route, new THREE.Vector3(0, 1, 0));
+                if (bend.lengthSq() < 0.0001) bend.set(1, 0, 0);
+                bend.normalize();
+                camera.position.addScaledVector(bend, Math.sin(progress * Math.PI) * route.length() * 0.055);
+                controls.target.lerpVectors(transitionState.controlStart, transitionState.controlEnd, eased);
+            } else if (usesPortal) {
                 if (progress <= 0.5) {
                     camera.position.lerpVectors(transitionState.cameraStart, transitionState.portalCamera, approach);
                     controls.target.lerpVectors(transitionState.controlStart, transitionState.portalTarget, approach);
@@ -870,7 +878,7 @@
             }
         }
 
-        function updateCosmicEnvironment(time) {
+        function updateCosmicEnvironment(time, deltaSeconds = 1 / 60) {
             cosmicUpdateBucket = (cosmicUpdateBucket + 1) % 4;
             starMesh.rotation.y += 0.000004;
             starMesh.rotation.x += 0.000001;
@@ -881,10 +889,12 @@
             galaxyClusters.forEach((cluster, index) => {
                 cluster.rotation.y += 0.000008 + index * 0.0000015;
             });
+            cosmicNebulae.forEach(nebula => { nebula.rotation.y += nebula.userData.rotationSpeed || 0; });
             shootingStars.forEach((entry, index) => {
-                entry.streak.position.add(entry.velocity);
-                entry.life -= 0.016;
-                const fade = Math.min(0.94, Math.max(0, entry.life * 0.28));
+                entry.streak.position.addScaledVector(entry.velocity, deltaSeconds * 60);
+                entry.life -= deltaSeconds;
+                const lifeRatio = Math.max(0, Math.min(1, entry.life / Math.max(0.001, entry.maxLife || 1)));
+                const fade = 0.94 * Math.min(1, lifeRatio * 3.4);
                 entry.head.material.opacity = fade;
                 entry.tail.material.opacity = fade * 0.64;
                 entry.tailGlow.material.opacity = fade * 0.24;
@@ -892,23 +902,32 @@
                 if (entry.life <= 0 || entry.streak.position.length() > 9200) resetShootingStar(entry, index);
             });
             cosmicSystems.forEach((entry, index) => {
-                if (index % 4 !== cosmicUpdateBucket) return;
-                entry.system.rotation.y += (0.00018 + index * 0.00003) * 4;
+                entry.system.rotation.y += (0.00018 + index * 0.00003) * deltaSeconds * 60;
                 entry.planets.forEach(planet => {
                     const angle = planet.angle + time * planet.speed;
-                    planet.mesh.position.set(Math.cos(angle) * planet.radius, Math.sin(angle * 1.7) * planet.radius * 0.08, Math.sin(angle) * planet.radius);
+                    planet.mesh.position.set(Math.cos(angle) * planet.radiusX, 0, Math.sin(angle) * planet.radiusZ);
                 });
-                const cometAngle = entry.phase + time * 0.12;
-                entry.comet.position.set(Math.cos(cometAngle) * entry.scale * 1.75, Math.sin(cometAngle * 1.4) * entry.scale * 0.24, Math.sin(cometAngle) * entry.scale * 1.75);
-                const cometVelocity = entry.comet.userData.orbitVelocity || new THREE.Vector3();
-                cometVelocity.set(
-                    -Math.sin(cometAngle) * entry.scale * 1.75,
-                    Math.cos(cometAngle * 1.4) * 1.4 * entry.scale * 0.24,
-                    Math.cos(cometAngle) * entry.scale * 1.75
-                ).normalize();
-                entry.comet.userData.orbitVelocity = cometVelocity;
-                // 彗星の尾はローカル-X。+Xを軌道接線へ向ければ、尾は常に進行方向の反対になる。
-                entry.comet.quaternion.setFromUnitVectors(cometForwardAxis, cometVelocity);
+                if (entry.comet && entry.cometPlane) {
+                    const cometAngle = entry.phase + time * entry.cometSpeed;
+                    entry.comet.position.set(Math.cos(cometAngle) * entry.cometRadiusX, 0, Math.sin(cometAngle) * entry.cometRadiusZ);
+                    entry.trailClock += deltaSeconds;
+                    entry.trailParticles.forEach(particle => {
+                        if (!Number.isFinite(particle.userData.age)) return;
+                        particle.userData.age += deltaSeconds;
+                        const fade = Math.max(0, 1 - particle.userData.age / 2.4);
+                        particle.material.opacity = fade * 0.58;
+                        particle.scale.setScalar((particle.userData.baseScale || 1) * (0.45 + fade * 0.55));
+                    });
+                    if (entry.trailClock >= 0.065) {
+                        entry.trailClock = 0;
+                        const particle = entry.trailParticles[entry.trailCursor];
+                        entry.trailCursor = (entry.trailCursor + 1) % entry.trailParticles.length;
+                        particle.position.copy(entry.comet.position);
+                        particle.userData.age = 0;
+                        particle.material.opacity = 0.58;
+                        particle.scale.setScalar(particle.userData.baseScale || 1);
+                    }
+                }
             });
             if (ngc3324Dome) {
                 ngc3324Dome.rotation.y += 0.000006;
@@ -932,10 +951,13 @@
         }
 
         function updateKeyboardNavigation(deltaSeconds) {
-            if (!controls.enabled || loadingAnimation || transitionState || groupOverviewState || isZoomingIntoGroup) return;
             if (state.screen !== 'GROUP' && state.screen !== 'SINGLE') return;
             const movementKeys = window.__bubbleBreakerMovementKeys;
             if (!movementKeys || !movementKeys.size) return;
+            if (loadingAnimation) return;
+            if (!controls.enabled || transitionState || groupOverviewState || isZoomingIntoGroup || universeRevealState) {
+                if (typeof window.interruptSceneMotion === 'function') window.interruptSceneMotion();
+            }
             const worldUp = new THREE.Vector3(0, 1, 0);
             const movement = new THREE.Vector3();
             const forward = controls.target.clone().sub(camera.position);
@@ -946,10 +968,25 @@
             if (movementKeys.has('s')) movement.sub(forward);
             if (movementKeys.has('d')) movement.add(right);
             if (movementKeys.has('a')) movement.sub(right);
+            if (movementKeys.has('e')) movement.add(worldUp);
+            if (movementKeys.has('q')) movement.sub(worldUp);
             if (movement.lengthSq() < 0.001) return;
             movement.normalize();
-            const speed = window.__bubbleBreakerShiftDown ? 96 : 32;
-            movement.multiplyScalar(speed * deltaSeconds);
+            let hierarchyDepth = 0;
+            currentBubbles.forEach(bubble => {
+                const radius = bubble.mesh.userData.finalScale || bubble.mesh.scale.x;
+                if (camera.position.distanceTo(bubble.mesh.position) >= radius * 0.94) return;
+                let parentId = bubble.parentBubbleId;
+                while (parentId) {
+                    const parent = currentBubbles.find(item => item.data.id === parentId);
+                    if (!parent || camera.position.distanceTo(parent.mesh.position) >= (parent.mesh.userData.finalScale || parent.mesh.scale.x) * 0.94) return;
+                    parentId = parent.parentBubbleId;
+                }
+                hierarchyDepth = Math.max(hierarchyDepth, bubble.hierarchyDepth + 1);
+            });
+            const worldScale = Math.pow(0.0225, hierarchyDepth);
+            const speed = (window.__bubbleBreakerShiftDown ? 168 : 32) * worldScale;
+            movement.multiplyScalar(Math.max(0.000001, speed) * deltaSeconds);
             camera.position.add(movement);
             controls.target.add(movement);
             targetCameraPos.add(movement);
@@ -968,7 +1005,8 @@
                 return;
             }
             if (document.hidden || document.body.classList.contains('about-open')) return;
-            updateCosmicEnvironment(time);
+            updateCosmicEnvironment(time, deltaSeconds);
+            updateKeyboardNavigation(deltaSeconds);
 
             // --- 状態に応じたカメラ・演出の制御 ---
             if (loadingAnimation) {
@@ -999,8 +1037,8 @@
             } else if (isZoomingIntoGroup) {
                 // 【ワープ明けの自動ズームイン中】
                 // 遠距離(Z=400)から目標(Z=25)へ、毎フレーム0.02の割合で滑らかに(Lerp)接近させる
-                camera.position.lerp(targetCameraPos, 0.02); 
-                controls.target.lerp(targetControlTarget, 0.02);
+                camera.position.lerp(targetCameraPos, 0.08);
+                controls.target.lerp(targetControlTarget, 0.08);
                 updateZoomSound(1 - Math.min(1, camera.position.distanceTo(targetCameraPos) / 70));
                 camera.lookAt(controls.target); // 常に目標を睨み続ける
                 
@@ -1012,7 +1050,6 @@
             } else if (controls.enabled) {
                 // 【ユーザー操作中（通常時）】
                 // マウスドラッグでの視点移動を滑らかに更新
-                updateKeyboardNavigation(deltaSeconds);
                 controls.update();
                 if (state.screen === 'SINGLE') {
                     const direction = getExplorationViewDirection(camera.position.clone().sub(controls.target));
@@ -1024,7 +1061,9 @@
                 controls.target.lerp(targetControlTarget, 0.05);
                 camera.lookAt(controls.target);
                 updateZoomSound(1 - Math.min(1, camera.position.distanceTo(targetCameraPos) / 50));
-                if (camera.position.distanceTo(targetCameraPos) < 0.6) {
+                const focusedBubble = currentBubbles.find(bubble => bubble.data.id === state.bubbleId);
+                const arrivalTolerance = Math.max(0.000001, (focusedBubble && (focusedBubble.mesh.userData.finalScale || focusedBubble.mesh.scale.x) || 1) * 0.025);
+                if (camera.position.distanceTo(targetCameraPos) < arrivalTolerance) {
                     stopZoomSound();
                     if (state.screen === 'SINGLE') controls.enabled = true;
                 }
@@ -1046,16 +1085,26 @@
                 }
                 // 初期Y座標を基準に絶対値で更新し、長時間実行時のdriftを防ぐ
                 const isHierarchyIncoming = transitionState && transitionState.incoming.includes(b);
-                if (!isHierarchyIncoming) b.mesh.position.y = b.baseY + Math.sin(time * 2 + b.baseX) * 0.005;
+                if (!isHierarchyIncoming) {
+                    const bubbleMotionRadius = b.mesh.userData.finalScale || b.mesh.scale.x;
+                    b.mesh.position.y = b.baseY + Math.sin(time * 2 + b.baseX) * Math.max(0.00000001, bubbleMotionRadius * 0.001);
+                }
+                const meshRotation = b.mesh.userData && b.mesh.userData.rotationVector;
+                if (meshRotation) {
+                    b.mesh.rotation.x += meshRotation.x;
+                    b.mesh.rotation.y += meshRotation.y;
+                    b.mesh.rotation.z += meshRotation.z;
+                }
 
                 const analysisProbe = b.mesh.userData && b.mesh.userData.analysisProbe;
                 const analysisProbeAnimation = analysisProbe && analysisProbe.userData.analysisProbeAnimation;
                 if (analysisProbe && analysisProbeAnimation) {
                     const isAnalysisLoading = b.data && b.data.analysisStatus === 'loading';
+                    const isAnalysisQueued = b.data && b.data.analysisStatus === 'queued';
                     const completionAt = analysisProbeAnimation.completionStartedAt || (b.data && b.data.analysisCompletionAt) || 0;
                     const completionProgress = completionAt ? (performance.now() - completionAt) / 1200 : 1;
                     const isCompletionPulse = completionProgress >= 0 && completionProgress < 1;
-                    analysisProbe.visible = Boolean(isAnalysisLoading || isCompletionPulse);
+                    analysisProbe.visible = Boolean(isAnalysisLoading || isAnalysisQueued || isCompletionPulse);
                     if (isAnalysisLoading) {
                         const orbitAngle = analysisProbeAnimation.phase + time * 2.7;
                         const latitude = Math.sin(time * 0.85 + analysisProbeAnimation.phase) * 0.34;
@@ -1069,7 +1118,11 @@
                         analysisProbeAnimation.orbit.rotation.y += 0.018;
                         analysisProbeAnimation.orbit.rotation.z = Math.sin(time * 0.8 + analysisProbeAnimation.phase) * 0.22;
                         analysisProbe.rotation.y += 0.012;
-                        analysisProbe.scale.setScalar(1.02 + Math.sin(time * 4.4 + analysisProbeAnimation.phase) * 0.08);
+                        analysisProbe.scale.setScalar((analysisProbe.userData.baseScale || 1) * (1.02 + Math.sin(time * 4.4 + analysisProbeAnimation.phase) * 0.08));
+                    } else if (isAnalysisQueued) {
+                        analysisProbeAnimation.probe.position.set(0, 0.08, 1.02);
+                        analysisProbeAnimation.probe.rotation.set(0.18, analysisProbeAnimation.phase, 0);
+                        analysisProbe.scale.setScalar((analysisProbe.userData.baseScale || 1) * 0.72);
                     }
                     if (analysisProbeAnimation.completionFlash) {
                         analysisProbeAnimation.completionFlash.visible = isCompletionPulse;
@@ -1223,8 +1276,34 @@
                 
                 // --- 解析画面時の他バブル透過処理 ---
                 const isTarget = (state.bubbleId === b.data.id);
-                // 対象バブル以外は目標不透明度を 0 にしてフェードアウトさせる
-                const targetOpacity = (isAnalysisOrDetail && !isTarget) ? 0.0 : 0.9;
+                const bubbleRadius = b.mesh.userData.finalScale || b.mesh.scale.x;
+                const insideBubble = camera.position.distanceTo(b.mesh.position) < bubbleRadius * 0.96;
+                let ancestorId = b.parentBubbleId;
+                let insideAncestors = true;
+                while (ancestorId) {
+                    const ancestor = currentBubbles.find(item => item.data.id === ancestorId);
+                    if (!ancestor || camera.position.distanceTo(ancestor.mesh.position) >= (ancestor.mesh.userData.finalScale || ancestor.mesh.scale.x) * 0.96) {
+                        insideAncestors = false;
+                        break;
+                    }
+                    ancestorId = ancestor.parentBubbleId;
+                }
+                const insidePeerBubble = currentBubbles.some(peer =>
+                    peer.hierarchyDepth === b.hierarchyDepth
+                    && peer.parentBubbleId === b.parentBubbleId
+                    && camera.position.distanceTo(peer.mesh.position) < (peer.mesh.userData.finalScale || peer.mesh.scale.x) * 0.96
+                );
+                b.interactive = insideAncestors && !insidePeerBubble && !isAnalysisOrDetail;
+                const insideNestedBubble = currentBubbles.some(child => child.parentBubbleId === b.data.id
+                    && camera.position.distanceTo(child.mesh.position) < (child.mesh.userData.finalScale || child.mesh.scale.x) * 0.96);
+                const statusNode = b.label.querySelector('.bubble-generation-status');
+                if (statusNode) {
+                    const status = b.data.analysisStatus;
+                    statusNode.textContent = status === 'loading' ? '探査中' : (status === 'ready' || status === 'partial' ? '探査完了' : '探査機待ち');
+                    statusNode.classList.toggle('is-loading', status === 'loading' || status === 'queued');
+                }
+                // カメラがバブルの内側なら球だけを透かし、表面の装飾は残す。
+                const targetOpacity = (isAnalysisOrDetail && !isTarget) ? 0.0 : (insideBubble && !insideNestedBubble ? 0.075 : 0.9);
 
                 // グループ遷移中は専用アニメーションが不透明度と縮尺を制御する。
                 if (!transitionState) b.mesh.material.opacity += (targetOpacity - b.mesh.material.opacity) * 0.1;
@@ -1234,6 +1313,11 @@
                 // --- HTML文字ラベルの追従処理 ---
                 // バブル群画面で、かつ自動ズーム演出中でない時だけラベルを表示する
                 if (state.screen === 'GROUP' && !isAnalysisOrDetail && !isZoomingIntoGroup) {
+                    if (!b.interactive) {
+                        b.label.style.opacity = '0';
+                        b.label.style.pointerEvents = 'none';
+                        return;
+                    }
                     // 3D空間の座標を、2Dの画面上の座標(-1〜1)に投影・変換する
                     const pos = labelProjectionScratch.copy(b.mesh.position).project(camera);
                     // カメラの背後にバブルがある場合はラベルを非表示にする
@@ -1245,8 +1329,7 @@
                     
                     // カメラからの距離に応じてラベルの大きさを変える（遠くにあると文字も小さくなる）
                     const dist = camera.position.distanceTo(b.mesh.position);
-                    let scale = Math.max(0.5, 15 / dist) * (1 + b.mesh.scale.x * 0.1);
-                    if (b.level === 'leaf') scale = Math.min(0.78, scale * 0.66);
+                    const scale = Math.min(1.55, Math.max(0.72, 14 / Math.max(0.001, dist)));
                     
                     // スタイルを適用してラベルを配置
                     const transform = `translate(-50%, -50%) translate(${x.toFixed(1)}px, ${y.toFixed(1)}px) scale(${scale.toFixed(3)})`;
@@ -1262,6 +1345,8 @@
                     b.label.style.pointerEvents = 'none';
                 }
             });
+
+            if (state.screen === 'GROUP' && typeof window.updateObservedHierarchyGroup === 'function') window.updateObservedHierarchyGroup();
 
             // バブル未選択時も、利用者が意図して近づけた最寄りバブルへ自動遷移する。
             updateAutomaticBubbleApproach();

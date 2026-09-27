@@ -377,6 +377,10 @@
         document.getElementById('saved-explorations-overlay')?.addEventListener('click', event => {
             if (event.target === event.currentTarget) setSavedExplorationsOpen(false);
         });
+        document.getElementById('saved-explorations-overlay')?.addEventListener('wheel', event => {
+            if (event.target === event.currentTarget) setSavedExplorationsOpen(false);
+            else event.stopPropagation();
+        }, { passive: true });
         document.addEventListener('keydown', event => {
             if (event.key === 'Escape' && !document.getElementById('saved-explorations-overlay')?.hidden) setSavedExplorationsOpen(false);
         });

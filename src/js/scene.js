@@ -88,8 +88,13 @@
         controls.dampingFactor = 0.05;
         // ホイールは階層移動だけでなく、全カテゴリ共通のカメラズームにも使う。
         controls.enableZoom = true;
-        controls.minDistance = 0.03;
         controls.maxDistance = 52000;
+        controls.minDistance = 0.000001;
+        camera.near = 0.00001;
+        camera.far = 1000000;
+        camera.updateProjectionMatrix();
+        controls.mouseButtons.LEFT = THREE.MOUSE.PAN;
+        controls.mouseButtons.RIGHT = THREE.MOUSE.ROTATE;
 
         // 照明の設定
         scene.add(new THREE.AmbientLight(0xffffff, 0.7)); // 全体を照らす環境光
@@ -475,6 +480,7 @@
         const cosmicBackgroundGroup = new THREE.Group();
         const cosmicSystems = [];
         const shootingStars = [];
+        const cosmicNebulae = [];
         let ngc3324Dome = null;
         const dataBackgroundGroup = new THREE.Group();
         const backgroundThemeGroups = { data: dataBackgroundGroup };
@@ -678,7 +684,14 @@
             scene.add(dome);
             const textureUrl = window.__NGC3324_TEXTURE__ || '';
             if (textureUrl) {
-                new THREE.TextureLoader().load(textureUrl, texture => {
+                const textureLoader = new THREE.TextureLoader();
+                textureLoader.setCrossOrigin('anonymous');
+                textureLoader.load(textureUrl, texture => {
+                    if (!texture.image || !texture.image.width || !texture.image.height) {
+                        dome.visible = false;
+                        console.warn('[BubbleBreaker][Cosmos] NGC 3324画像に有効な画素がありません', textureUrl);
+                        return;
+                    }
                     texture.encoding = THREE.sRGBEncoding;
                     try {
                         dome.material.map = softenNGC3324Seam(texture);
@@ -688,9 +701,13 @@
                         console.warn('[BubbleBreaker][Cosmos] NGC 3324の境界補正を省略しました', error);
                         dome.material.map = texture;
                     }
+                    dome.material.color.set(0xffffff);
                     dome.material.needsUpdate = true;
+                    dome.visible = window.__bubbleBreakerNGC3324Visible !== false && backgroundTheme === 'space';
+                    window.__bubbleBreakerNGC3324Loaded = true;
                 }, undefined, error => {
                     dome.visible = false;
+                    window.__bubbleBreakerNGC3324Loaded = false;
                     console.warn('[BubbleBreaker][Cosmos] NGC 3324写真の読み込みに失敗しました。星空背景を表示します', error);
                 });
             }
@@ -717,6 +734,54 @@
             galaxyGlowSprites.push({ sprite, clusterIndex: galaxyGlowSprites.length });
         }
 
+        function addProceduralNebula(center, scale, seed) {
+            const nebula = new THREE.Group();
+            nebula.position.copy(center);
+            nebula.rotation.set(cosmicRandom(seed + 1) * 0.9, cosmicRandom(seed + 2) * Math.PI * 2, cosmicRandom(seed + 3) * 0.7);
+            nebula.userData.rotationSpeed = (cosmicRandom(seed + 4) - 0.5) * 0.000035;
+            const hues = [0.57, 0.62, 0.79, 0.91, 0.08];
+            const hue = hues[Math.floor(cosmicRandom(seed + 5) * hues.length)];
+            const cloudColor = new THREE.Color().setHSL(hue, 0.82, 0.58);
+            const cloudTexture = createGlowTexture(`rgba(255,255,255,${0.78 + cosmicRandom(seed + 6) * 0.22})`);
+            const lobeCount = 5 + Math.floor(cosmicRandom(seed + 7) * 7);
+            const angle = cosmicRandom(seed + 8) * Math.PI * 2;
+            for (let index = 0; index < lobeCount; index += 1) {
+                const progress = index / Math.max(1, lobeCount - 1);
+                const wave = Math.sin(index * 2.1 + seed) * scale * 0.14;
+                const radius = scale * (0.24 + cosmicRandom(seed + index * 4.3) * 0.46);
+                const lobeColor = cloudColor.clone().offsetHSL((cosmicRandom(seed + index * 5.1) - 0.5) * 0.16, 0, (cosmicRandom(seed + index * 6.9) - 0.5) * 0.18);
+                const lobe = new THREE.Sprite(new THREE.SpriteMaterial({
+                    map: cloudTexture, color: lobeColor, transparent: true,
+                    opacity: 0.095 + cosmicRandom(seed + index * 8.1) * 0.12,
+                    depthWrite: false, blending: THREE.AdditiveBlending, fog: false
+                }));
+                const along = (progress - 0.5) * scale * (0.72 + cosmicRandom(seed + index * 9.7) * 0.28);
+                lobe.position.set(Math.cos(angle) * along - Math.sin(angle) * wave, wave * 0.45, Math.sin(angle) * along + Math.cos(angle) * wave);
+                const aspect = 0.32 + cosmicRandom(seed + index * 11.3) * 0.52;
+                lobe.scale.set(radius, radius * aspect, 1);
+                lobe.material.rotation = angle + (cosmicRandom(seed + index * 13.1) - 0.5) * 1.1;
+                nebula.add(lobe);
+            }
+            const dustCount = 220;
+            const dustPositions = new Float32Array(dustCount * 3);
+            for (let index = 0; index < dustCount; index += 1) {
+                const t = cosmicRandom(seed + index * 17.7) * Math.PI * 2;
+                const radial = Math.sqrt(cosmicRandom(seed + index * 18.9));
+                const along = (cosmicRandom(seed + index * 20.3) - 0.5) * scale * 0.75;
+                dustPositions[index * 3] = Math.cos(angle) * along - Math.sin(t) * radial * scale * 0.28;
+                dustPositions[index * 3 + 1] = (cosmicRandom(seed + index * 22.1) - 0.5) * scale * 0.24;
+                dustPositions[index * 3 + 2] = Math.sin(angle) * along + Math.cos(t) * radial * scale * 0.28;
+            }
+            const dustGeometry = new THREE.BufferGeometry();
+            dustGeometry.setAttribute('position', new THREE.BufferAttribute(dustPositions, 3));
+            nebula.add(new THREE.Points(dustGeometry, new THREE.PointsMaterial({
+                color: cloudColor, size: Math.max(2, scale * 0.006), transparent: true, opacity: 0.42,
+                depthWrite: false, blending: THREE.AdditiveBlending, fog: false
+            })));
+            cosmicNebulae.push(nebula);
+            cosmicBackgroundGroup.add(nebula);
+        }
+
         function addSolarSystem(center, scale, seed) {
             const system = new THREE.Group();
             system.position.copy(center);
@@ -730,50 +795,89 @@
                 depthWrite: false, fog: false
             }));
             star.scale.set(scale * (0.28 + cosmicRandom(seed + 4) * 0.12), scale * (0.28 + cosmicRandom(seed + 4) * 0.12), 1);
-            system.add(star);
+            const elements = [star];
             const planets = [];
-            for (let index = 0; index < 4; index++) {
-                const radius = scale * (0.65 + index * 0.38);
-                const orbitCurve = new THREE.EllipseCurve(0, 0, radius, radius * (0.8 + index * 0.03), 0, Math.PI * 2, false, 0);
-                const orbitGeometry = new THREE.BufferGeometry().setFromPoints(orbitCurve.getPoints(48).map(point => new THREE.Vector3(point.x, 0, point.y)));
+            const planetCount = 2 + Math.floor(cosmicRandom(seed + 14) * 5);
+            for (let index = 0; index < planetCount; index++) {
+                const radiusX = scale * (0.52 + index * 0.3 + cosmicRandom(seed + index * 5.3) * 0.54);
+                const radiusZ = radiusX * (0.56 + cosmicRandom(seed + index * 6.7) * 0.43);
+                const plane = new THREE.Group();
+                plane.rotation.set((cosmicRandom(seed + index * 7.9) - 0.5) * Math.PI / 3, cosmicRandom(seed + index * 9.1) * Math.PI * 2, 0);
+                const orbitCurve = new THREE.EllipseCurve(0, 0, radiusX, radiusZ, 0, Math.PI * 2, false, 0);
+                const orbitGeometry = new THREE.BufferGeometry().setFromPoints(orbitCurve.getPoints(64).map(point => new THREE.Vector3(point.x, 0, point.y)));
                 const orbit = new THREE.LineLoop(orbitGeometry, new THREE.LineBasicMaterial({ color: 0x8da7d8, transparent: true, opacity: 0.16, depthWrite: false }));
-                system.add(orbit);
+                plane.add(orbit);
                 const planet = new THREE.Mesh(
-                    new THREE.SphereGeometry(Math.max(1.2, scale * (0.022 + index * 0.006)), 10, 8),
+                    new THREE.SphereGeometry(Math.max(1.2, scale * (0.018 + cosmicRandom(seed + index * 11.2) * 0.025)), 12, 10),
                     new THREE.MeshBasicMaterial({
-                        color: new THREE.Color().setHSL((0.1 + index * 0.14 + seed * 0.01) % 1, 0.72, 0.58),
+                        color: new THREE.Color().setHSL((cosmicRandom(seed + index * 13.7) + seed * 0.01) % 1, 0.72, 0.58),
                         transparent: true, opacity: 0.9, fog: false
                     })
                 );
-                planets.push({ mesh: planet, radius, angle: cosmicRandom(seed + index * 4) * Math.PI * 2, speed: 0.05 + index * 0.018 });
-                system.add(planet);
+                planets.push({ mesh: planet, radiusX, radiusZ, angle: cosmicRandom(seed + index * 4) * Math.PI * 2, speed: (0.11 + cosmicRandom(seed + index * 15.1) * 0.15) / Math.sqrt(0.5 + index * 0.45) });
+                plane.add(planet);
+                elements.push(plane);
             }
-            const beltGeometry = new THREE.BufferGeometry();
-            const beltCount = 360;
-            const beltPositions = new Float32Array(beltCount * 3);
-            for (let index = 0; index < beltCount; index++) {
-                const angle = cosmicRandom(seed + index * 0.71) * Math.PI * 2;
-                const radius = scale * (1.28 + cosmicRandom(seed + index * 1.41) * 0.18);
-                beltPositions[index * 3] = Math.cos(angle) * radius;
-                beltPositions[index * 3 + 1] = (cosmicRandom(seed + index * 1.93) - 0.5) * scale * 0.08;
-                beltPositions[index * 3 + 2] = Math.sin(angle) * radius;
+            if (cosmicRandom(seed + 81) > 0.32) {
+                const beltPlane = new THREE.Group();
+                beltPlane.rotation.x = (cosmicRandom(seed + 82) - 0.5) * Math.PI / 3;
+                beltPlane.rotation.y = cosmicRandom(seed + 83) * Math.PI * 2;
+                const beltGeometry = new THREE.BufferGeometry();
+                const beltCount = 220 + Math.floor(cosmicRandom(seed + 84) * 260);
+                const beltPositions = new Float32Array(beltCount * 3);
+                for (let index = 0; index < beltCount; index++) {
+                    const angle = cosmicRandom(seed + index * 0.71) * Math.PI * 2;
+                    const radius = scale * (0.95 + cosmicRandom(seed + index * 1.41) * 1.1);
+                    beltPositions[index * 3] = Math.cos(angle) * radius;
+                    beltPositions[index * 3 + 1] = (cosmicRandom(seed + index * 1.93) - 0.5) * scale * 0.08;
+                    beltPositions[index * 3 + 2] = Math.sin(angle) * radius;
+                }
+                beltGeometry.setAttribute('position', new THREE.BufferAttribute(beltPositions, 3));
+                beltPlane.add(new THREE.Points(beltGeometry, new THREE.PointsMaterial({ size: Math.max(1.2, scale * 0.018), color: 0xc9a77e, transparent: true, opacity: 0.7, depthWrite: false, blending: THREE.AdditiveBlending })));
+                elements.push(beltPlane);
             }
-            beltGeometry.setAttribute('position', new THREE.BufferAttribute(beltPositions, 3));
-            system.add(new THREE.Points(beltGeometry, new THREE.PointsMaterial({ size: Math.max(1.2, scale * 0.018), color: 0xc9a77e, transparent: true, opacity: 0.7, depthWrite: false, blending: THREE.AdditiveBlending })));
-
-            const comet = new THREE.Group();
-            comet.add(new THREE.Mesh(new THREE.SphereGeometry(Math.max(2, scale * 0.04), 8, 6), new THREE.MeshBasicMaterial({ color: 0xbbe8ff, transparent: true, opacity: 0.95 })));
-            const tailGeometry = new THREE.BufferGeometry();
-            const tailPositions = new Float32Array(36 * 3);
-            for (let index = 0; index < 36; index++) {
-                tailPositions[index * 3] = -index * scale * 0.045;
-                tailPositions[index * 3 + 1] = (cosmicRandom(seed + index * 2.2) - 0.5) * scale * 0.06;
-                tailPositions[index * 3 + 2] = (cosmicRandom(seed + index * 3.4) - 0.5) * scale * 0.06;
+            let comet = null;
+            let cometPlane = null;
+            let cometRadiusX = scale * 2;
+            let cometRadiusZ = scale * 2;
+            const trailParticles = [];
+            if (cosmicRandom(seed + 91) > 0.22) {
+                cometPlane = new THREE.Group();
+                const nearStarOrbit = cosmicRandom(seed + 92) < 0.22;
+                cometRadiusX = scale * (nearStarOrbit ? 0.42 + cosmicRandom(seed + 93) * 0.4 : 1.55 + cosmicRandom(seed + 94) * 1.55);
+                cometRadiusZ = cometRadiusX * (0.38 + cosmicRandom(seed + 95) * 0.52);
+                const inclination = (cosmicRandom(seed + 96) - 0.5) * Math.PI / 3;
+                cometPlane.rotation.set(inclination, cosmicRandom(seed + 97) * Math.PI * 2, 0);
+                const cometOrbit = new THREE.EllipseCurve(0, 0, cometRadiusX, cometRadiusZ, 0, Math.PI * 2, false, 0);
+                const cometOrbitGeometry = new THREE.BufferGeometry().setFromPoints(cometOrbit.getPoints(80).map(point => new THREE.Vector3(point.x, 0, point.y)));
+                cometPlane.add(new THREE.LineLoop(cometOrbitGeometry, new THREE.LineBasicMaterial({ color: 0xa6c8e7, transparent: true, opacity: 0.11, depthWrite: false })));
+                comet = new THREE.Group();
+                comet.add(new THREE.Mesh(new THREE.SphereGeometry(Math.max(2, scale * 0.04), 10, 8), new THREE.MeshBasicMaterial({ color: 0xc7efff, transparent: true, opacity: 0.98 })));
+                cometPlane.add(comet);
+                const trailTexture = createGlowTexture('rgba(190,235,255,1)');
+                const trailCount = 30;
+                for (let index = 0; index < trailCount; index++) {
+                    const particle = new THREE.Sprite(new THREE.SpriteMaterial({ map: trailTexture, color: index % 3 ? 0x83c8ff : 0xe6fbff, transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending, fog: false }));
+                    particle.scale.setScalar(Math.max(1, scale * (0.008 + cosmicRandom(seed + index * 3.7) * 0.018)));
+                    particle.userData.baseScale = particle.scale.x;
+                    particle.userData.age = Infinity;
+                    cometPlane.add(particle);
+                    trailParticles.push(particle);
+                }
+                elements.push(cometPlane);
             }
-            tailGeometry.setAttribute('position', new THREE.BufferAttribute(tailPositions, 3));
-            comet.add(new THREE.Points(tailGeometry, new THREE.PointsMaterial({ size: Math.max(1.5, scale * 0.022), color: 0x9bdcff, transparent: true, opacity: 0.65, depthWrite: false, blending: THREE.AdditiveBlending })));
-            system.add(comet);
-            cosmicSystems.push({ system, planets, comet, scale, phase: cosmicRandom(seed + 8) * Math.PI * 2 });
+            for (let index = elements.length - 1; index > 0; index--) {
+                const swapIndex = Math.floor(cosmicRandom(seed + index * 31.7) * (index + 1));
+                [elements[index], elements[swapIndex]] = [elements[swapIndex], elements[index]];
+            }
+            elements.forEach(element => system.add(element));
+            cosmicSystems.push({
+                system, planets, comet, cometPlane, trailParticles, trailCursor: 0, trailClock: 0, scale,
+                cometRadiusX,
+                cometRadiusZ,
+                phase: cosmicRandom(seed + 8) * Math.PI * 2,
+                cometSpeed: 0.08 + cosmicRandom(seed + 99) * 0.16
+            });
             cosmicBackgroundGroup.add(system);
         }
 
@@ -788,8 +892,9 @@
             // 尾はローカル+Zへ伸びるため、+Zを進行方向の反対へ向ける。
             entry.streak.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), direction.clone().negate());
             entry.direction.copy(direction);
-            entry.velocity.copy(direction).multiplyScalar(2.2 + cosmicRandom(index + entry.respawnCount * 2.7) * 2.4);
-            entry.life = 2.8 + cosmicRandom(index + entry.respawnCount * 3.9) * 3.2;
+            entry.velocity.copy(direction).multiplyScalar(1.4 + cosmicRandom(index + entry.respawnCount * 2.7) * 5.8);
+            entry.life = 8 + cosmicRandom(index + entry.respawnCount * 3.9) * 14;
+            entry.maxLife = entry.life;
             entry.respawnCount += 1;
             const length = 110 + cosmicRandom(index * 2.4 + entry.respawnCount * 1.7) * 150;
             entry.head.scale.setScalar(18 + cosmicRandom(index + entry.respawnCount) * 12);
@@ -848,6 +953,15 @@
             createNGC3324PhotoDome();
             createAdditionalBackgroundThemes();
             galaxyClusterCenters.forEach((center, index) => addGalaxyGlow(center, 180 + index * 22, (0.58 + index * 0.047) % 1));
+            const nebulaCount = 8 + Math.floor(cosmicRandom(1441) * 6);
+            Array.from({ length: nebulaCount }, (_, index) => {
+                const seed = 1301 + index * 37;
+                addProceduralNebula(
+                    createSphericalBackgroundPosition(index, nebulaCount, 2200, 14800, seed),
+                    380 + cosmicRandom(seed + 1) * 1180,
+                    seed
+                );
+            });
             const externalSystemCount = galaxyClusterCenters.length * GALAXIES_PER_CLUSTER;
             Array.from({ length: externalSystemCount }, (_, index) => {
                 const nearby = index < Math.ceil(externalSystemCount * 0.22);
@@ -898,9 +1012,13 @@
         let targetCameraPos = new THREE.Vector3(0, 0, 25);     // カメラが移動する目標地点
         let targetControlTarget = new THREE.Vector3(0, 0, 0);  // カメラが向くべき注視点の目標地点
         const BUBBLE_GROUP_WORLD_SCALE = 1.75;
+        const RELATIVE_BUBBLE_DIAMETER = 0.0225;
         let groupWorldOffset = new THREE.Vector3(0, 0, 0);
         let groupWorldScale = BUBBLE_GROUP_WORLD_SCALE;
         let navigationStack = [];
+        let hierarchyVisualShells = [];
+        let hierarchyRootGroupId = null;
+        let hierarchyGroupLayouts = new Map();
         let transitionState = null;
         let groupOverviewState = null;
         let loadingAnimation = null;
@@ -1011,7 +1129,7 @@
         function getGroupOverviewTarget(directionOverride = null) {
             if (!currentBubbles.length) return null;
             const bounds = new THREE.Box3();
-            currentBubbles.forEach(bubble => {
+            currentBubbles.filter(bubble => bubble.groupId === state.groupId).forEach(bubble => {
                 if (!bubble.mesh.visible) return;
                 const radius = Math.max(0.01, bubble.mesh.userData.finalScale || bubble.mesh.scale.x);
                 const position = bubble.mesh.position;
@@ -1076,7 +1194,7 @@
             const verticalFov = THREE.MathUtils.degToRad(getExplorationFieldOfView());
             const horizontalFov = 2 * Math.atan(Math.tan(verticalFov / 2) * Math.max(0.5, camera.aspect));
             const limitingFov = Math.min(verticalFov, horizontalFov);
-            return Math.max(0.05, radius / Math.sin(limitingFov / 2) * 1.34 + radius * 0.34);
+            return Math.max(0.00002, radius / Math.sin(limitingFov * 0.45) * 1.02 + radius * 0.05);
         }
 
         function getNearestApproachingBubble() {
@@ -1141,17 +1259,18 @@
 
         function createAnalysisProbeVisual(isFocus = false) {
             const visual = new THREE.Group();
-            visual.scale.setScalar(isFocus ? 1.35 : 1.12);
+            visual.scale.setScalar(isFocus ? 2.55 : 2.05);
+            visual.userData.baseScale = visual.scale.x;
             const orbit = new THREE.Mesh(
-                new THREE.TorusGeometry(1.04, isFocus ? 0.032 : 0.022, 8, 72),
-                new THREE.MeshBasicMaterial({ color: 0xffe38a, transparent: true, opacity: isFocus ? 1 : 0.82, depthWrite: false, blending: THREE.AdditiveBlending })
+                new THREE.TorusGeometry(1.04, isFocus ? 0.05 : 0.04, 8, 72),
+                new THREE.MeshBasicMaterial({ color: 0xffa94d, transparent: true, opacity: isFocus ? 1 : 0.88, depthWrite: false, blending: THREE.AdditiveBlending })
             );
             orbit.rotation.x = Math.PI * 0.5;
             visual.add(orbit);
             const probe = new THREE.Group();
             const body = new THREE.Mesh(
-                new THREE.SphereGeometry(isFocus ? 0.065 : 0.045, 10, 8),
-                new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 1, depthWrite: false, blending: THREE.AdditiveBlending })
+                new THREE.SphereGeometry(isFocus ? 0.105 : 0.085, 12, 10),
+                new THREE.MeshBasicMaterial({ color: 0xdffaff, transparent: true, opacity: 1, depthWrite: false, blending: THREE.AdditiveBlending })
             );
             const nose = new THREE.Mesh(
                 new THREE.ConeGeometry(isFocus ? 0.045 : 0.032, isFocus ? 0.16 : 0.11, 7, 1),
@@ -1580,65 +1699,18 @@
             bubbles.forEach(bubble => {
                 if (!bubble || !bubble.mesh) return;
                 ensureBubbleVisual(bubble.mesh, bubble.data, bubble.level, bubble.isFocus);
+                const ornament = bubble.mesh.userData.networkVisual || bubble.mesh.userData.deepSeaVisual || bubble.mesh.userData.dataVisual;
+                if (ornament && bubble.mesh.userData.ornamentRotation) {
+                    ornament.rotation.copy(bubble.mesh.userData.ornamentRotation);
+                    ornament.scale.setScalar(bubble.mesh.userData.ornamentScale || 1);
+                }
             });
             return bubbleVisualMode;
         };
 
         function createChildBubblePreview(bubbleData) {
-            const childGroup = bubbleData && bubbleData.childId ? activeDB[bubbleData.childId] : null;
-            if (!childGroup || !Array.isArray(childGroup.bubbles) || !childGroup.bubbles.length) return null;
-            arrangeBubblePositions(childGroup);
-            const preview = new THREE.Group();
-            preview.name = 'child-bubble-preview';
-            preview.raycast = () => {};
-            const validChildren = childGroup.bubbles.filter(isRenderableBubbleData).slice(0, 8);
-            if (!validChildren.length) return null;
-            const maximumDistance = Math.max(1, ...validChildren.map(child => {
-                const position = Array.isArray(child.pos) ? child.pos : [0, 0, 0];
-                return Math.hypot(Number(position[0]) || 0, Number(position[1]) || 0, Number(position[2]) || 0);
-            }));
-            const previewChildren = validChildren.slice();
-            while (previewChildren.length < 5) previewChildren.push(validChildren[previewChildren.length % validChildren.length]);
-            previewChildren.forEach((child, index) => {
-                const source = Array.isArray(child.pos) ? child.pos : [Math.cos(index) * 10, Math.sin(index) * 10, 0];
-                const position = new THREE.Vector3(...source).multiplyScalar(0.48 / maximumDistance);
-                if (index >= validChildren.length) {
-                    position.add(new THREE.Vector3(Math.cos(index * 2.4), Math.sin(index * 2.4), Math.sin(index) * 0.5).multiplyScalar(0.18 + (index - validChildren.length) * 0.08));
-                }
-                const color = new THREE.Color(child.htmlColor || child.color || 0x9beeff);
-                const radius = Math.min(0.14, 0.065 + Math.sqrt(Math.max(1, Number(child.size) || 1)) * 0.009);
-                const miniature = new THREE.Mesh(
-                    new THREE.SphereGeometry(radius, 16, 12),
-                    new THREE.MeshBasicMaterial({
-                        color,
-                        transparent: true,
-                        opacity: index >= validChildren.length ? 0.2 : 0.42,
-                        depthWrite: false,
-                        blending: THREE.AdditiveBlending,
-                        fog: false
-                    })
-                );
-                miniature.position.copy(position);
-                miniature.userData.childBubbleId = index < validChildren.length ? child.id : null;
-                miniature.userData.sourceChildBubbleId = child.id;
-                miniature.userData.isPreviewEcho = index >= validChildren.length;
-                preview.add(miniature);
-            });
-            const boundary = new THREE.Mesh(
-                new THREE.SphereGeometry(0.66, 20, 14),
-                new THREE.MeshBasicMaterial({
-                    color: 0xbfefff,
-                    transparent: true,
-                    opacity: 0.075,
-                    wireframe: true,
-                    depthWrite: false,
-                    blending: THREE.AdditiveBlending,
-                    fog: false
-                })
-            );
-            preview.add(boundary);
-            preview.userData.childGroupId = childGroup.id;
-            return preview;
+            // 子テーマは重複コピーではなく、buildWorldHierarchyが実データから配置する。
+            return null;
         }
 
         function createHierarchyTransitionShell(position, radius, color = 0x9beeff) {
@@ -1656,7 +1728,7 @@
                 })
             );
             shell.position.copy(position);
-            shell.scale.setScalar(Math.max(0.01, radius));
+            shell.scale.setScalar(Math.max(0.0000001, radius));
             shell.userData.baseScale = Math.max(0.01, radius);
             scene.add(shell);
             return shell;
@@ -1687,9 +1759,10 @@
             mesh.userData.dataVisual = null;
             mesh.userData.analysisProbe = createAnalysisProbeVisual(isFocus);
             mesh.add(mesh.userData.analysisProbe);
-            mesh.userData.childPreview = createChildBubblePreview(bubbleData);
-            if (mesh.userData.childPreview) mesh.add(mesh.userData.childPreview);
+            mesh.userData.childPreview = null;
             if (bubbleData) ensureBubbleVisual(mesh, bubbleData, level, isFocus);
+            const ornament = mesh.userData.networkVisual || mesh.userData.deepSeaVisual || mesh.userData.dataVisual;
+            if (ornament) ornament.scale.setScalar(mesh.userData.ornamentScale || (0.82 + (hashBubbleValue(bubbleData && bubbleData.id) % 37) / 100));
             return mesh;
         }
 
@@ -1717,8 +1790,27 @@
             }));
         }
 
+        function getGroupAverageBubbleRadius(group) {
+            if (!group || !Array.isArray(group.bubbles)) return 1;
+            const radii = group.bubbles.filter(isRenderableBubbleData).map(bubble => getBubbleLocalRadius(group, bubble));
+            return radii.length ? radii.reduce((sum, radius) => sum + radius, 0) / radii.length : 1;
+        }
+
+        function getGroupPositionExtent(group) {
+            if (!group || !Array.isArray(group.bubbles)) return 1;
+            arrangeBubblePositions(group);
+            return Math.max(1, ...group.bubbles.filter(isRenderableBubbleData).map(bubble => {
+                const position = Array.isArray(bubble.pos) ? bubble.pos : [0, 0, 0];
+                return Math.hypot(Number(position[0]) || 0, Number(position[1]) || 0, Number(position[2]) || 0);
+            }));
+        }
+
         function getNestedGroupWorldScale(group, parentBubbleWorldRadius) {
-            return Math.max(0.012, (Math.max(0.1, parentBubbleWorldRadius) * 0.56) / getGroupLocalExtent(group));
+            return Math.max(0.0000001, (Math.max(0.00001, parentBubbleWorldRadius) * RELATIVE_BUBBLE_DIAMETER) / getGroupAverageBubbleRadius(group));
+        }
+
+        function getNestedGroupPlacementScale(group, parentBubbleWorldRadius) {
+            return Math.max(0.000001, (Math.max(0.00001, parentBubbleWorldRadius) * 0.52) / getGroupPositionExtent(group));
         }
 
         function buildNavigationEntries(path) {
@@ -1732,8 +1824,9 @@
                     arrangeBubblePositions(parent);
                     anchorBubble = parent && parent.bubbles.find(bubble => bubble.childId === groupId);
                     if (anchorBubble) {
+                        const parentRadius = getBubbleLocalRadius(parent, anchorBubble) * scale;
                         offset = offset.clone().add(new THREE.Vector3(...anchorBubble.pos).multiplyScalar(scale));
-                        scale = getNestedGroupWorldScale(group, getBubbleLocalRadius(parent, anchorBubble) * scale);
+                        scale = getNestedGroupPlacementScale(group, parentRadius);
                     }
                 }
                 return {
@@ -1745,6 +1838,121 @@
                     depth: index
                 };
             });
+        }
+
+        function createVisualOnlyBubbleShell(position, radius, color = 0x9beeff, opacity = 0.08) {
+            const shell = createHierarchyTransitionShell(position, radius, color);
+            shell.name = 'visual-only-bubble-shell';
+            shell.material.opacity = opacity;
+            shell.scale.setScalar(Math.max(0.0000001, radius));
+            shell.renderOrder = -2;
+            hierarchyVisualShells.push(shell);
+            return shell;
+        }
+
+        function buildWorldHierarchy(rootGroupId) {
+            const layouts = new Map();
+            const rendered = [];
+            const visited = new Set();
+            hierarchyVisualShells.forEach(shell => {
+                scene.remove(shell);
+                disposeObjectTree(shell);
+            });
+            hierarchyVisualShells = [];
+            labelsContainer.replaceChildren();
+
+            const addGroup = (groupId, center, placementScale, depth, parentBubbleId = null, parentBubbleRadius = 0) => {
+                const group = activeDB[groupId];
+                if (!group || visited.has(groupId) || !Array.isArray(group.bubbles)) return;
+                visited.add(groupId);
+                arrangeBubblePositions(group);
+                const validBubbles = group.bubbles.filter(isRenderableBubbleData);
+                if (!validBubbles.length) return;
+                const averageLocalRadius = getGroupAverageBubbleRadius(group);
+                const layout = { groupId, group, center: center.clone(), placementScale, depth, parentBubbleId, parentBubbleRadius, bubbles: [] };
+                layouts.set(groupId, layout);
+
+                validBubbles.forEach((bubbleData, index) => {
+                    const local = Array.isArray(bubbleData.pos) ? bubbleData.pos : [0, 0, 0];
+                    const position = center.clone().add(new THREE.Vector3(...local).multiplyScalar(placementScale));
+                    const localRadius = getBubbleLocalRadius(group, bubbleData);
+                    const radius = depth === 0
+                        ? localRadius * BUBBLE_GROUP_WORLD_SCALE
+                        : Math.max(0.000002, parentBubbleRadius * RELATIVE_BUBBLE_DIAMETER * localRadius / Math.max(0.0001, averageLocalRadius));
+                    const isFocus = isFocusPathBubble(group, bubbleData);
+                    const mesh = createBubbleMesh(bubbleData.size, bubbleData.color, position.toArray(), bubbleData, depth === 2 ? 'leaf' : (group.level || 'central'), isFocus);
+                    mesh.position.copy(position);
+                    mesh.scale.setScalar(radius);
+                    mesh.userData.finalScale = radius;
+                    mesh.userData.hierarchyDepth = depth;
+                    mesh.material.depthWrite = false;
+                    const seed = hashBubbleValue(bubbleData.id);
+                    mesh.userData.rotationVector = new THREE.Vector3(
+                        ((seed % 17) - 8) * 0.000035,
+                        ((Math.floor(seed / 7) % 19) - 9) * 0.000035,
+                        ((Math.floor(seed / 13) % 15) - 7) * 0.000025
+                    );
+                    mesh.userData.ornamentScale = 0.82 + (seed % 37) / 100;
+                    mesh.userData.bubbleVariant = seed % 4;
+                    mesh.userData.ornamentRotation = new THREE.Euler(
+                        ((Math.floor(seed / 5) % 17) - 8) * 0.055,
+                        ((Math.floor(seed / 11) % 23) - 11) * 0.065,
+                        ((Math.floor(seed / 19) % 15) - 7) * 0.055
+                    );
+                    const ornament = mesh.userData.networkVisual || mesh.userData.deepSeaVisual || mesh.userData.dataVisual;
+                    if (ornament) {
+                        ornament.scale.setScalar(mesh.userData.ornamentScale);
+                        ornament.rotation.copy(mesh.userData.ornamentRotation);
+                    }
+                    scene.add(mesh);
+
+                    const label = document.createElement('div');
+                    label.className = 'bubble-label';
+                    label.dataset.level = String(depth);
+                    const name = document.createElement('span');
+                    name.className = 'bubble-label-name';
+                    name.textContent = bubbleData.name;
+                    label.appendChild(name);
+                    const status = document.createElement('span');
+                    status.className = 'bubble-generation-status';
+                    status.dataset.bubbleStatus = bubbleData.id;
+                    label.appendChild(status);
+                    label.title = `${bubbleData.name} — 選択して詳しく見る`;
+                    label.onclick = event => {
+                        event.stopPropagation();
+                        selectBubble(bubbleData);
+                    };
+                    labelsContainer.appendChild(label);
+                    const bubble = {
+                        mesh, label, data: bubbleData, level: depth === 2 ? 'leaf' : group.level || 'central', isFocus,
+                        groupId: group.id, groupData: group, hierarchyDepth: depth, parentBubbleId,
+                        interactive: depth === 0, baseX: position.x, baseY: position.y
+                    };
+                    layout.bubbles.push(bubble);
+                    rendered.push(bubble);
+
+                    const childGroup = bubbleData.childId && activeDB[bubbleData.childId];
+                    if (childGroup && depth < 2) {
+                        const childPlacementScale = getNestedGroupPlacementScale(childGroup, radius);
+                        addGroup(childGroup.id, position, childPlacementScale, depth + 1, bubbleData.id, radius);
+                    } else if (depth === 2) {
+                        const tinyRadius = Math.max(0.0000001, radius * RELATIVE_BUBBLE_DIAMETER);
+                        for (let shellIndex = 0; shellIndex < 3; shellIndex += 1) {
+                            const angle = shellIndex * Math.PI * 2 / 3;
+                            const shellPosition = position.clone().add(new THREE.Vector3(Math.cos(angle), Math.sin(angle), (shellIndex - 1) * 0.12).multiplyScalar(radius * 0.08));
+                            createVisualOnlyBubbleShell(shellPosition, tinyRadius, bubbleData.color, 0.12);
+                        }
+                    }
+                });
+                if (depth === 0) {
+                    layout.bubbles.forEach(bubble => {
+                        const radius = bubble.mesh.userData.finalScale || bubble.mesh.scale.x;
+                        createVisualOnlyBubbleShell(bubble.mesh.position, radius / RELATIVE_BUBBLE_DIAMETER, bubble.data.color || 0xa9dfff, 0.022);
+                    });
+                }
+            };
+            addGroup(rootGroupId, new THREE.Vector3(), BUBBLE_GROUP_WORLD_SCALE, 0);
+            return { layouts, bubbles: rendered };
         }
 
         // ==========================================
@@ -1804,11 +2012,53 @@
             return Boolean(activeDB[targetGroupId] && activeDB[targetGroupId].parentId === group.id && bubble.childId === targetGroupId);
         }
         function selectBubble(bubbleData) {
+            const selected = currentBubbles.find(bubble => bubble.data.id === bubbleData.id);
+            const selectedGroup = selected && selected.groupData || state.groupData;
+            if (selectedGroup && selectedGroup.id !== state.groupId) {
+                state.groupId = selectedGroup.id;
+                state.groupData = selectedGroup;
+                const path = getGroupHierarchyPath(selectedGroup.id).map(group => group.id);
+                if (path.length) navigationStack = buildNavigationEntries(path);
+                const entry = navigationStack.find(item => item.groupId === selectedGroup.id);
+                if (entry) {
+                    groupWorldOffset.copy(entry.worldPosition);
+                    groupWorldScale = entry.worldScale;
+                }
+            }
             if (typeof requestBubbleAnalysis === 'function' && state.groupData) {
                 void requestBubbleAnalysis(bubbleData, state.groupData);
             }
             loadSingle(bubbleData);
         }
+
+        window.interruptSceneMotion = function() {
+            if (transitionState) {
+                const active = new Set(currentBubbles.map(bubble => bubble.mesh));
+                transitionState.outgoing.forEach(bubble => { if (!active.has(bubble.mesh)) disposeBubble(bubble); });
+                if (transitionState.shell) {
+                    scene.remove(transitionState.shell);
+                    disposeObjectTree(transitionState.shell);
+                }
+                transitionState = null;
+                currentBubbles.forEach(bubble => {
+                    bubble.mesh.visible = true;
+                    bubble.mesh.material.opacity = 0.95;
+                });
+            }
+            if (groupOverviewState) groupOverviewState = null;
+            if (universeRevealState) {
+                if (universeRevealState.beacon) {
+                    scene.remove(universeRevealState.beacon);
+                    disposeObjectTree(universeRevealState.beacon);
+                }
+                universeRevealState = null;
+            }
+            isZoomingIntoGroup = false;
+            controls.enabled = true;
+            applyExplorationViewControls();
+            controls.update();
+            return true;
+        };
 
         window.getBubbleNavigationPath = function() {
             const path = navigationStack.map(entry => entry.groupId).filter(groupId => activeDB && activeDB[groupId]);
@@ -2147,31 +2397,32 @@
             } else if (previousScreen === 'SINGLE' && groupId === previousGroupId) {
                 transitionType = 'reveal';
             } else if (previousScreen === 'SINGLE' && state.bubbleData && state.bubbleData.childId === groupId) {
-                const anchorPosition = new THREE.Vector3(...state.bubbleData.pos).multiplyScalar(previousScale);
-                nextOffset.copy(previousOffset).add(anchorPosition);
                 const parentGroup = activeDB[previousGroupId];
                 const parentBubbleMesh = currentBubbles.find(bubble => bubble.data.id === state.bubbleData.id);
+                if (parentBubbleMesh) nextOffset.copy(parentBubbleMesh.mesh.position);
                 const parentWorldRadius = parentBubbleMesh
                     ? (parentBubbleMesh.mesh.userData.finalScale || parentBubbleMesh.mesh.scale.x)
                     : getBubbleLocalRadius(parentGroup, state.bubbleData) * previousScale;
-                nextScale = getNestedGroupWorldScale(data, parentWorldRadius);
+                nextScale = getNestedGroupPlacementScale(data, parentWorldRadius);
                 navigationStack.push({ groupId, parentGroupId: data.parentId || previousGroupId, anchorBubbleId: state.bubbleData.id, worldPosition: nextOffset.clone(), worldScale: nextScale, depth: navigationStack.length });
                 transitionType = 'zoomIn';
-            } else if (previousScreen === 'GROUP' && state.groupData && state.groupData.parentId === groupId) {
-                const parentEntryIndex = navigationStack.findIndex(entry => entry.groupId === groupId);
-                const parentEntry = parentEntryIndex >= 0 ? navigationStack[parentEntryIndex] : null;
-                if (parentEntry) {
-                    nextOffset.copy(parentEntry.worldPosition);
-                    nextScale = parentEntry.worldScale;
-                    navigationStack = navigationStack.slice(0, parentEntryIndex + 1);
-                } else {
-                    const hierarchyPath = getGroupHierarchyPath(groupId).map(group => group.id);
-                    navigationStack = buildNavigationEntries(hierarchyPath);
-                    const rebuilt = navigationStack[navigationStack.length - 1];
-                    nextOffset.copy(rebuilt.worldPosition);
-                    nextScale = rebuilt.worldScale;
+            } else if (previousScreen === 'GROUP' && previousGroupId !== groupId) {
+                const previousPath = getGroupHierarchyPath(previousGroupId).map(group => group.id);
+                const targetPath = getGroupHierarchyPath(groupId).map(group => group.id);
+                const targetIsAncestor = targetPath.length < previousPath.length
+                    && targetPath.every((id, index) => previousPath[index] === id);
+                const currentIsAncestor = previousPath.length < targetPath.length
+                    && previousPath.every((id, index) => targetPath[index] === id);
+                if (targetIsAncestor || currentIsAncestor || previousPath[0] === targetPath[0]) {
+                    const path = buildNavigationEntries(targetPath);
+                    navigationStack = path;
+                    const targetEntry = path[path.length - 1];
+                    if (targetEntry) {
+                        nextOffset.copy(targetEntry.worldPosition);
+                        nextScale = targetEntry.worldScale;
+                    }
+                    transitionType = targetPath.length < previousPath.length ? 'zoomOut' : 'zoomIn';
                 }
-                transitionType = 'zoomOut';
             }
             groupWorldOffset.copy(nextOffset);
             groupWorldScale = nextScale;
@@ -2189,43 +2440,28 @@
             // 古いバブル（3DモデルとHTMLラベル）を画面から削除
             const outgoingBubbles = currentBubbles;
             currentBubbles = [];
-            labelsContainer.innerHTML = '';
-
-            // 新しいバブル群を生成して配置
-            // 固定DBとAPIデータのどちらでも、球体の半径を考慮して重なりを解消する。
-            ensureDistinctBubbleColors(data.bubbles);
-            const isLowestLayer = data.level === 'leaf'
-                || (Boolean(data.parentId) && !data.bubbles.some(bubble => bubble.childId && activeDB[bubble.childId]));
-            data.bubbles.forEach(bData => {
-                const worldPosition = new THREE.Vector3(...bData.pos).multiplyScalar(nextScale).add(nextOffset);
-                const isFocus = isFocusPathBubble(data, bData);
-                const mesh = createBubbleMesh(bData.size, bData.color, worldPosition.toArray(), bData, data.level, isFocus);
-                mesh.scale.multiplyScalar(nextScale * getTypeBubbleScale(data, bData));
-                const finalRadius = mesh.scale.x;
-                mesh.userData.finalScale = finalRadius;
-                if (useThreeDTransition) {
-                    mesh.material.opacity = 0.02;
-                }
-                scene.add(mesh);
-
-                // 3Dバブルに追従させるためのHTMLラベルを作成
-                const label = document.createElement('div');
-                label.className = 'bubble-label' + (isLowestLayer ? ' is-leaf-label' : '');
-                label.dataset.level = data.level || '';
-                label.textContent = isLowestLayer && window.BubbleBreakerText
-                    ? window.BubbleBreakerText.formatBubbleDisplayName(bData.name)
-                    : bData.name;
-                label.title = bData.name;
-                // ラベルがクリックされたら、そのバブルの個別画面に飛ぶ
-                label.onclick = (e) => {
-                    e.stopPropagation(); // 貫通して裏のバブルもクリックされるのを防ぐ
-                    selectBubble(bData);
-                };
-                labelsContainer.appendChild(label);
-
-                // 生成したデータを配列に保存
-                currentBubbles.push({ mesh, label, data: bData, level: isLowestLayer ? 'leaf' : data.level, isFocus, baseX: mesh.position.x, baseY: mesh.position.y });
-            });
+            const rootGroupId = navigationStack[0] && activeDB[navigationStack[0].groupId]
+                ? navigationStack[0].groupId
+                : groupId;
+            hierarchyRootGroupId = rootGroupId;
+            const hierarchy = buildWorldHierarchy(rootGroupId);
+            currentBubbles = hierarchy.bubbles;
+            hierarchyGroupLayouts = hierarchy.layouts;
+            const targetLayout = hierarchy.layouts.get(groupId);
+            if (targetLayout) {
+                nextOffset.copy(targetLayout.center);
+                nextScale = targetLayout.placementScale;
+                groupWorldOffset.copy(nextOffset);
+                groupWorldScale = nextScale;
+                navigationStack.forEach(entry => {
+                    const layout = hierarchy.layouts.get(entry.groupId);
+                    if (layout) {
+                        entry.worldPosition.copy(layout.center);
+                        entry.worldScale = layout.placementScale;
+                    }
+                });
+            }
+            if (useThreeDTransition) currentBubbles.forEach(bubble => { bubble.mesh.material.opacity = 0.02; });
 
             if (!useThreeDTransition) {
                 outgoingBubbles.forEach(disposeBubble);
@@ -2252,7 +2488,7 @@
                     shell,
                     anchorBubbleId: previousBubbleData && previousBubbleData.id,
                     startedAt: performance.now(),
-                    duration: 1800,
+                    duration: 650,
                     type: transitionType
                 };
             }
@@ -2324,16 +2560,61 @@
             showToast(`${groupDisplayTitle} の宇宙を観測中`);
         }
 
+        window.updateObservedHierarchyGroup = function() {
+            if (state.screen !== 'GROUP' || transitionState || groupOverviewState || isZoomingIntoGroup || !hierarchyRootGroupId) return;
+            const rootGroup = activeDB[hierarchyRootGroupId];
+            if (!rootGroup) return;
+            let chosenGroup = rootGroup;
+            const candidates = currentBubbles.filter(bubble => bubble.data.childId && activeDB[bubble.data.childId])
+                .sort((a, b) => a.hierarchyDepth - b.hierarchyDepth);
+            candidates.forEach(bubble => {
+                let parentId = bubble.parentBubbleId;
+                let ancestorsInside = true;
+                while (parentId) {
+                    const parent = currentBubbles.find(item => item.data.id === parentId);
+                    if (!parent || camera.position.distanceTo(parent.mesh.position) > (parent.mesh.userData.finalScale || parent.mesh.scale.x) * 0.94) {
+                        ancestorsInside = false;
+                        break;
+                    }
+                    parentId = parent.parentBubbleId;
+                }
+                const radius = bubble.mesh.userData.finalScale || bubble.mesh.scale.x;
+                if (ancestorsInside && camera.position.distanceTo(bubble.mesh.position) < radius * 0.92) {
+                    chosenGroup = activeDB[bubble.data.childId];
+                }
+            });
+            if (!chosenGroup || chosenGroup.id === state.groupId) return;
+            state.groupId = chosenGroup.id;
+            state.groupData = chosenGroup;
+            const entryPath = getGroupHierarchyPath(chosenGroup.id).map(group => group.id);
+            navigationStack = buildNavigationEntries(entryPath);
+            const layout = hierarchyGroupLayouts.get(chosenGroup.id);
+            if (layout) {
+                groupWorldOffset.copy(layout.center);
+                groupWorldScale = layout.placementScale;
+            }
+            const anchor = chosenGroup.parentId && activeDB[chosenGroup.parentId]
+                ? activeDB[chosenGroup.parentId].bubbles.find(bubble => bubble.childId === chosenGroup.id)
+                : null;
+            const title = anchor && anchor.name || chosenGroup.title;
+            document.getElementById('group-title').textContent = title;
+            document.getElementById('group-desc').textContent = anchor && anchor.desc || chosenGroup.desc || `${title}に関する話題のまとまりです。`;
+            renderGroupBreadcrumb(chosenGroup.id);
+            renderGroupComposition(chosenGroup.bubbles);
+        };
+
         // 【個別バブル画面】 を読み込んで表示する関数
         // 特定のバブルにカメラがグーッと寄っていく演出を行います。
         window.loadSingle = function(bubbleData) {
+            const bObj = currentBubbles.find(b => b.data.id === bubbleData.id);
+            if (!bObj) return;
+            if (transitionState || groupOverviewState || universeRevealState) window.interruptSceneMotion();
+            state.groupId = bObj.groupId;
+            state.groupData = bObj.groupData;
             state.bubbleId = bubbleData.id;
             state.bubbleData = bubbleData;
 
             // 選択されたバブルの3Dモデルを探す
-            const bObj = currentBubbles.find(b => b.data.id === bubbleData.id);
-            if(!bObj) return;
-
             const radius = bObj.mesh.scale.x;
             const targetPos = bObj.mesh.position.clone();
             const currentDirection = camera.position.clone().sub(controls.target);
@@ -2349,6 +2630,8 @@
 
             // UIパネルの情報を更新
             document.getElementById('single-title').innerText = bubbleData.name;
+            const bubbleStatus = bubbleData.analysisStatus;
+            document.getElementById('single-generation-status').textContent = bubbleStatus === 'loading' ? '探査中' : (bubbleStatus === 'ready' || bubbleStatus === 'partial' ? '探査完了' : '探査機待ち');
             document.getElementById('single-desc').innerText = bubbleData.desc || `${bubbleData.name}に関する意見や評価が集まるバブルです。`;
             document.getElementById('single-panel-title').innerText = bubbleData.name;
             document.getElementById('single-panel-desc').innerText = bubbleData.desc || `${bubbleData.name}に関する意見や評価が集まるバブルです。`;
@@ -2371,7 +2654,7 @@
             const status = document.getElementById('analysis-status');
             const detailStatus = document.getElementById('detail-status');
             const stateName = state.bubbleData && state.bubbleData.analysisStatus;
-            const loading = stateName === 'loading';
+            const loading = stateName === 'loading' || stateName === 'queued';
             const failed = stateName === 'error';
             const partial = stateName === 'partial';
             const message = loading ? '4つの見方をまとめています…' : (failed ? '分析をまとめられませんでした。戻ってもう一度開くと再試行します' : (partial ? '一部の情報を確認できました。出典と合わせてご覧ください' : ''));
@@ -2383,6 +2666,14 @@
                 element.classList.toggle('text-cyan-200', !failed && !partial);
                 element.classList.toggle('text-amber-200', partial);
             });
+            const label = stateName === 'loading' ? '探査中' : (stateName === 'ready' || stateName === 'partial' ? '探査完了' : '探査機待ち');
+            document.querySelectorAll('[data-analysis-generation-status]').forEach(node => {
+                node.textContent = label;
+                node.classList.toggle('is-loading', loading);
+                node.closest('.analysis-card-image')?.classList.toggle('is-analysis-pending', loading || failed);
+            });
+            const singleStatus = document.getElementById('single-generation-status');
+            if (singleStatus) singleStatus.textContent = label;
         }
 
         function updateAnalysisCardPreviews() {
@@ -2450,7 +2741,9 @@
             
             // 対象バブルを小さく中央に置き、4枚の解析カードを主役にする。
             targetControlTarget.copy(targetPos); 
-            targetCameraPos.copy(targetPos).add(new THREE.Vector3(0, 0, radius * 12));
+            const direction = getExplorationViewDirection(camera.position.clone().sub(controls.target));
+            targetCameraPos.copy(targetPos).add(direction.multiplyScalar(Math.max(0.0001, radius * 12)));
+            controls.enabled = false;
 
             // 中央のテキスト表示を更新
             document.getElementById('analysis-center-title').innerText = state.bubbleData.name;
@@ -2685,6 +2978,9 @@
             }
             track.appendChild(axis);
             const lastLanePosition = [-Infinity, -Infinity];
+            const timelineCardWidth = 210;
+            const minimumCardCenter = horizontalPadding + timelineCardWidth / 2;
+            const maximumCardCenter = trackWidth - horizontalPadding - timelineCardWidth / 2;
             section.events.forEach((event, index) => {
                 const year = getTimelineEventYear(event);
                 const baseRatio = scale.hasYears && Number.isFinite(year)
@@ -2692,10 +2988,11 @@
                     : (index + 0.5) / Math.max(1, section.events.length);
                 const lane = index % 2;
                 const naturalX = horizontalPadding + Math.max(0, Math.min(1, baseRatio)) * (trackWidth - horizontalPadding * 2);
-                const eventX = Math.max(naturalX, lastLanePosition[lane] + 258);
-                lastLanePosition[lane] = eventX;
+                const eventX = Math.max(naturalX, lastLanePosition[lane] + timelineCardWidth + 16);
+                const eventCenter = Math.max(minimumCardCenter, Math.min(maximumCardCenter, eventX));
+                lastLanePosition[lane] = eventCenter;
                 const card = createDetailElement('article', `detail-timeline-event ${lane === 0 ? 'is-above' : 'is-below'}`);
-                card.style.left = `${Math.min(trackWidth - horizontalPadding, eventX)}px`;
+                card.style.left = `${eventCenter}px`;
                 card.appendChild(createDetailElement('time', 'detail-timeline-date', event.dateLabel));
                 card.appendChild(createDetailElement('h3', 'detail-timeline-title', event.title));
                 card.appendChild(createDetailElement('p', 'detail-timeline-description', event.description));
@@ -2703,26 +3000,6 @@
                 track.appendChild(card);
             });
             timeline.appendChild(track);
-            let dragStartX = null;
-            let dragStartScroll = 0;
-            timeline.addEventListener('pointerdown', event => {
-                if (event.button !== 0) return;
-                dragStartX = event.clientX;
-                dragStartScroll = timeline.scrollLeft;
-                timeline.classList.add('is-dragging');
-                timeline.setPointerCapture(event.pointerId);
-                event.preventDefault();
-            });
-            timeline.addEventListener('pointermove', event => {
-                if (dragStartX === null) return;
-                timeline.scrollLeft = dragStartScroll - (event.clientX - dragStartX);
-            });
-            const finishTimelineDrag = () => {
-                dragStartX = null;
-                timeline.classList.remove('is-dragging');
-            };
-            timeline.addEventListener('pointerup', finishTimelineDrag);
-            timeline.addEventListener('pointercancel', finishTimelineDrag);
             timeline.addEventListener('keydown', event => {
                 if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
                 event.preventDefault();
@@ -2799,6 +3076,20 @@
                 createDetailElement('article', '', `${Array.isArray(section.sourceIds) ? section.sourceIds.length : 0}件の分析根拠`)
             );
             container.appendChild(stats);
+            const domainCounts = new Map();
+            uniqueSources.forEach(source => {
+                const domain = String(source.domain || source.publisher || '発信元不明').trim();
+                domainCounts.set(domain, (domainCounts.get(domain) || 0) + 1);
+            });
+            const sourceProfile = createDetailElement('section', 'detail-source-profile');
+            sourceProfile.appendChild(createDetailElement('strong', '', '今回見つかった発信元'));
+            const sourceProfileItems = createDetailElement('div', 'detail-source-profile-items');
+            Array.from(domainCounts.entries()).sort((left, right) => right[1] - left[1]).slice(0, 5).forEach(([domain, count]) => {
+                sourceProfileItems.appendChild(createDetailElement('span', '', `${domain} · ${count}件`));
+            });
+            if (!domainCounts.size) sourceProfileItems.appendChild(createDetailElement('span', '', '情報源の分類は未取得です'));
+            sourceProfile.appendChild(sourceProfileItems);
+            container.appendChild(sourceProfile);
             const segments = Array.isArray(section.segments) && section.segments.length
                 ? section.segments
                 : (state.bubbleData.detailResearch && Array.isArray(state.bubbleData.detailResearch.sourceComposition) ? state.bubbleData.detailResearch.sourceComposition : []);
@@ -2862,22 +3153,15 @@
                     if (item) turns.push({ id: `legacy-${index}`, side, text: item.text, sourceIds: item.sourceIds || [], respondsTo: null });
                 }
             }
-            const priorTurns = new Map();
             turns.slice(0, 6).forEach(turn => {
                 const side = turn.side === 'support' ? 'support' : 'opposition';
                 const turnNode = createDetailElement('article', `detail-conversation-turn is-${side}`);
                 turnNode.appendChild(createDetailElement('div', 'detail-conversation-label', side === 'support' ? '賛成側の主張' : '反対側の主張'));
-                const reply = turn.respondsTo && priorTurns.get(String(turn.respondsTo));
-                if (hasEvidenceConversation && reply) {
-                    const excerpt = Array.from(reply.text).slice(0, 44).join('');
-                    turnNode.appendChild(createDetailElement('div', 'detail-comment-reply-context', `「${excerpt}${Array.from(reply.text).length > 44 ? '…' : ''}」への応答`));
-                }
                 const comment = createDetailElement('div', `detail-comment detail-comment-${side}`);
                 comment.appendChild(createDetailElement('p', '', turn.text));
                 appendDetailSourceLinks(comment, turn.sourceIds, sourceMap, 'この主張を支える情報源');
                 turnNode.appendChild(comment);
                 transcript.appendChild(turnNode);
-                priorTurns.set(String(turn.id), turn);
             });
             if (!turns.length) transcript.appendChild(createDetailElement('div', 'detail-empty-state', '比較できる根拠付きの意見を確認できませんでした。'));
             container.appendChild(transcript);

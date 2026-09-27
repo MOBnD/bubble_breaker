@@ -201,10 +201,12 @@
 
             function mergePanelImageResults(results) {
                 const byId = new Map();
+                const seenImageUrls = new Set();
                 results.forEach(image => {
-                    const current = byId.get(image.imageId);
-                    if (current) current.panelIds = Array.from(new Set([...current.panelIds, ...image.panelIds]));
-                    else byId.set(image.imageId, { ...image, panelIds: [...image.panelIds] });
+                    // Keep one image in one panel so the four analysis cards never repeat a thumbnail.
+                    if (byId.has(image.imageId) || seenImageUrls.has(image.imageUrl)) return;
+                    seenImageUrls.add(image.imageUrl);
+                    byId.set(image.imageId, { ...image, panelIds: [...image.panelIds] });
                 });
                 return [...byId.values()].slice(0, 12);
             }
@@ -555,7 +557,7 @@
                 return {
                     model, store: false, reasoning: { effort: 'low' }, max_output_tokens: 7000,
                     input: [
-                        { role: 'system', content: [{ type: 'input_text', text: 'あなたはBubbleBreakerの統合分析器です。検索は完了しています。与えられたEvidenceと検証結果だけを使い、Evidence外の事実を検索済みであるかのように補完しないでください。' }] },
+                        { role: 'system', content: [{ type: 'input_text', text: 'あなたはBubbleBreakerの統合分析器です。検索は完了しています。与えられたEvidenceと検証結果だけを使い、Evidence外の事実を検索済みであるかのように補完しないでください。各パネルのsourceIdsはそのパネルの主張を直接支える資料だけにし、同じ出典一覧を全パネルへコピーしないでください。同じsourceIdを複数パネルで使うのは、その資料が各パネルの異なる主張も直接支える場合に限ります。' }] },
                         { role: 'user', content: [{ type: 'input_text', text: `対象: ${plan.topic}\nEvidence: ${JSON.stringify(evidence)}\nClaims: ${JSON.stringify(claims)}\nContradictions: ${JSON.stringify(detailResearch.contradictions)}\nPerspective: ${JSON.stringify(detailResearch.perspective)}\n情報源構成: ${JSON.stringify(detailResearch.sourceComposition)}\nImage candidates: ${JSON.stringify(images)}\nLimitations: ${JSON.stringify(detailResearch.limitations)}\n\noverviewは概要、historyは根拠から年月を確認できる出来事だけを最大8件、demographicは今回収集したEvidenceの情報源構成について生成してください。history.sortKeyは年月日をYYYYMMDD整数で表し、不明な月日は00にしてください。evaluationは賛成側と反対側のEvidenceに基づく論点を整理してください。conversationには立場を交互にした最大6ターンを作り、respondsToで直前の相手側の論点へ具体的に応答してください。これは実在人物の会話ではなく、Evidenceから再構成した匿名の立場ごとの主張です。各ターンは根拠となるsourceIdsを必ず付け、根拠が片側しかなければ会話を無理に成立させず、確認できた立場だけ返してください。commentsは説明文や箇条書き調を避け、自然な意見文にしてください。実在人物の直接引用や架空の発言者名は作らず、反対側を藁人形化せず、賛成側もEvidenceなしに補完しないでください。各section・event・立場は根拠となるsourceIdを返し、関連性をcaptionから説明できる場合だけimageIdを返してください。画像は0件でも構いません。AIインサイトや架空の割合は生成しないでください。矛盾があれば一方を消さず明記してください。使用したsourceIdの和集合を最上位sourceIdsへ返してください。` }] }
                     ],
                     text: { format: { type: 'json_schema', name: 'bubble_analysis_synthesis', strict: true, schema } }

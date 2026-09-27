@@ -1,21 +1,20 @@
 <!DOCTYPE html>
-<!-- Development source; scripts/build.mjs inlines local assets into dist/bb_proto4.html. -->
+<!-- Application source served directly. -->
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no">
-    <title>BubbleBreaker - Prototype</title>
+<title>BubbleBreaker — フィルターバブルを越えて探索する</title>
     <script src="https://cdn.tailwindcss.com"></script>
     
     <!-- Three.jsを直接読み込む（環境依存エラーをなくすため安定版のr128を使用） -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
     <script>
-        // npm run build replaces the placeholder with the local environment value.
-        // Keeping the source value empty makes the prototype safe to open without a key.
+        // The API key is entered in the app and kept only in page memory.
         window.__OPENAI_API_KEY__ = "__OPENAI_API_KEY__";
         window.__OPENAI_MODEL__ = "gpt-6-luna";
-        window.__NGC3324_TEXTURE__ = "./assets/ngc-3324-nircam-clean-4000.png";
+        window.__NGC3324_TEXTURE__ = new URL("./assets/ngc-3324-nircam-clean-4000.png", document.baseURI).href;
     </script>
 
 
@@ -175,6 +174,7 @@
                     <button id="btn-close-guide" type="button" aria-label="ガイドを閉じる">×</button>
                 </div>
                 <div class="guide-illustration" aria-hidden="true"><span class="guide-orbit guide-orbit-one"></span><span class="guide-orbit guide-orbit-two"></span><b>✦</b></div>
+                <div class="guide-map" aria-label="BubbleBreakerでできること"><span>あなたの投稿<br><b>💬</b></span><i>→</i><span>賛成・反対・背景<br><b>🌐</b></span><i>→</i><span>自分で確かめる<br><b>🔎</b></span></div>
                 <span class="input-kicker">A NEW WAY TO EXPLORE</span>
                 <h2 id="guide-title"></h2>
                 <p id="guide-copy"></p>
@@ -189,8 +189,8 @@
                 <div class="voyage-step" data-voyage-step="1"><span>2</span><b>視点を集める</b></div>
                 <div class="voyage-step" data-voyage-step="2"><span>3</span><b>世界を組み立てる</b></div>
             </div>
-            <p id="voyage-status" class="voyage-status">入力したテーマを整理しています…</p>
-            <p class="voyage-estimate">探索の目安 <strong>約3分</strong></p>
+            <p id="voyage-status" class="voyage-status" aria-live="polite">入力したテーマから、近い意見・異なる意見・背景を探しています…</p>
+            <p class="voyage-estimate">全体の目安 <strong>約3分</strong></p>
         </section>
 
         <aside id="contextual-hint" class="contextual-hint" aria-live="polite">
@@ -217,14 +217,14 @@
             <div class="about-scroll">
                 <header class="about-header">
                     <span class="about-kicker">YOUR IDEA IS THE START</span>
-                    <h2 id="about-title">ひとつの意見から、<br>まだ知らない視点へ。</h2>
-                    <p>気になることをひとつ入力すると、関連する考えや反対意見、背景を宇宙のような地図にして探索できます。</p>
+                    <h2 id="about-title">おすすめの外へ。<br>まだ見えていない視点へ。</h2>
+                    <p>ひとつの投稿から、似た意見だけに寄らないネットの冒険へ。賛成・反対・背景を見比べ、アルゴリズムに選ばれるだけでなく、自分で次の視点を選べます。</p>
                 </header>
                 <section id="about-mission" class="about-hero">
                     <div>
                         <span class="about-section-number">00 / MISSION</span>
-                        <h3>答えを読むだけでなく、つながりをたどる。</h3>
-                        <p>あなたの言葉から、近い考え・異なる考え・その背景を集めます。気になるバブルを選び、情報源や意見の違いを自分のペースで確かめられます。</p>
+                        <h3>フィルターバブルに気づき、境界の外へ。</h3>
+                        <p>いつものSNSや検索では、過去に見た投稿に近い情報がおすすめされがちです。BubbleBreakerは、あなたの一言を起点に、似た考えだけでなく反対の主張や背景も地図にします。気になる話題を自分で選び、根拠を確かめながらネットを冒険できます。</p>
                     </div>
                     <div class="about-orbit" aria-hidden="true"><span></span><i></i><b></b></div>
                 </section>
@@ -244,13 +244,14 @@
                     <article>
                         <span>CONVENTIONAL FEED</span>
                         <h3>いつもの検索</h3>
-                        <div class="about-mini-map is-linear"><b>入力</b><i></i><b>最適化された結果</b><i></i><b>似た次の結果</b></div>
-                        <p>答えは見つかっても、別の立場や情報同士の関係は見えにくいことがあります。</p>
+                        <div class="about-social-icons" aria-label="SNSや動画、検索のおすすめ"><b aria-label="X">𝕏</b><b aria-label="写真SNS">◎</b><b aria-label="動画">▶</b><b aria-label="検索">⌕</b></div>
+                        <div class="about-mini-map is-linear"><b>📱 SNS投稿</b><i></i><b>あなたの関心</b><i></i><b>似たおすすめ</b></div>
+                        <p>いつものタイムラインは便利ですが、似た立場の投稿が続き、別の見方に気づきにくいことがあります。</p>
                     </article>
                     <article>
                         <span>BUBBLE BREAKER</span>
                         <h3>BubbleBreaker</h3>
-                        <div class="about-mini-map is-network"><b>入力</b><i></i><b>比較</b><b>反対</b><b>背景</b><b>接続</b></div>
+                        <div class="about-mini-map is-network"><b>💬 投稿</b><i></i><b>賛成</b><b>反対</b><b>背景</b><b>🔎 根拠</b></div>
                         <p>賛成・反対・背景を同じ地図で見比べ、次に読むものを自分で選べます。</p>
                     </article>
                 </section>
@@ -305,22 +306,22 @@
                 </section>
 
                 <section id="about-controls" class="about-section about-controls-section">
-                    <div class="about-section-heading"><span class="about-section-number">HOW TO EXPLORE</span><h3>気になるバブルから、少しずつ。</h3><p>難しい操作はありません。見たいものを選び、必要なときに戻れます。</p></div>
-                    <ol class="about-controls-list">
-                        <li><b>気になる丸を選ぶ</b><span>バブルを押すと、その話題の説明が開きます。</span></li>
-                        <li><b>下の世界をのぞく</b><span>さらに具体的な話題があるバブルは、選んで中へ進めます。</span></li>
-                        <li><b>4つの見方を比べる</b><span>概要、歴史、情報源、内外の論争から、知りたい内容を開きます。</span></li>
-                        <li><b>出典を確かめる</b><span>解析画面では、説明の根拠になった情報源も読めます。</span></li>
-                        <li><b>いつでも続きから</b><span>探索はこの端末に保存され、入力画面の履歴から再開できます。</span></li>
-                    </ol>
+                    <div class="about-section-heading"><span class="about-section-number">HOW TO EXPLORE</span><h3>気になるバブルから、境界を越える。</h3><p>見たいものを選び、視点を比べ、根拠を確かめるだけです。</p></div>
+                    <div class="about-controls-list about-flow">
+                        <div><b>1　ひとこと入力</b><span>好きなもの、気になるニュース、日々の疑問を書きます。</span></div><i aria-hidden="true">↓</i>
+                        <div><b>2　話題の地図を探索</b><span>丸を選ぶと、つながるテーマやさらに細かな話題へ進めます。</span></div><i aria-hidden="true">↓</i>
+                        <div><b>3　4つの窓で見比べる</b><span>概要・歴史・情報源・内外の論争から、同じテーマの別の面を見ます。</span></div><i aria-hidden="true">↓</i>
+                        <div><b>4　出典を開いて確かめる</b><span>根拠になった資料を読み、次に知りたい視点を自分で選びます。</span></div>
+                    </div>
                 </section>
 
                 <section id="about-impact" class="about-outcome">
                     <span class="about-section-number">TAKE THE NEXT STEP</span>
                     <h3>あなたの世界の、その先へ。</h3>
                     <p>同じ意見だけでは見つからないつながりを、根拠とともにたどってみましょう。</p>
-                    <strong>気になることから、探索を始めよう。</strong>
+                    <strong>おすすめの外へ。フィルターバブルを突破しよう。</strong>
                 </section>
+                <button id="btn-about-start" class="about-start-button" type="button">フィルターバブルを突破する</button>
             </div>
         </section>
 
@@ -336,6 +337,7 @@
                     <div class="panel-section group-heading-section">
                         <h2 id="group-title" class="text-xl font-bold">--</h2>
                         <p id="group-desc" class="group-description">--</p>
+                        <button type="button" class="panel-about-link" data-open-about>BubbleBreakerとは</button>
                     </div>
                     <div class="panel-section panel-list-section">
                         <div class="group-composition-chart-wrap">
@@ -354,6 +356,7 @@
             <button id="single-bubble-info" onclick="loadAnalysis()" class="single-bubble-info pointer-events-auto group" type="button" aria-label="このバブルの詳しい解析を開く">
                 <span class="single-description-label">このバブルについて</span>
                 <h2 id="single-title" class="text-4xl font-bold text-white text-shadow-lg mb-2 group-hover:text-blue-200 transition-colors">--</h2>
+                <span id="single-generation-status" class="analysis-generation-status">探査機待ち</span>
                 <p id="single-desc" class="text-sm text-gray-200">--</p>
                 <span class="single-info-action">詳しい分析を見る <b aria-hidden="true">→</b></span>
             </button>
@@ -368,6 +371,7 @@
                     <div class="panel-section group-heading-section">
                         <h2 id="single-panel-title" class="text-xl font-bold">--</h2>
                         <p id="single-panel-desc" class="group-description">--</p>
+                        <button type="button" class="panel-about-link" data-open-about>BubbleBreakerとは</button>
                     </div>
                     <div class="panel-section panel-list-section">
                         <div class="group-composition-chart-wrap">
@@ -403,7 +407,7 @@
                 <div class="card-tl card-anim absolute top-0 left-0 lg:left-10 pointer-events-auto">
                     <button type="button" onclick="showDetail('overview')" class="analysis-card glass-panel group" aria-label="バブルの概要を詳しく見る">
                         <span class="analysis-card-kicker">01 · まず全体を知る</span><h3>バブルの概要</h3>
-                        <span class="analysis-card-image is-overview"><img data-analysis-thumb="overview" alt="" hidden><i aria-hidden="true">◉</i></span>
+                        <span class="analysis-card-image is-overview"><span class="analysis-generation-status" data-analysis-generation-status="overview">探査機待ち</span><img data-analysis-thumb="overview" alt="" hidden><i aria-hidden="true">◉</i></span>
                         <p data-analysis-summary="overview">この話題のポイントと、確認できた根拠。</p>
                     </button>
                 </div>
@@ -411,7 +415,7 @@
                 <div class="card-bl card-anim absolute bottom-0 left-0 lg:left-10 pointer-events-auto">
                     <button type="button" onclick="showDetail('history')" class="analysis-card glass-panel group" aria-label="形成の歴史を詳しく見る">
                         <span class="analysis-card-kicker">02 · 時間をたどる</span><h3>形成の歴史</h3>
-                        <span class="analysis-card-image is-history"><img data-analysis-thumb="history" alt="" hidden><i aria-hidden="true">⌁</i></span>
+                        <span class="analysis-card-image is-history"><span class="analysis-generation-status" data-analysis-generation-status="history">探査機待ち</span><img data-analysis-thumb="history" alt="" hidden><i aria-hidden="true">⌁</i></span>
                         <p data-analysis-summary="history">確認できた出来事を、古い順にたどります。</p>
                     </button>
                 </div>
@@ -419,7 +423,7 @@
                 <div class="card-tr card-anim absolute top-0 right-0 lg:right-10 pointer-events-auto">
                     <button type="button" onclick="showDetail('demographic')" class="analysis-card glass-panel group" aria-label="構成層と情報源を詳しく見る">
                         <span class="analysis-card-kicker">03 · 情報源を見る</span><h3>構成層・情報源</h3>
-                        <span class="analysis-card-image is-sources"><img data-analysis-thumb="demographic" alt="" hidden><i aria-hidden="true">◌</i></span>
+                        <span class="analysis-card-image is-sources"><span class="analysis-generation-status" data-analysis-generation-status="demographic">探査機待ち</span><img data-analysis-thumb="demographic" alt="" hidden><i aria-hidden="true">◌</i></span>
                         <p data-analysis-summary="demographic">どんな資料が、この話題を支えているか。</p>
                     </button>
                 </div>
@@ -427,7 +431,7 @@
                 <div class="card-br card-anim absolute bottom-0 right-0 lg:right-10 pointer-events-auto">
                     <button type="button" onclick="showDetail('evaluation')" class="analysis-card glass-panel group" aria-label="内外の論争を詳しく見る">
                         <span class="analysis-card-kicker">04 · 立場を比べる</span><h3>内外の論争</h3>
-                        <span class="analysis-card-image is-debate"><img data-analysis-thumb="evaluation" alt="" hidden><i aria-hidden="true">↔</i></span>
+                        <span class="analysis-card-image is-debate"><span class="analysis-generation-status" data-analysis-generation-status="evaluation">探査機待ち</span><img data-analysis-thumb="evaluation" alt="" hidden><i aria-hidden="true">↔</i></span>
                         <p data-analysis-summary="evaluation">賛成・反対それぞれの主張と根拠。</p>
                     </button>
                 </div>
