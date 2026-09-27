@@ -33,7 +33,7 @@
                         selectBubble(bubbleObj.data);
                     } else if (state.screen === 'SINGLE' && bubbleObj.data.id === state.bubbleId) {
                         // 個別バブル画面で、見ているバブル自身をクリックされたら → 解析画面へ移行
-                        loadAnalysis();
+                        window.loadAnalysis();
                     }
                 }
             }
@@ -376,7 +376,7 @@
                 button.disabled = false;
                 updateApiKeyUI(true);
                 updateWarpHazeLayer();
-                loadGroup(universe.entryGroupId, true);
+                window.loadGroup(universe.entryGroupId, true);
             };
         });
 
@@ -388,15 +388,15 @@
         });
 
         // --- 各種UIボタンのクリックイベント ---
-        document.getElementById('btn-analyze').addEventListener('click', () => loadAnalysis());
-        document.getElementById('analysis-center-title').addEventListener('click', () => loadSingle(state.bubbleData));
+        document.getElementById('btn-analyze').addEventListener('click', () => window.loadAnalysis());
+        document.getElementById('analysis-center-title').addEventListener('click', () => window.loadSingle(state.bubbleData));
         document.getElementById('btn-back-detail').addEventListener('click', () => switchScreen('ANALYSIS'));
         const analysisScreen = document.getElementById('screen-analysis');
         const detailScreen = document.getElementById('screen-detail');
         const detailShell = document.querySelector('.detail-shell');
         analysisScreen?.addEventListener('click', event => {
             if (event.target.closest('.analysis-card, #analysis-center-title, #analysis-status, .contextual-hint-content, .brand-hud, #panel-bgm')) return;
-            loadSingle(state.bubbleData);
+            window.loadSingle(state.bubbleData);
         });
         detailScreen?.addEventListener('click', event => {
             if (detailShell && detailShell.contains(event.target)) return;
@@ -405,7 +405,7 @@
         window.addEventListener('wheel', event => {
             if (state.screen !== 'ANALYSIS') return;
             if (event.target.closest('.analysis-card, #analysis-center-title, #analysis-status, .contextual-hint-content, .brand-hud, #panel-bgm')) return;
-            loadSingle(state.bubbleData);
+            window.loadSingle(state.bubbleData);
         }, { passive: true });
         window.addEventListener('wheel', event => {
             if (state.screen === 'DETAIL' && detailShell && !detailShell.contains(event.target)) switchScreen('ANALYSIS');
@@ -753,13 +753,13 @@
             if (direction === 'zoomOut') {
                 // 下スクロール（手前に引く）＝ズームアウト（親階層へ戻る）
                 if (state.screen === 'DETAIL') switchScreen('ANALYSIS');
-                else if (state.screen === 'ANALYSIS') loadSingle(state.bubbleData);
-                else if (state.screen === 'SINGLE') loadGroup(state.groupId);
+                else if (state.screen === 'ANALYSIS') window.loadSingle(state.bubbleData);
+                else if (state.screen === 'SINGLE') window.loadGroup(state.groupId);
                 else if (state.screen === 'GROUP' && state.groupData && state.groupData.parentId) {
                     // 最初の操作は現在のバブル群全体を収める俯瞰に使い、
                     // 俯瞰完了後の追加操作で親カテゴリへ戻る。
                     if (explorationViewMode === '2d' || typeof requestGroupZoomOut !== 'function' || requestGroupZoomOut()) {
-                        loadGroup(state.groupData.parentId);
+                        window.loadGroup(state.groupData.parentId);
                     }
                 }
                 return;
@@ -767,7 +767,7 @@
 
             // 上スクロール（奥へ押し込む）＝ズームイン（子階層へ進む）
             if (state.screen === 'SINGLE' && state.bubbleData && state.bubbleData.childId) {
-                loadGroup(state.bubbleData.childId);
+                window.loadGroup(state.bubbleData.childId);
             }
         }
 

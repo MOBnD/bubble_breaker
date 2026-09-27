@@ -1222,7 +1222,7 @@
             const nearest = getNearestApproachingBubble();
             if (!nearest) return;
             groupCameraInteractionArmed = false;
-            loadSingle(nearest.data);
+            window.loadSingle(nearest.data);
         }
 
         function hashBubbleValue(value) {
@@ -2028,7 +2028,7 @@
             if (typeof requestBubbleAnalysis === 'function' && state.groupData) {
                 void requestBubbleAnalysis(bubbleData, state.groupData);
             }
-            loadSingle(bubbleData);
+            window.loadSingle(bubbleData);
         }
 
         window.interruptSceneMotion = function() {
@@ -2185,7 +2185,7 @@
                 groupWorldOffset.copy(entry.worldPosition);
                 groupWorldScale = entry.worldScale;
             }
-            loadGroup(groupId);
+            window.loadGroup(groupId);
             return true;
         };
 

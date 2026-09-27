@@ -406,7 +406,7 @@
                 if (typeof window.restoreBubbleNavigationPath === 'function') {
                     window.restoreBubbleNavigationPath(record.navigationPath, record.lastGroupId);
                 }
-                loadGroup(record.lastGroupId);
+                window.loadGroup(record.lastGroupId);
                 setSavedExplorationsOpen(false);
                 window.scheduleCurrentBubbleSessionSave('restored');
                 showToast('保存したバブル宇宙を復元しました');
@@ -456,13 +456,13 @@
             if (inputButton) inputButton.addEventListener('click', window.openBubbleInputScreen);
             if (singleInputButton) singleInputButton.addEventListener('click', window.openBubbleInputScreen);
             if (returnButton) returnButton.addEventListener('click', () => {
-                if (state.groupId && activeDB[state.groupId]) loadGroup(state.groupId);
+                if (state.groupId && activeDB[state.groupId]) window.loadGroup(state.groupId);
             });
             void renderBubbleSessionHistory();
             if (inputScreen) inputScreen.addEventListener('click', event => {
                 if (event.target !== inputScreen || !activeBubbleSession || !state.groupId || !activeDB[state.groupId]) return;
                 if (typeof isDiving !== 'undefined' && isDiving) return;
-                loadGroup(state.groupId);
+                window.loadGroup(state.groupId);
             });
             setBubbleSessionInputVisibility();
         };
