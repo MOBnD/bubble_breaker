@@ -45,18 +45,194 @@
         const apiKeySetButton = document.getElementById('btn-set-api-key');
         const apiKeyStatus = document.getElementById('api-key-status');
         const diveButton = document.getElementById('btn-dive');
+        const apiKeyOverlay = document.getElementById('api-key-overlay');
+        const apiKeyCloseButton = document.getElementById('btn-close-api-key');
+        const voyagePanel = document.getElementById('voyage-panel');
+        const voyageStatus = document.getElementById('voyage-status');
+        const voyageRouteFill = document.getElementById('voyage-route-fill');
+        let runtimeKeyConfigured = typeof window.hasRuntimeOpenAIKey === 'function' && window.hasRuntimeOpenAIKey();
         function updateApiKeyUI(configured, message = null) {
+            runtimeKeyConfigured = Boolean(configured);
             if (apiKeyStatus) {
                 apiKeyStatus.innerText = message || (configured ? 'APIキー設定済み（このページのメモリ内のみ）' : 'APIキー未設定');
                 apiKeyStatus.classList.toggle('text-emerald-200', configured);
                 apiKeyStatus.classList.toggle('text-amber-200', !configured);
             }
             if (diveButton) diveButton.disabled = !configured || isGenerating;
+            if (typeof window.syncApiKeyPrompt === 'function') window.syncApiKeyPrompt();
         }
-        const bootstrapKeyConfigured = typeof window.hasRuntimeOpenAIKey === 'function' && window.hasRuntimeOpenAIKey();
-        updateApiKeyUI(bootstrapKeyConfigured);
+
+        const promptExamples = [
+            ['最近、気になっていることは？', '例：きのこの山とたけのこの里、どちらが好き？'],
+            ['あなたの好きな食べ物は？', '例：たけのこの里が好き'],
+            ['最近のマイブームは？', '例：スプラトゥーン3を遊ぶこと'],
+            ['なくなると困るものは？', '例：毎朝飲むコーヒー'],
+            ['子どものころ夢中だったものは？', '例：ポケモンの図鑑を集めていた'],
+            ['最近、誰かに話したくなったことは？', '例：近所に新しいパン屋ができた'],
+            ['つい時間を忘れてしまうことは？', '例：好きな音楽を探すこと'],
+            ['毎日の小さな楽しみは？', '例：寝る前に漫画を読むこと'],
+            ['最近、気になったニュースは？', '例：新しい月探査計画が始まった'],
+            ['もっと知りたいと思う場所は？', '例：深海にはどんな生き物がいるの？'],
+            ['いま不思議に思っていることは？', '例：猫はどうして箱が好きなの？'],
+            ['好きな季節と、その理由は？', '例：秋。散歩が気持ちいいから'],
+            ['最近、買ってよかったものは？', '例：耳をふさがないイヤホン'],
+            ['つい応援したくなるものは？', '例：地元のサッカーチーム'],
+            ['みんなに広めたい作品は？', '例：何度見ても楽しい映画'],
+            ['食べてみたい料理は？', '例：本場のスパイスカレー'],
+            ['最近、変わったなと思うことは？', '例：現金よりスマホで払うことが増えた'],
+            ['あなたの街の好きなところは？', '例：川沿いの桜並木'],
+            ['気になっている技術は？', '例：家事を助けるロボット'],
+            ['最近、心に残った言葉は？', '例：「ゆっくりでいい」という言葉'],
+            ['休日にしてみたいことは？', '例：知らない駅で降りて散歩する'],
+            ['好きな動物は？', '例：ラッコの食事風景を見るのが好き'],
+            ['最近、考え方が変わったことは？', '例：休むことも大切な予定だと思う'],
+            ['身近な人と話してみたい話題は？', '例：子どものころ好きだった遊び']
+        ];
+        let activePromptIndex = -1;
+        function setRandomPrompt() {
+            if (promptExamples.length < 2) return;
+            let nextIndex = Math.floor(Math.random() * promptExamples.length);
+            while (nextIndex === activePromptIndex) nextIndex = Math.floor(Math.random() * promptExamples.length);
+            activePromptIndex = nextIndex;
+            document.getElementById('input-question').textContent = promptExamples[nextIndex][0];
+            document.getElementById('input-example').textContent = promptExamples[nextIndex][1];
+        }
+        document.getElementById('btn-refresh-prompt')?.addEventListener('click', setRandomPrompt);
+
+        const guideSlides = [
+            ['ひとつの意見から、世界が広がる', '気になることや好きなものを入力すると、関連する考えを集めて、探索できる世界をつくります。'],
+            ['近い考えも、違う考えも見つかる', 'テーマを小さなバブルに分けて表示します。大きなまとまりから気になる話題へ、少しずつ進めます。'],
+            ['4つの窓から、テーマを読み解く', '概要、できごとの流れ、情報源、賛成・反対の見方を比べて、テーマの全体像をつかめます。'],
+            ['あなたの好奇心から、さあ行こう', '正解を出す場所ではなく、問いを広げる場所です。まずは気になることをひとつ、宇宙へ放ってみましょう。']
+        ];
+        const guideOverlay = document.getElementById('first-run-guide');
+        let guideSlideIndex = 0;
+        let guideIsOpen = false;
+        function renderGuideSlide() {
+            const [title, copy] = guideSlides[guideSlideIndex];
+            document.getElementById('guide-title').textContent = title;
+            document.getElementById('guide-copy').textContent = copy;
+            document.getElementById('guide-step-label').textContent = `${guideSlideIndex + 1} / ${guideSlides.length}`;
+            document.getElementById('guide-progress-fill').style.width = `${((guideSlideIndex + 1) / guideSlides.length) * 100}%`;
+            document.getElementById('btn-guide-next').innerHTML = guideSlideIndex === guideSlides.length - 1
+                ? 'さあ、探索へ <span aria-hidden="true">→</span>'
+                : '次へ <span aria-hidden="true">→</span>';
+        }
+        function setGuideOpen(open, restart = false) {
+            if (!guideOverlay) return;
+            if (restart) guideSlideIndex = 0;
+            guideIsOpen = Boolean(open);
+            guideOverlay.hidden = !guideIsOpen;
+            if (guideIsOpen) {
+                renderGuideSlide();
+                requestAnimationFrame(() => document.getElementById('btn-guide-next')?.focus());
+            }
+            else {
+                localStorage.setItem('bubblebreaker.firstGuideSeen', 'on');
+                if (typeof window.syncApiKeyPrompt === 'function') window.syncApiKeyPrompt();
+            }
+        }
+        document.getElementById('btn-guide-next')?.addEventListener('click', () => {
+            if (guideSlideIndex < guideSlides.length - 1) {
+                guideSlideIndex += 1;
+                renderGuideSlide();
+            } else setGuideOpen(false);
+        });
+        document.getElementById('btn-close-guide')?.addEventListener('click', () => setGuideOpen(false));
+        document.getElementById('btn-reopen-guide')?.addEventListener('click', () => {
+            setSettingsOpen(false);
+            setGuideOpen(true, true);
+        });
+        window.onSavedExplorationCountChanged = count => {
+            if (count === 0 && localStorage.getItem('bubblebreaker.firstGuideSeen') !== 'on') setGuideOpen(true, true);
+        };
+
+        const hintByScreen = {
+            INPUT: ['意見をひとつ、世界の入口に', '例をヒントに短く書くだけで大丈夫です。「別のお題」で質問を変えられます。前の探索は下の「今まで探索した世界」から開けます。'],
+            LOADING: ['テーマを調べて世界を準備中', '入力されたテーマを整理し、関連する視点や情報を集めて、たどれるまとまりにしています。目安は約3分です。'],
+            GROUP: ['バブルを選んで、話題を深く見る', '丸は話題のまとまりです。気になる丸を選ぶと内容を読み、上部の道順を押すと前のまとまりへ戻れます。'],
+            SINGLE: ['このバブルの内容を確認する', '説明を読み、解析を見ると概要・歴史・情報源・意見の違いを比べられます。子テーマがある場合は上の道順から進めます。'],
+            ANALYSIS: ['4つの窓からテーマを読み解く', '気になるカードを選ぶと詳しい内容と出典を確認できます。対象のバブルに戻るには中央のタイトルを選びます。'],
+            DETAIL: ['内容と出典を一緒に確認する', '要約、時系列、情報源、意見を読み、気になった点はカード内の出典から確かめられます。']
+        };
+        const hintPanel = document.getElementById('contextual-hint');
+        let hintVisible = localStorage.getItem('bubblebreaker.hintVisible') !== 'off';
+        let apiSetupExplicit = false;
+        function renderHint(screenName) {
+            const key = hintByScreen[screenName] ? screenName : 'INPUT';
+            const [title, copy] = hintByScreen[key];
+            document.getElementById('hint-screen-label').textContent = key === 'LOADING' ? '探索中' : ({ INPUT: 'スタート', GROUP: 'バブル群', SINGLE: 'バブル', ANALYSIS: '解析', DETAIL: '解析の詳細' }[key] || 'スタート');
+            document.getElementById('hint-title').textContent = title;
+            const action = document.getElementById('btn-hint-action');
+            const needsKey = !runtimeKeyConfigured && key !== 'INPUT';
+            document.getElementById('hint-copy').textContent = needsKey ? `${copy} 未生成の解析を調べるには API Key を入力してください。` : copy;
+            action.hidden = !needsKey;
+            action.textContent = 'API Key を入力する';
+        }
+        document.getElementById('btn-close-hint')?.addEventListener('click', () => {
+            hintVisible = false;
+            localStorage.setItem('bubblebreaker.hintVisible', 'off');
+            hintPanel.classList.add('hint-is-closed');
+            document.getElementById('btn-open-hint').hidden = false;
+        });
+        document.getElementById('btn-open-hint')?.addEventListener('click', () => {
+            hintVisible = true;
+            localStorage.setItem('bubblebreaker.hintVisible', 'on');
+            hintPanel.classList.remove('hint-is-closed');
+            document.getElementById('btn-open-hint').hidden = true;
+        });
+        window.openApiKeySetup = () => {
+            apiSetupExplicit = true;
+            if (typeof window.syncApiKeyPrompt === 'function') window.syncApiKeyPrompt();
+            else if (apiKeyOverlay) apiKeyOverlay.hidden = false;
+            apiKeyInput?.focus();
+        };
+        document.getElementById('btn-close-api-key')?.addEventListener('click', () => {
+            apiSetupExplicit = false;
+            if (apiKeyOverlay) apiKeyOverlay.hidden = true;
+            if (typeof window.syncApiKeyPrompt === 'function') window.syncApiKeyPrompt();
+        });
+        document.getElementById('btn-hint-action')?.addEventListener('click', () => window.openApiKeySetup());
+        window.syncApiKeyPrompt = () => {
+            if (!apiKeyOverlay) return;
+            if (runtimeKeyConfigured) apiSetupExplicit = false;
+            const shouldShow = !runtimeKeyConfigured && !isDiving && !guideIsOpen
+                && (state.screen === 'INPUT' || apiSetupExplicit);
+            const wasHidden = apiKeyOverlay.hidden;
+            apiKeyOverlay.hidden = !shouldShow;
+            if (apiKeyCloseButton) apiKeyCloseButton.hidden = !apiSetupExplicit;
+            if (!shouldShow && apiKeyInput) apiKeyInput.value = '';
+            if (shouldShow && wasHidden) requestAnimationFrame(() => apiKeyInput?.focus());
+            renderHint(window.__bubbleBreakerLoading ? 'LOADING' : state.screen);
+        };
+        window.updateAppChromeForScreen = screenName => {
+            const header = document.querySelector('.brand-hud');
+            const loading = Boolean(window.__bubbleBreakerLoading || isDiving);
+            const headerVisible = ['INPUT', 'GROUP'].includes(screenName) || loading;
+            if (header) header.classList.toggle('chrome-hidden', !headerVisible);
+            if (hintPanel) {
+                hintPanel.classList.toggle('hint-is-closed', !hintVisible);
+                document.getElementById('btn-open-hint').hidden = hintVisible;
+            }
+            renderHint(loading && screenName === 'INPUT' ? 'LOADING' : screenName);
+            if (typeof window.syncApiKeyPrompt === 'function') window.syncApiKeyPrompt();
+        };
+        window.updateVoyageProgress = progress => {
+            if (!progress) return;
+            const step = Math.max(0, Math.min(2, Number(progress.step) || 0));
+            document.querySelectorAll('.voyage-step').forEach(item => {
+                const itemStep = Number(item.dataset.voyageStep);
+                item.classList.toggle('is-active', itemStep === step);
+                item.classList.toggle('is-complete', itemStep < step);
+            });
+            if (voyageRouteFill) voyageRouteFill.style.width = `${step * 50}%`;
+            if (voyageStatus && progress.message) voyageStatus.textContent = progress.message;
+        };
+
+        window.updateAppChromeForScreen(state.screen || 'INPUT');
+        updateApiKeyUI(runtimeKeyConfigured);
         if (typeof window.initializeBubbleSessionUI === 'function') window.initializeBubbleSessionUI();
-        apiKeySetButton.addEventListener('click', () => {
+        apiKeySetButton?.addEventListener('click', () => {
             const value = apiKeyInput.value.trim();
             if (value.length < 10) {
                 if (typeof window.setRuntimeOpenAIKey === 'function') window.setRuntimeOpenAIKey('');
@@ -66,14 +242,19 @@
             const configured = typeof window.setRuntimeOpenAIKey === 'function' && window.setRuntimeOpenAIKey(value);
             apiKeyInput.value = '';
             updateApiKeyUI(configured, configured ? 'APIキー設定済み（このページのメモリ内のみ）' : 'APIキーを確認してください');
+            if (configured && apiKeyOverlay) apiKeyOverlay.hidden = true;
+            if (configured && state.groupData && typeof requestBubbleGroupAnalyses === 'function') {
+                void requestBubbleGroupAnalyses(state.groupData);
+                if (state.bubbleData && typeof requestBubbleAnalysis === 'function') void requestBubbleAnalysis(state.bubbleData, state.groupData);
+            }
         });
-        apiKeyInput.addEventListener('keypress', event => {
+        apiKeyInput?.addEventListener('keydown', event => {
             if (event.key === 'Enter') apiKeySetButton.click();
         });
         document.getElementById('btn-dive').addEventListener('click', async () => {
             if (isDiving || isGenerating) return;
             if (typeof window.hasRuntimeOpenAIKey !== 'function' || !window.hasRuntimeOpenAIKey()) {
-                updateApiKeyUI(false, '意見入力の前にAPIキーを設定してください');
+                updateApiKeyUI(false, '探索を始めるには API Key を入力してください');
                 apiKeyInput.focus();
                 return;
             }
@@ -87,38 +268,45 @@
             const panel = document.getElementById('input-panel');
             button.disabled = true;
             isGenerating = true;
+            window.__bubbleBreakerLoading = true;
+            if (voyagePanel) voyagePanel.hidden = false;
+            window.updateVoyageProgress({ step: 0, message: '入力したテーマを整理しています…' });
             updateApiKeyUI(true);
             startBackgroundMusic();
 
             // API応答をワープ演出と並行して取得する。API失敗時は既存モックDBへ戻す。
-            const universePromise = requestDynamicUniverse(input).then(result => {
+            const universePromise = requestDynamicUniverse(input, window.updateVoyageProgress).then(result => {
                 if (result) {
-                    showToast('Web Searchでバブル宇宙を生成しました');
+                    showToast('関連する情報を集めて、探索する世界をつくりました');
                     return result;
                 }
-                showToast('階層生成を完了できなかったため固定データを使用します');
+                showToast('すべての情報を集められなかったため、用意済みの世界を表示します');
                 return normalizeFallbackUniverse(input);
             }).catch(error => {
                 apiError('Dynamic BubbleBreaker data generation failed。固定データを使用します', { status: error.status || null, requestId: error.requestId || null, message: redactApiLog(error.message), body: error.body || null });
-                showToast('検索に失敗したため固定データを使用します');
+                showToast('検索に失敗したため、用意済みの世界を表示します');
                 return normalizeFallbackUniverse(input);
             });
             universePromise.then(universe => {
                 pendingUniverse = universe;
+                window.updateVoyageProgress({ step: 2, message: '世界の準備ができました。中心のバブルへ向かっています…' });
                 if (typeof window.markLoadingUniverseReady === 'function') window.markLoadingUniverseReady();
             });
 
             panel.style.transform = 'scale(0.5)';
             panel.style.opacity = '0';
             panel.style.pointerEvents = 'none';
-            showToast('Web Searchで対象のバブル宇宙を調査しています... 🚀');
+            showToast('入力したテーマをもとに、新しい世界をつくっています… 🚀');
 
             startLoadingAnimation();
             updateWarpHazeLayer();
+            window.updateAppChromeForScreen('INPUT');
             loadingAnimation.onReady = () => {
                 const universe = pendingUniverse;
                 pendingUniverse = null;
                 if (!universe) return;
+                if (voyagePanel) voyagePanel.hidden = true;
+                window.__bubbleBreakerLoading = false;
                 activeDB = universe.db;
                 focusEntryGroupId = universe.entryGroupId;
                 focusEntryBubbleId = universe.entryBubbleId || null;
@@ -134,25 +322,14 @@
             };
         });
 
-        // テキストボックスでEnterキーを押した時もダイブボタンをクリックした扱いにする
-        document.getElementById('input-opinion').addEventListener('keypress', (e) => {
-            if(e.key === 'Enter') document.getElementById('btn-dive').click();
+        document.getElementById('input-opinion').addEventListener('keydown', event => {
+            if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
+                event.preventDefault();
+                document.getElementById('btn-dive').click();
+            }
         });
 
         // --- 各種UIボタンのクリックイベント ---
-        document.getElementById('btn-zoomout-group').addEventListener('click', () => {
-            if (explorationViewMode === '2d' && state.groupData && state.groupData.parentId) {
-                loadGroup(state.groupData.parentId);
-                return;
-            }
-            if (state.groupData && state.groupData.parentId && typeof requestGroupZoomOut === 'function' && requestGroupZoomOut()) {
-                loadGroup(state.groupData.parentId);
-            }
-        });
-        document.getElementById('btn-zoomout-single').addEventListener('click', () => loadGroup(state.groupId));
-        document.getElementById('btn-zoomin-single').addEventListener('click', () => {
-            if(state.bubbleData && state.bubbleData.childId) loadGroup(state.bubbleData.childId);
-        });
         document.getElementById('btn-analyze').addEventListener('click', () => loadAnalysis());
         document.getElementById('analysis-center-title').addEventListener('click', () => loadSingle(state.bubbleData));
         document.getElementById('btn-back-detail').addEventListener('click', () => switchScreen('ANALYSIS'));
@@ -285,6 +462,20 @@
         });
         const ngc3324Toggle = document.getElementById('ngc3324-toggle');
         const warpHazeToggle = document.getElementById('warp-haze-toggle');
+        const motionBlurRange = document.getElementById('motion-blur-range');
+        const motionBlurValue = document.getElementById('motion-blur-value');
+        const savedMotionBlurStrength = localStorage.getItem('bubblebreaker.warpRadialBlurStrength');
+        let motionBlurStrength = Math.max(0, Math.min(100, savedMotionBlurStrength === null ? 50 : (Number(savedMotionBlurStrength) || 0)));
+        if (motionBlurRange) motionBlurRange.value = String(motionBlurStrength);
+        if (motionBlurValue) motionBlurValue.value = `${motionBlurStrength}%`;
+        if (typeof window.setWarpBlurStrength === 'function') window.setWarpBlurStrength(motionBlurStrength);
+        motionBlurRange?.addEventListener('input', () => {
+            motionBlurStrength = Math.max(0, Math.min(100, Number(motionBlurRange.value) || 0));
+            if (motionBlurValue) motionBlurValue.value = `${motionBlurStrength}%`;
+            localStorage.setItem('bubblebreaker.warpRadialBlurStrength', String(motionBlurStrength));
+            if (typeof window.setWarpBlurStrength === 'function') window.setWarpBlurStrength(motionBlurStrength);
+            document.documentElement.style.setProperty('--warp-blur-opacity', String(motionBlurStrength / 100 * 0.58));
+        });
         const bubbleVisualModeButtons = [...document.querySelectorAll('[data-bubble-visual-mode]')];
         const viewModeButtons = [...document.querySelectorAll('[data-view-mode]')];
         const backgroundThemeControl = document.getElementById('background-theme');
@@ -345,6 +536,9 @@
             const inputScreen = document.getElementById('screen-input');
             if (!inputScreen) return;
             inputScreen.classList.toggle('warp-haze-active', Boolean(isDiving && warpHazeEnabled));
+            const blurLayer = document.getElementById('warp-blur-2d');
+            if (blurLayer) blurLayer.classList.toggle('is-active', Boolean(isDiving && warpHazeEnabled && selectedViewMode === '2d'));
+            document.documentElement.style.setProperty('--warp-blur-opacity', String(motionBlurStrength / 100 * 0.58));
         }
         const bubbleVisualModeOptions = ['network', 'classic', 'deepSea', 'data'];
         let storedBubbleVisualMode = localStorage.getItem('bubblebreaker.bubbleVisualMode');
@@ -441,6 +635,7 @@
                     ? setExplorationViewMode(button.dataset.viewMode, true)
                     : button.dataset.viewMode;
                 localStorage.setItem('bubblebreaker.viewMode', selectedViewMode);
+                if (typeof window.onSceneBubbleScreenChanged === 'function') window.onSceneBubbleScreenChanged(state.screen);
                 if (selectedViewMode === '2d' && window.innerWidth <= 720) {
                     setPanelCollapsed('panel-bgm', true, false);
                 } else {
@@ -527,15 +722,16 @@
 
         window.addEventListener('wheel', (e) => {
             if (e.target.closest('#about-overlay')) return;
-            if (e.target.closest('.detail-timeline')) return;
+            if (e.target.closest('input, textarea, select, [contenteditable="true"]')) return;
+            if (e.target.closest('.saved-explorations-dialog, .saved-exploration-list, .api-key-card, .first-run-guide-card, .contextual-hint-content, .detail-timeline')) return;
             // スクロール可能なUI領域（右側のリストなど）を操作している場合は、階層移動を発生させない
             const cosmicControl = e.target.closest('#panel-bgm');
             if (cosmicControl) {
                 if (e.ctrlKey) e.preventDefault(); // Ctrlキー押下時のブラウザの文字拡大は防ぐ
                 return;
             }
-            const scrollable = e.target.closest('.exploration-panel, .overflow-y-auto');
-            if(scrollable && state.screen !== 'SINGLE' && state.screen !== 'ANALYSIS') {
+            const scrollable = e.target.closest('.exploration-panel, .overflow-y-auto, #screen-analysis, #screen-detail, .detail-main');
+            if (scrollable) {
                 if(e.ctrlKey) e.preventDefault(); // Ctrlキー押下時のブラウザの文字拡大は防ぐ
                 return;
             }

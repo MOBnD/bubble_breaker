@@ -311,6 +311,7 @@
             status.textContent = '保存済み探索を読み込んでいます…';
             try {
                 const records = await listBubbleSessionRecords();
+                if (typeof window.onSavedExplorationCountChanged === 'function') window.onSavedExplorationCountChanged(records.length);
                 list.innerHTML = '';
                 records.forEach(record => {
                     const summary = summarizeBubbleSession(record);
@@ -322,13 +323,13 @@
                     heading.textContent = summary.opinion || '意見未設定の探索';
                     const meta = document.createElement('p');
                     meta.className = 'saved-exploration-meta';
-                    meta.textContent = `${formatBubbleSessionDate(summary.updatedAt)} · ${summary.groupCount}群 · 詳細 ${summary.detailCount}/${summary.bubbleCount}`;
+                    meta.textContent = `最終探索：${formatBubbleSessionDate(summary.updatedAt)}`;
                     const actions = document.createElement('div');
                     actions.className = 'saved-exploration-actions';
                     const restore = document.createElement('button');
                     restore.type = 'button';
                     restore.className = 'saved-exploration-restore';
-                    restore.textContent = '復元する';
+                    restore.textContent = 'この世界を開く';
                     restore.addEventListener('click', () => void restoreBubbleSession(summary.id));
                     const remove = document.createElement('button');
                     remove.type = 'button';
@@ -342,6 +343,7 @@
                 empty.classList.toggle('hidden', records.length > 0);
                 status.textContent = records.length > 0 ? `${records.length}件の探索を保存しています` : '';
             } catch (error) {
+                if (typeof window.onSavedExplorationCountChanged === 'function') window.onSavedExplorationCountChanged(null);
                 list.innerHTML = '';
                 empty.classList.remove('hidden');
                 empty.textContent = '保存済み探索を読み込めませんでした。';
@@ -350,6 +352,34 @@
             }
             setBubbleSessionInputVisibility();
         }
+
+        let historyPreviousFocus = null;
+        function setSavedExplorationsOpen(open) {
+            const overlay = document.getElementById('saved-explorations-overlay');
+            if (!overlay) return;
+            if (open) {
+                historyPreviousFocus = document.activeElement;
+                overlay.hidden = false;
+                document.body.classList.add('history-open');
+                void renderBubbleSessionHistory();
+                document.getElementById('btn-close-history')?.focus();
+                return;
+            }
+            overlay.hidden = true;
+            document.body.classList.remove('history-open');
+            if (historyPreviousFocus && typeof historyPreviousFocus.focus === 'function') historyPreviousFocus.focus();
+            if (typeof window.syncApiKeyPrompt === 'function') window.syncApiKeyPrompt();
+        }
+        window.openBubbleSessionHistory = () => setSavedExplorationsOpen(true);
+        document.getElementById('btn-open-history')?.addEventListener('click', () => setSavedExplorationsOpen(true));
+        document.getElementById('btn-open-history-from-key')?.addEventListener('click', () => setSavedExplorationsOpen(true));
+        document.getElementById('btn-close-history')?.addEventListener('click', () => setSavedExplorationsOpen(false));
+        document.getElementById('saved-explorations-overlay')?.addEventListener('click', event => {
+            if (event.target === event.currentTarget) setSavedExplorationsOpen(false);
+        });
+        document.addEventListener('keydown', event => {
+            if (event.key === 'Escape' && !document.getElementById('saved-explorations-overlay')?.hidden) setSavedExplorationsOpen(false);
+        });
 
         async function restoreBubbleSession(sessionId) {
             try {
@@ -372,6 +402,7 @@
                 if (typeof window.restoreBubbleNavigationPath === 'function') {
                     window.restoreBubbleNavigationPath(record.navigationPath, record.lastGroupId);
                 }
+                setSavedExplorationsOpen(false);
                 loadGroup(record.lastGroupId);
                 window.scheduleCurrentBubbleSessionSave('restored');
                 showToast('保存したバブル宇宙を復元しました');
@@ -423,13 +454,13 @@
             if (returnButton) returnButton.addEventListener('click', () => {
                 if (state.groupId && activeDB[state.groupId]) loadGroup(state.groupId);
             });
+            void renderBubbleSessionHistory();
             if (inputScreen) inputScreen.addEventListener('click', event => {
                 if (event.target !== inputScreen || !activeBubbleSession || !state.groupId || !activeDB[state.groupId]) return;
                 if (typeof isDiving !== 'undefined' && isDiving) return;
                 loadGroup(state.groupId);
             });
             setBubbleSessionInputVisibility();
-            void renderBubbleSessionHistory();
         };
 
         window.BubbleSessionStorage = {

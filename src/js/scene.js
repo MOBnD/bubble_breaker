@@ -22,6 +22,66 @@
         renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)); // 高解像度ディスプレイ対応
         container.appendChild(renderer.domElement);
 
+        const warpBlurTarget = new THREE.WebGLRenderTarget(1, 1, {
+            minFilter: THREE.LinearFilter,
+            magFilter: THREE.LinearFilter,
+            format: THREE.RGBAFormat,
+            depthBuffer: true,
+            stencilBuffer: false
+        });
+        const warpBlurScene = new THREE.Scene();
+        const warpBlurCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+        const warpBlurMaterial = new THREE.ShaderMaterial({
+            uniforms: { tDiffuse: { value: warpBlurTarget.texture }, strength: { value: 0 } },
+            vertexShader: 'varying vec2 vUv; void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }',
+            fragmentShader: `
+                uniform sampler2D tDiffuse;
+                uniform float strength;
+                varying vec2 vUv;
+                void main() {
+                    vec2 radial = vUv - vec2(0.5);
+                    float edge = smoothstep(0.08, 0.72, length(radial));
+                    vec2 stretch = radial * strength * edge;
+                    vec4 color = vec4(0.0);
+                    for (int sampleIndex = 0; sampleIndex < 5; sampleIndex++) {
+                        float sampleOffset = float(sampleIndex) / 4.0;
+                        color += texture2D(tDiffuse, clamp(vUv - stretch * sampleOffset, 0.0, 1.0));
+                    }
+                    gl_FragColor = color / 5.0;
+                }
+            `,
+            depthTest: false,
+            depthWrite: false,
+            toneMapped: false
+        });
+        const warpBlurQuad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), warpBlurMaterial);
+        warpBlurScene.add(warpBlurQuad);
+        let warpBlurStrength = 50;
+        function resizeWarpBlurTarget() {
+            const width = Math.max(1, container.clientWidth || window.innerWidth);
+            const height = Math.max(1, container.clientHeight || window.innerHeight);
+            const scale = Math.min(1, 1280 / width);
+            warpBlurTarget.setSize(Math.max(1, Math.round(width * scale)), Math.max(1, Math.round(height * scale)));
+        }
+        resizeWarpBlurTarget();
+        window.setWarpBlurStrength = value => {
+            warpBlurStrength = Math.max(0, Math.min(100, Number(value) || 0));
+            return warpBlurStrength;
+        };
+        window.renderSceneFrame = (isWarping, travelSpeed = 1) => {
+            if (!isWarping || warpBlurStrength <= 0 || explorationViewMode === '2d') {
+                renderer.setRenderTarget(null);
+                renderer.render(scene, camera);
+                return;
+            }
+            renderer.setRenderTarget(warpBlurTarget);
+            renderer.render(scene, camera);
+            renderer.setRenderTarget(null);
+            warpBlurMaterial.uniforms.tDiffuse.value = warpBlurTarget.texture;
+            warpBlurMaterial.uniforms.strength.value = Math.min(0.105, warpBlurStrength / 100 * 0.09 * Math.max(0.72, Math.min(1.25, travelSpeed)));
+            renderer.render(warpBlurScene, warpBlurCamera);
+        };
+
         // OrbitControls：マウスのドラッグで視点移動するための標準プラグイン
         const controls = new THREE.OrbitControls(camera, renderer.domElement);
         controls.enableDamping = true; // 視点移動に滑らかな慣性をつける
@@ -1818,6 +1878,22 @@
                 current.disabled = true;
                 current.setAttribute('aria-current', 'page');
                 container.appendChild(current);
+                const childId = currentBubble.childId && String(currentBubble.childId);
+                const childGroup = childId && activeDB[childId];
+                if (childGroup) {
+                    const nextSeparator = document.createElement('span');
+                    nextSeparator.className = 'group-breadcrumb-separator';
+                    nextSeparator.textContent = '→';
+                    container.appendChild(nextSeparator);
+                    const next = document.createElement('button');
+                    next.type = 'button';
+                    next.className = 'is-next';
+                    next.textContent = 'さらに詳しい話題を見る';
+                    next.title = `${childGroup.title || currentBubble.name}を探索`;
+                    next.setAttribute('aria-label', `${childGroup.title || currentBubble.name}の中を探索する`);
+                    next.addEventListener('click', () => window.loadGroup(childId));
+                    container.appendChild(next);
+                }
             }
         }
 
@@ -2179,8 +2255,6 @@
                 : (data.desc || `${groupDisplayTitle}に関する意見のまとまりを観測しています。`);
             document.getElementById('group-title').innerText = groupDisplayTitle;
             document.getElementById('group-desc').innerText = groupDisplayDescription;
-            document.getElementById('group-type').innerText = data.type;
-            document.getElementById('btn-zoomout-group').style.display = data.parentId ? 'flex' : 'none';
             renderGroupBreadcrumb(groupId);
             
             // 右側のリスト（構成要素と占有率）を生成
@@ -2266,12 +2340,6 @@
             document.getElementById('single-desc').innerText = bubbleData.desc || `${bubbleData.name}に関する意見や評価が集まるバブルです。`;
             document.getElementById('single-panel-title').innerText = bubbleData.name;
             document.getElementById('single-panel-desc').innerText = bubbleData.desc || `${bubbleData.name}に関する意見や評価が集まるバブルです。`;
-            document.getElementById('single-group-type').innerText = state.groupData.type;
-            // さらにズームできる子階層がある場合はボタンを表示
-            const hasChild = !!bubbleData.childId;
-            document.getElementById('btn-zoomin-single').style.display = hasChild ? 'block' : 'none';
-            document.getElementById('btn-zoomin-single').innerText = hasChild && activeDB[bubbleData.childId]
-                ? `↑ ${activeDB[bubbleData.childId].title}へ (上スクロール)` : '';
 
             renderGroupBreadcrumb(state.groupId, 'single-breadcrumb', bubbleData);
             renderGroupComposition(state.groupData.bubbles, {
@@ -2294,7 +2362,7 @@
             const loading = stateName === 'loading';
             const failed = stateName === 'error';
             const partial = stateName === 'partial';
-            const message = loading ? '分析生成中…' : (failed ? '分析生成に失敗しました。再試行できます' : (partial ? '一部の検索・検証結果から表示しています' : ''));
+            const message = loading ? '4つの見方をまとめています…' : (failed ? '分析をまとめられませんでした。戻ってもう一度開くと再試行します' : (partial ? '一部の情報を確認できました。出典と合わせてご覧ください' : ''));
             [status, detailStatus].forEach(element => {
                 if (!element) return;
                 element.innerText = message;
@@ -2305,6 +2373,55 @@
             });
         }
 
+        function updateAnalysisCardPreviews() {
+            if (!state.bubbleData) return;
+            const analysis = normalizeAnalysis(state.bubbleData.analysis);
+            const researchImages = state.bubbleData.detailResearch && Array.isArray(state.bubbleData.detailResearch.images)
+                ? state.bubbleData.detailResearch.images : [];
+            const imageMap = new Map(researchImages.filter(image => image && image.imageId).map(image => [String(image.imageId), image]));
+            const usedImages = new Set();
+            const previews = [
+                ['overview', 'このテーマの要点と、確認できた事実。'],
+                ['history', '根拠をたどれる出来事の流れ。'],
+                ['demographic', 'どんな資料や発信元が見つかったか。'],
+                ['evaluation', '賛成・反対それぞれの主張と根拠。']
+            ];
+            previews.forEach(([panelId, fallback]) => {
+                const section = analysis[panelId] || {};
+                const summary = String(section.summary || section.overview || section.conclusion || fallback).trim();
+                const summaryNode = document.querySelector(`[data-analysis-summary="${panelId}"]`);
+                if (summaryNode) summaryNode.textContent = summary.length > 180 ? `${Array.from(summary).slice(0, 177).join('')}…` : summary;
+                const imageNode = document.querySelector(`[data-analysis-thumb="${panelId}"]`);
+                if (!imageNode) return;
+                const wrapper = imageNode.closest('.analysis-card-image');
+                const candidates = Array.from(new Set(Array.isArray(section.imageIds) ? section.imageIds.map(String) : []))
+                    .map(id => imageMap.get(id)).filter(image => image && image.imageUrl && image.sourceWebsiteUrl)
+                    .concat(researchImages.filter(image => image && image.imageUrl && image.sourceWebsiteUrl && Array.isArray(image.panelIds) && image.panelIds.includes(panelId)));
+                const image = candidates.find(candidate => !usedImages.has(candidate.thumbnailUrl || candidate.imageUrl));
+                if (!image) {
+                    imageNode.hidden = true;
+                    wrapper?.classList.remove('has-thumbnail');
+                    return;
+                }
+                usedImages.add(image.thumbnailUrl || image.imageUrl);
+                imageNode.hidden = false;
+                imageNode.alt = '';
+                imageNode.onerror = () => {
+                    imageNode.hidden = true;
+                    wrapper?.classList.remove('has-thumbnail');
+                };
+                imageNode.onload = () => wrapper?.classList.add('has-thumbnail');
+                imageNode.src = image.thumbnailUrl || image.imageUrl;
+            });
+        }
+
+        window.onSceneBubbleScreenChanged = screenName => {
+            if (screenName === 'SINGLE') {
+                camera.setViewOffset(window.innerWidth, window.innerHeight, Math.round(window.innerWidth * 0.15), 0, window.innerWidth, window.innerHeight);
+            } else if (camera.view && camera.view.enabled) camera.clearViewOffset();
+            camera.updateProjectionMatrix();
+        };
+
         window.loadAnalysis = function() {
             if(state.screen !== 'SINGLE') return;
             
@@ -2313,22 +2430,23 @@
 
             if (typeof requestBubbleAnalysis === 'function' && state.groupData && state.bubbleData.analysisStatus !== 'ready') {
                 void requestBubbleAnalysis(state.bubbleData, state.groupData);
-                showToast('バブルの分析をWeb Searchで生成しています...');
+                showToast('このテーマに関する情報を調べています…');
             }
 
             const radius = bObj.mesh.scale.x;
             const targetPos = bObj.mesh.position.clone();
             
-            // バブルが画面の「ど真ん中」に来るようにカメラを少し引き、真正面から見据える
+            // 対象バブルを小さく中央に置き、4枚の解析カードを主役にする。
             targetControlTarget.copy(targetPos); 
-            targetCameraPos.copy(targetPos).add(new THREE.Vector3(0, 0, radius * 3.5));
+            targetCameraPos.copy(targetPos).add(new THREE.Vector3(0, 0, radius * 12));
 
             // 中央のテキスト表示を更新
             document.getElementById('analysis-center-title').innerText = state.bubbleData.name;
             updateAnalysisGenerationStatus();
+            updateAnalysisCardPreviews();
 
             switchScreen('ANALYSIS');
-            showToast(`解析モードへ移行しました`);
+            showToast('知りたい見方を選んでください');
         }
 
         function createDetailElement(tagName, className = '', text = '') {
@@ -2519,9 +2637,9 @@
 
         function renderHistoryDetail(container, section, sourceMap, imageMap) {
             container.appendChild(createDetailElement('p', 'detail-summary', section.summary));
-            appendPanelImages(container, section.imageIds, imageMap, 'history');
             if (!section.events.length) {
                 container.appendChild(createDetailElement('div', 'detail-empty-state', '根拠付きの時系列イベントを確認できませんでした。'));
+                appendPanelImages(container, section.imageIds, imageMap, 'history');
                 appendDetailSourceLinks(container, section.sourceIds, sourceMap, '形成史の参照ソース');
                 return;
             }
@@ -2529,8 +2647,8 @@
             timeline.setAttribute('aria-label', 'バブル形成の時系列');
             timeline.tabIndex = 0;
             const scale = createTimelineYearScale(section.events);
-            const trackWidth = Math.max(920, section.events.length * 330, scale.ticks.length * 190, (scale.breaks || []).length * 170 + 920);
-            const horizontalPadding = 120;
+            const trackWidth = Math.max(760, section.events.length * 270, scale.ticks.length * 150, (scale.breaks || []).length * 135 + 760);
+            const horizontalPadding = 54;
             const track = createDetailElement('div', 'detail-timeline-track');
             track.style.width = `${trackWidth}px`;
             const axis = createDetailElement('div', 'detail-timeline-axis');
@@ -2562,27 +2680,44 @@
                     : (index + 0.5) / Math.max(1, section.events.length);
                 const lane = index % 2;
                 const naturalX = horizontalPadding + Math.max(0, Math.min(1, baseRatio)) * (trackWidth - horizontalPadding * 2);
-                const eventX = Math.max(naturalX, lastLanePosition[lane] + 305);
+                const eventX = Math.max(naturalX, lastLanePosition[lane] + 258);
                 lastLanePosition[lane] = eventX;
                 const card = createDetailElement('article', `detail-timeline-event ${lane === 0 ? 'is-above' : 'is-below'}`);
                 card.style.left = `${Math.min(trackWidth - horizontalPadding, eventX)}px`;
                 card.appendChild(createDetailElement('time', 'detail-timeline-date', event.dateLabel));
                 card.appendChild(createDetailElement('h3', 'detail-timeline-title', event.title));
                 card.appendChild(createDetailElement('p', 'detail-timeline-description', event.description));
-                appendDetailImages(card, event.imageIds, imageMap);
                 appendDetailSourceLinks(card, event.sourceIds, sourceMap, '出来事の根拠');
                 track.appendChild(card);
             });
             timeline.appendChild(track);
-            timeline.addEventListener('wheel', event => {
-                if (timeline.scrollWidth <= timeline.clientWidth) return;
-                const movement = Math.abs(event.deltaY) >= Math.abs(event.deltaX) ? event.deltaY : event.deltaX;
-                if (!movement) return;
+            let dragStartX = null;
+            let dragStartScroll = 0;
+            timeline.addEventListener('pointerdown', event => {
+                if (event.button !== 0) return;
+                dragStartX = event.clientX;
+                dragStartScroll = timeline.scrollLeft;
+                timeline.classList.add('is-dragging');
+                timeline.setPointerCapture(event.pointerId);
                 event.preventDefault();
-                event.stopPropagation();
-                timeline.scrollLeft += movement;
-            }, { passive: false });
+            });
+            timeline.addEventListener('pointermove', event => {
+                if (dragStartX === null) return;
+                timeline.scrollLeft = dragStartScroll - (event.clientX - dragStartX);
+            });
+            const finishTimelineDrag = () => {
+                dragStartX = null;
+                timeline.classList.remove('is-dragging');
+            };
+            timeline.addEventListener('pointerup', finishTimelineDrag);
+            timeline.addEventListener('pointercancel', finishTimelineDrag);
+            timeline.addEventListener('keydown', event => {
+                if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+                event.preventDefault();
+                timeline.scrollLeft += event.key === 'ArrowRight' ? 160 : -160;
+            });
             container.appendChild(timeline);
+            appendPanelImages(container, section.imageIds, imageMap, 'history');
         }
 
         function createEvidenceCompositionChart(segments) {
@@ -2639,6 +2774,19 @@
 
         function renderDemographicDetail(container, section, sourceMap, imageMap) {
             container.appendChild(createDetailElement('p', 'detail-summary', section.summary));
+            const researchSources = state.bubbleData.detailResearch && Array.isArray(state.bubbleData.detailResearch.sources)
+                ? state.bubbleData.detailResearch.sources : [];
+            const visibleSources = Array.isArray(state.bubbleData.sources) ? state.bubbleData.sources : [];
+            const sources = [...researchSources, ...visibleSources];
+            const uniqueSources = new Map(sources.filter(source => source && source.url).map(source => [source.url, source]));
+            const publishers = new Set(Array.from(uniqueSources.values()).map(source => String(source.domain || source.publisher || '').trim().toLowerCase()).filter(Boolean));
+            const stats = createDetailElement('div', 'detail-evidence-stats');
+            stats.append(
+                createDetailElement('article', '', `${uniqueSources.size}件の出典`),
+                createDetailElement('article', '', `${publishers.size}種類の発信元`),
+                createDetailElement('article', '', `${Array.isArray(section.sourceIds) ? section.sourceIds.length : 0}件の分析根拠`)
+            );
+            container.appendChild(stats);
             const segments = Array.isArray(section.segments) && section.segments.length
                 ? section.segments
                 : (state.bubbleData.detailResearch && Array.isArray(state.bubbleData.detailResearch.sourceComposition) ? state.bubbleData.detailResearch.sourceComposition : []);
@@ -2723,7 +2871,7 @@
             container.appendChild(transcript);
             appendPanelImages(container, section.imageIds, imageMap, 'evaluation');
             const sourceIds = [...new Set([...(section.opposition.sourceIds || []), ...(section.support.sourceIds || []), ...turns.flatMap(turn => turn.sourceIds || [])])];
-            appendDetailSourceLinks(container, sourceIds, sourceMap, '内外からの意見の参照ソース');
+            appendDetailSourceLinks(container, sourceIds, sourceMap, '内外の論争の参照ソース');
         }
 
         // 【解析バブル詳細表示画面】(一番最後の詳細テキスト画面)を表示する関数
@@ -2733,7 +2881,7 @@
                 'overview': 'バブルの概要と特徴',
                 'history': '形成の歴史と拡大要因',
                 'demographic': '構成層・情報源の分析',
-                'evaluation': '内外からの意見'
+                'evaluation': '内外の論争'
             };
             const normalizedAnalysis = normalizeAnalysis(state.bubbleData && state.bubbleData.analysis);
             const analysis = normalizedAnalysis[cardType] || DEFAULT_ANALYSIS[cardType];
@@ -2768,5 +2916,6 @@
         window.refreshAnalysisView = function(bubbleId) {
             if (!state.bubbleData || state.bubbleData.id !== bubbleId) return;
             updateAnalysisGenerationStatus();
+            updateAnalysisCardPreviews();
             if (state.screen === 'DETAIL' && state.analysisCardType) showDetail(state.analysisCardType);
         };

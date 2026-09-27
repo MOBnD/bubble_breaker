@@ -26,9 +26,10 @@
 
     <div id="canvas-container"></div>
     <div id="labels-container"></div>
-    <div id="exploration-2d" class="exploration-2d" aria-hidden="true" hidden>
-        <div class="exploration-2d-background" aria-hidden="true"></div>
-        <div class="exploration-2d-grid" aria-hidden="true"></div>
+        <div id="exploration-2d" class="exploration-2d" aria-hidden="true" hidden>
+            <div class="exploration-2d-background" aria-hidden="true"></div>
+            <div id="warp-blur-2d" class="warp-blur-2d" aria-hidden="true"></div>
+            <div class="exploration-2d-grid" aria-hidden="true"></div>
         <svg id="exploration-2d-stage" class="exploration-2d-stage" viewBox="0 0 1000 700" role="img" aria-label="2Dバブル探索空間"></svg>
         <div id="exploration-2d-loading" class="exploration-2d-loading" hidden>
             <span class="exploration-2d-loading-kicker">SEARCH VOYAGE / 2D</span>
@@ -52,6 +53,12 @@
                 <button id="btn-sound-toggle" class="sound-control" type="button">🔊 効果音ON</button>
                 <label class="flex items-center gap-2"><input id="ngc3324-toggle" type="checkbox" checked> NGC 3324背景</label>
                 <label class="flex items-center gap-2"><input id="warp-haze-toggle" type="checkbox" checked> ワープ中の靄</label>
+                <label class="motion-blur-control" for="motion-blur-range">
+                    <span>ワープの速度感 <output id="motion-blur-value" for="motion-blur-range">50%</output></span>
+                    <input id="motion-blur-range" type="range" min="0" max="100" step="1" value="50">
+                </label>
+                <p class="settings-help-copy">0%で効果なし。画面の端ほど伸びる動きを調整できます。</p>
+                <button id="btn-reopen-guide" class="settings-guide-button" type="button">はじめてガイドを見る</button>
                 <div class="bubble-visual-control">
                     <span class="bubble-visual-label">BUBBLE FORM / VISUAL MODE</span>
                     <div class="bubble-visual-options" role="group" aria-label="バブル表示デザイン">
@@ -104,7 +111,7 @@
                 </button>
                 <button id="btn-open-settings" class="settings-open-button pointer-events-auto" type="button" aria-haspopup="dialog" aria-controls="settings-overlay" aria-expanded="false" title="設定を開く">⚙ 設定</button>
             </div>
-            <p class="text-xs text-gray-400">君の世界は、編集されている / NAVIGATE THE BUBBLE WEB</p>
+                    <p class="text-xs text-gray-400">ひとつの意見から、広い世界へ</p>
             <div id="toast" class="mt-2 glass-panel px-4 py-2 rounded-lg text-xs text-blue-200 opacity-0 transition-opacity duration-500">
                 メッセージ
             </div>
@@ -112,35 +119,89 @@
 
         <!-- ① 意見入力画面 -->
         <div id="screen-input" class="input-screen screen-container screen-active flex flex-col items-center justify-center z-50 pointer-events-auto">
-            <div id="input-panel" class="portal-panel glass-panel p-10 rounded-2xl w-full max-w-lg text-center flex flex-col gap-6 transition-all duration-500 relative z-50">
-                <h2 class="text-3xl font-bold text-white mb-2">あなたの意見を教えてください</h2>
-                <p class="text-sm text-gray-300">入力した言葉から、あなたが属するバブルの宇宙を探索します。</p>
-                <div class="api-key-entry text-left">
-                    <label for="openai-api-key" class="block text-xs text-cyan-200 mb-2">OpenAI APIキー（意見入力前に設定）</label>
-                    <div class="flex gap-2">
-                        <input type="password" id="openai-api-key" autocomplete="off" placeholder="sk-..." class="flex-1 bg-black/50 border border-gray-600 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-cyan-400 transition-colors pointer-events-auto">
-                        <button id="btn-set-api-key" type="button" class="api-key-button">設定</button>
-                    </div>
-                    <div id="api-key-status" class="mt-2 text-[10px] text-amber-200">APIキー未設定</div>
-                    <p class="mt-2 text-[10px] leading-relaxed text-gray-500">キーはこのページのメモリ内だけで使用し、保存・共有しません。公開サイトでは自分のキーを入力してください。</p>
+            <div id="input-panel" class="portal-panel glass-panel transition-all duration-500 relative z-50">
+                <div class="input-prompt-copy">
+                    <span class="input-kicker">YOUR STARTING POINT</span>
+                    <h2 id="input-question" class="text-3xl font-bold text-white">最近、気になっていることは？</h2>
+                    <p id="input-example" class="input-example">例：きのこの山とたけのこの里、どちらが好き？</p>
                 </div>
-                <input type="text" id="input-opinion" placeholder="例: きのこの山が好き" class="w-full bg-black/50 border border-gray-600 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-blue-500 transition-colors pointer-events-auto">
-                <button id="btn-dive" disabled class="w-full bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 text-white font-bold py-3 px-4 rounded-lg transition-all shadow-[0_0_15px_rgba(59,130,246,0.5)] cursor-pointer pointer-events-auto">
-                    宇宙へダイブ 🚀
-                </button>
-                <button id="btn-return-current-exploration" type="button" class="hidden current-exploration-button">
-                    現在のバブル宇宙へ戻る
-                </button>
-                <section class="saved-explorations" aria-labelledby="saved-explorations-heading">
-                    <div class="saved-explorations-heading-row">
-                        <h2 id="saved-explorations-heading">保存済みの探索</h2>
-                        <span id="saved-exploration-status" aria-live="polite"></span>
-                    </div>
-                    <p id="saved-exploration-empty" class="saved-exploration-empty">保存済みの探索はありません。</p>
-                    <div id="saved-exploration-list" class="saved-exploration-list"></div>
-                </section>
+                <button id="btn-refresh-prompt" class="prompt-refresh-button" type="button" aria-label="質問と例を別のものにする" title="別のお題を見る">⟳<span>別のお題</span></button>
+                <label class="input-field-label" for="input-opinion">あなたの考えをひとことで</label>
+                <textarea id="input-opinion" rows="2" maxlength="240" placeholder="好きなもの、気になるニュース、日々の疑問など" class="input-opinion-field pointer-events-auto"></textarea>
+                <div class="input-actions-row">
+                    <button id="btn-dive" disabled class="input-dive-button pointer-events-auto">このテーマの世界を見てみる <span aria-hidden="true">→</span></button>
+                    <button id="btn-return-current-exploration" type="button" class="hidden current-exploration-button">現在の探索に戻る</button>
+                </div>
+                <div class="input-history-dock">
+                    <div><strong>前の続きから始める</strong><span>保存した探索をいつでも再開できます</span></div>
+                    <button id="btn-open-history" type="button" class="input-history-button">今まで探索した世界 <span aria-hidden="true">↗</span></button>
+                </div>
             </div>
         </div>
+
+        <section id="api-key-overlay" class="api-key-overlay" role="dialog" aria-modal="true" aria-labelledby="api-key-title" hidden>
+            <div class="api-key-card glass-panel">
+                <button id="btn-close-api-key" class="overlay-close-button api-key-close" type="button" aria-label="API Key の入力を閉じる">×</button>
+                <span class="input-kicker">ONE-TIME SETUP</span>
+                <h2 id="api-key-title">探索を始める準備</h2>
+                <p>新しいテーマを調べるには OpenAI API Key が必要です。</p>
+                <label for="openai-api-key">API Key</label>
+                <div class="api-key-field-row">
+                    <input type="password" id="openai-api-key" autocomplete="off" placeholder="sk-...">
+                    <button id="btn-set-api-key" type="button" class="api-key-button">設定して続ける</button>
+                </div>
+                <div id="api-key-status" class="api-key-status" aria-live="polite">キーはこのページのメモリ内だけで使います。</div>
+                <p class="api-key-privacy">キーは保存・共有されません。保存済みの探索を見るだけなら、API Key は不要です。</p>
+                <button id="btn-open-history-from-key" class="api-key-history-button" type="button">保存した世界を見に行く</button>
+            </div>
+        </section>
+
+        <section id="saved-explorations-overlay" class="saved-explorations-overlay" role="dialog" aria-modal="true" aria-labelledby="saved-explorations-heading" hidden>
+            <div class="saved-explorations-dialog glass-panel">
+                <div class="saved-explorations-heading-row">
+                    <div><span class="input-kicker">YOUR WORLDS</span><h2 id="saved-explorations-heading">今まで探索した世界</h2></div>
+                    <button id="btn-close-history" class="overlay-close-button" type="button" aria-label="保存履歴を閉じる">×</button>
+                </div>
+                <p id="saved-exploration-status" class="saved-exploration-status" aria-live="polite"></p>
+                <p id="saved-exploration-empty" class="saved-exploration-empty">保存した探索はまだありません。気になることから、新しい世界を作ってみましょう。</p>
+                <div id="saved-exploration-list" class="saved-exploration-list"></div>
+            </div>
+        </section>
+
+        <section id="first-run-guide" class="first-run-guide" role="dialog" aria-modal="true" aria-labelledby="guide-title" hidden>
+            <div class="first-run-guide-card glass-panel">
+                <div class="guide-progress" aria-label="はじめてガイド">
+                    <span id="guide-step-label">1 / 4</span><div><i id="guide-progress-fill"></i></div>
+                    <button id="btn-close-guide" type="button" aria-label="ガイドを閉じる">×</button>
+                </div>
+                <div class="guide-illustration" aria-hidden="true"><span class="guide-orbit guide-orbit-one"></span><span class="guide-orbit guide-orbit-two"></span><b>✦</b></div>
+                <span class="input-kicker">A NEW WAY TO EXPLORE</span>
+                <h2 id="guide-title"></h2>
+                <p id="guide-copy"></p>
+                <div class="guide-actions"><button id="btn-guide-next" type="button">次へ <span aria-hidden="true">→</span></button></div>
+            </div>
+        </section>
+
+        <section id="voyage-panel" class="voyage-panel" aria-live="polite" hidden>
+            <div class="voyage-route" aria-label="探索の進行状況">
+                <div class="voyage-route-line"><i id="voyage-route-fill"></i></div>
+                <div class="voyage-step is-active" data-voyage-step="0"><span>1</span><b>テーマを整理</b></div>
+                <div class="voyage-step" data-voyage-step="1"><span>2</span><b>視点を集める</b></div>
+                <div class="voyage-step" data-voyage-step="2"><span>3</span><b>世界を組み立てる</b></div>
+            </div>
+            <p id="voyage-status" class="voyage-status">入力したテーマを整理しています…</p>
+            <p class="voyage-estimate">探索の目安 <strong>約3分</strong></p>
+        </section>
+
+        <aside id="contextual-hint" class="contextual-hint" aria-live="polite">
+            <div id="contextual-hint-content" class="contextual-hint-content">
+                <div><span id="hint-screen-label" class="hint-screen-label">はじめに</span><button id="btn-close-hint" type="button" aria-label="ヒントを閉じる">×</button></div>
+                <strong id="hint-title">BubbleBreakerでできること</strong>
+                <p id="hint-copy"></p>
+                <button id="btn-hint-action" class="hint-action-button" type="button" hidden></button>
+            </div>
+            <button id="btn-open-hint" class="hint-reopen-button" type="button" aria-label="この画面のヒントを開く" hidden>?</button>
+        </aside>
 
         <section id="about-overlay" class="about-overlay" role="dialog" aria-modal="true" aria-labelledby="about-title" hidden>
             <div class="about-stars" aria-hidden="true"></div>
@@ -148,26 +209,22 @@
                 <button id="btn-about-menu" class="about-menu-button" type="button" aria-expanded="false" aria-controls="about-menu">☰ 目次</button>
                 <button id="btn-close-about" class="about-close" type="button" aria-label="サービス紹介を閉じる">← 探索へ戻る</button>
                 <nav id="about-menu" class="about-menu" aria-label="紹介ページの目次" hidden>
-                    <a href="#about-mission">Bubble Breakerとは</a>
-                    <a href="#about-filter-bubble">フィルターバブルとは</a>
-                    <a href="#about-collection">情報収集の仕組み</a>
-                    <a href="#about-formation">バブルの形成</a>
-                    <a href="#about-navigation">探索方法</a>
-                    <a href="#about-controls">操作方法</a>
-                    <a href="#about-impact">使うと何が変わるか</a>
+                    <a href="#about-mission">このサービスでできること</a>
+                    <a href="#about-controls">探索のしかた</a>
+                    <a href="#about-impact">見つかるもの</a>
                 </nav>
             </div>
             <div class="about-scroll">
                 <header class="about-header">
-                    <span class="about-kicker">BUBBLE BREAKER / SERVICE GUIDE</span>
-                    <h2 id="about-title">フィルターバブルを脱し、<br>本来のインターネットを自由に旅する</h2>
-                    <p>ひとつの意見から、比較・反対・背景・意外な接続まで。情報を「答え」ではなく、根拠のある宇宙として探索するサービスです。</p>
+                    <span class="about-kicker">YOUR IDEA IS THE START</span>
+                    <h2 id="about-title">ひとつの意見から、<br>まだ知らない視点へ。</h2>
+                    <p>気になることをひとつ入力すると、関連する考えや反対意見、背景を宇宙のような地図にして探索できます。</p>
                 </header>
                 <section id="about-mission" class="about-hero">
                     <div>
                         <span class="about-section-number">00 / MISSION</span>
-                        <h3>検索結果の列を、探索できる宇宙へ。</h3>
-                        <p>Bubble Breakerは、入力した意見を起点に三階層のバブル群を形成します。バブルを潜り、戻り、根拠を読み比べることで、自分の現在地と、まだ見えていなかった隣の世界を同じ地図の上で確かめられます。</p>
+                        <h3>答えを読むだけでなく、つながりをたどる。</h3>
+                        <p>あなたの言葉から、近い考え・異なる考え・その背景を集めます。気になるバブルを選び、情報源や意見の違いを自分のペースで確かめられます。</p>
                     </div>
                     <div class="about-orbit" aria-hidden="true"><span></span><i></i><b></b></div>
                 </section>
@@ -186,15 +243,15 @@
                 <section class="about-compare">
                     <article>
                         <span>CONVENTIONAL FEED</span>
-                        <h3>近い答えへ収束する</h3>
+                        <h3>いつもの検索</h3>
                         <div class="about-mini-map is-linear"><b>入力</b><i></i><b>最適化された結果</b><i></i><b>似た次の結果</b></div>
-                        <p>順位づけされた一本の列では、採用されなかった観点や、情報同士の関係を把握しにくくなります。</p>
+                        <p>答えは見つかっても、別の立場や情報同士の関係は見えにくいことがあります。</p>
                     </article>
                     <article>
                         <span>BUBBLE BREAKER</span>
-                        <h3>複数の方向へ分岐する</h3>
+                        <h3>BubbleBreaker</h3>
                         <div class="about-mini-map is-network"><b>入力</b><i></i><b>比較</b><b>反対</b><b>背景</b><b>接続</b></div>
-                        <p>近い情報だけでなく、異なる立場と背景を同じ空間に置き、どこへ進むかをユーザー自身が選べます。</p>
+                        <p>賛成・反対・背景を同じ地図で見比べ、次に読むものを自分で選べます。</p>
                     </article>
                 </section>
 
@@ -248,23 +305,21 @@
                 </section>
 
                 <section id="about-controls" class="about-section about-controls-section">
-                    <div class="about-section-heading"><span class="about-section-number">08 / CONTROLS</span><h3>探索の操作方法</h3><p>情報を選ぶ、潜る、根拠を確かめる。画面ごとの操作は次の通りです。</p></div>
+                    <div class="about-section-heading"><span class="about-section-number">HOW TO EXPLORE</span><h3>気になるバブルから、少しずつ。</h3><p>難しい操作はありません。見たいものを選び、必要なときに戻れます。</p></div>
                     <ol class="about-controls-list">
-                        <li><b>バブル群を見る</b><span>意見入力後、関連するテーマが三階層のバブル群として現れます。</span></li>
-                        <li><b>バブルを選ぶ</b><span>バブルをクリックすると個別画面へ移動します。右パネルの構成要素も選択できます。</span></li>
-                        <li><b>ズームイン／アウト</b><span>3Dではホイールとドラッグ、WASDで移動します。2Dではバブルを選んで移動します。</span></li>
-                        <li><b>上位・下位へ移動</b><span>個別画面の「中を見る」「俯瞰する」や階層ナビゲーションから移動します。</span></li>
-                        <li><b>詳細解析を開く</b><span>「このバブルを詳しく解析する」を押し、4つのカードから根拠や情報源を確認します。</span></li>
-                        <li><b>右パネルを使う</b><span>「−」で閉じ、再表示ボタンで開きます。設定からサイズや表示モードを変更できます。</span></li>
-                        <li><b>意見入力・保存履歴へ</b><span>右パネル下部のボタンで戻り、保存済みのバブル群を復元できます。</span></li>
+                        <li><b>気になる丸を選ぶ</b><span>バブルを押すと、その話題の説明が開きます。</span></li>
+                        <li><b>下の世界をのぞく</b><span>さらに具体的な話題があるバブルは、選んで中へ進めます。</span></li>
+                        <li><b>4つの見方を比べる</b><span>概要、歴史、情報源、内外の論争から、知りたい内容を開きます。</span></li>
+                        <li><b>出典を確かめる</b><span>解析画面では、説明の根拠になった情報源も読めます。</span></li>
+                        <li><b>いつでも続きから</b><span>探索はこの端末に保存され、入力画面の履歴から再開できます。</span></li>
                     </ol>
                 </section>
 
                 <section id="about-impact" class="about-outcome">
-                    <span class="about-section-number">09 / WHAT CHANGES</span>
-                    <h3>「与えられた答えを読む」から、<br>「情報環境を自分で旅する」へ。</h3>
-                    <p>Bubble Breakerは正解を一つに決める道具ではありません。自分の視界に何が入り、何が欠け、どの根拠がどの主張を支えているかを確かめながら、次の一歩を自分で選ぶための探索装置です。</p>
-                    <strong>BREAK THE FEED. EXPLORE THE WEB.</strong>
+                    <span class="about-section-number">TAKE THE NEXT STEP</span>
+                    <h3>あなたの世界の、その先へ。</h3>
+                    <p>同じ意見だけでは見つからないつながりを、根拠とともにたどってみましょう。</p>
+                    <strong>気になることから、探索を始めよう。</strong>
                 </section>
             </div>
         </section>
@@ -273,7 +328,7 @@
         <div id="screen-group" class="exploration-screen screen-container screen-hidden flex justify-end z-40">
             <div id="panel-group" class="exploration-panel glass-panel rounded-xl relative pointer-events-auto">
                 <div class="panel-section panel-header panel-compact-header">
-                    <span class="text-[10px] text-blue-300 font-semibold">現在の観測領域</span>
+                    <span class="text-[10px] text-blue-300 font-semibold">いま見ているテーマ</span>
                     <button class="panel-collapse-button" data-collapse-panel="panel-group" aria-controls="panel-group-content" aria-expanded="true" type="button" title="パネルを畳む">−</button>
                 </div>
                 <div id="panel-group-content" class="panel-collapsible-content">
@@ -281,25 +336,14 @@
                     <div class="panel-section group-heading-section">
                         <h2 id="group-title" class="text-xl font-bold">--</h2>
                         <p id="group-desc" class="group-description">--</p>
-                        <button id="btn-zoomout-group" class="group-parent-button bg-white/10 hover:bg-white/20 px-2 py-1 rounded text-white transition-colors cursor-pointer">
-                            ↓ 上の階層へ
-                        </button>
-                    </div>
-                    <div class="panel-section panel-type-card bg-black/40 rounded-lg p-3 border border-gray-700">
-                        <div class="text-xs text-gray-400 mb-1">バブル群の型</div>
-                        <div id="group-type" class="text-lg font-bold text-purple-300">--</div>
                     </div>
                     <div class="panel-section panel-list-section">
-                        <div class="text-xs text-gray-400 mb-2"><span>構成要素と占有率</span></div>
                         <div class="group-composition-chart-wrap">
-                            <svg id="group-composition-chart" class="group-composition-chart" viewBox="0 0 392 250" role="img" aria-label="構成要素の割合"></svg>
+                            <svg id="group-composition-chart" class="group-composition-chart" viewBox="0 0 392 250" role="img" aria-label="このテーマを構成するバブル"></svg>
                         </div>
                         <div id="group-list" class="group-composition-fallback" aria-live="polite"></div>
                     </div>
-                    <div class="panel-section panel-help text-[10px] text-gray-500 mt-2 text-center">
-                        バブルをクリックするか、ズームイン<br>下スクロールで全体を俯瞰し、もう一度で上の階層へ戻る<br>WASDで前後左右へ移動
-                    </div>
-                    <button id="btn-open-input" type="button" class="group-input-navigation-button">← 意見入力・保存履歴へ</button>
+                    <button id="btn-open-input" type="button" class="group-input-navigation-button">別のテーマを探索する</button>
                 </div>
             </div>
             <button class="exploration-panel-reopen pointer-events-auto" data-reopen-panel="panel-group" type="button" aria-controls="panel-group">観測パネルを開く</button>
@@ -307,18 +351,16 @@
 
         <!-- ③ 個別バブル画面 -->
         <div id="screen-single" class="exploration-screen screen-container screen-hidden flex justify-end p-6 pt-24 z-40">
-            <div id="single-bubble-info" onclick="loadAnalysis()" class="absolute top-1/2 left-1/4 transform -translate-x-1/2 -translate-y-1/2 text-center pointer-events-auto cursor-pointer hover:scale-105 transition-all w-96 group">
-                <div class="absolute -top-8 left-1/2 transform -translate-x-1/2 text-xs text-blue-300 opacity-0 group-hover:opacity-100 transition-opacity bg-black/60 px-3 py-1 rounded-full border border-blue-500/50 shadow-lg">
-                    クリックして詳細解析へ
-                </div>
+            <button id="single-bubble-info" onclick="loadAnalysis()" class="single-bubble-info pointer-events-auto group" type="button" aria-label="このバブルの詳しい解析を開く">
+                <span class="single-description-label">このバブルについて</span>
                 <h2 id="single-title" class="text-4xl font-bold text-white text-shadow-lg mb-2 group-hover:text-blue-200 transition-colors">--</h2>
-                <div class="single-description-label">このバブルの簡易説明</div>
-                <p id="single-desc" class="text-sm text-gray-200 bg-black/50 p-4 rounded-xl backdrop-blur-md border border-white/10 group-hover:border-blue-500/50 transition-colors">--</p>
-            </div>
+                <p id="single-desc" class="text-sm text-gray-200">--</p>
+                <span class="single-info-action">詳しい分析を見る <b aria-hidden="true">→</b></span>
+            </button>
 
             <div id="panel-single" class="exploration-panel glass-panel rounded-xl relative pointer-events-auto">
                 <div class="panel-section panel-header panel-compact-header">
-                    <span class="text-[10px] text-blue-300 font-semibold">現在の観測領域</span>
+                    <span class="text-[10px] text-blue-300 font-semibold">いま見ているテーマ</span>
                     <button class="panel-collapse-button" data-collapse-panel="panel-single" aria-controls="panel-single-content" aria-expanded="true" type="button" title="パネルを畳む">−</button>
                 </div>
                 <div id="panel-single-content" class="panel-collapsible-content">
@@ -327,14 +369,9 @@
                         <h2 id="single-panel-title" class="text-xl font-bold">--</h2>
                         <p id="single-panel-desc" class="group-description">--</p>
                     </div>
-                    <div class="panel-section panel-type-card bg-black/40 rounded-lg p-3 border border-gray-700">
-                        <div class="text-xs text-gray-400 mb-1">バブル群の型</div>
-                        <div id="single-group-type" class="text-lg font-bold text-purple-300">--</div>
-                    </div>
                     <div class="panel-section panel-list-section">
-                        <div class="text-xs text-gray-400 mb-2"><span>構成要素と占有率</span></div>
                         <div class="group-composition-chart-wrap">
-                            <svg id="single-composition-chart" class="group-composition-chart" viewBox="0 0 392 250" role="img" aria-label="構成要素の割合"></svg>
+                            <svg id="single-composition-chart" class="group-composition-chart" viewBox="0 0 392 250" role="img" aria-label="このテーマを構成するバブル"></svg>
                         </div>
                         <div id="single-group-list" class="group-composition-fallback" aria-live="polite"></div>
                     </div>
@@ -342,16 +379,8 @@
                         <button id="btn-analyze" class="w-full bg-blue-600/80 hover:bg-blue-500 text-white font-bold py-3 px-4 rounded-lg transition-colors border border-blue-400/50 shadow-[0_0_15px_rgba(59,130,246,0.3)] cursor-pointer">
                             このバブルを詳しく解析する 🔍
                         </button>
-                        <div class="flex gap-2">
-                            <button id="btn-zoomout-single" class="flex-1 bg-gray-700/50 hover:bg-gray-600 text-xs text-white py-2 rounded border border-gray-600 transition-colors cursor-pointer">
-                                ↓ 俯瞰する (下スクロール)
-                            </button>
-                            <button id="btn-zoomin-single" class="flex-1 bg-gray-700/50 hover:bg-gray-600 text-xs text-white py-2 rounded border border-gray-600 transition-colors hidden cursor-pointer">
-                                ↑ 中を見る (上スクロール)
-                            </button>
-                        </div>
                     </div>
-                    <button id="btn-open-input-single" type="button" class="group-input-navigation-button">← 意見入力・保存履歴へ</button>
+                    <button id="btn-open-input-single" type="button" class="group-input-navigation-button">別のテーマを探索する</button>
                 </div>
             </div>
             <button class="exploration-panel-reopen pointer-events-auto" data-reopen-panel="panel-single" type="button" aria-controls="panel-single">観測パネルを開く</button>
@@ -361,61 +390,46 @@
         <div id="screen-analysis" class="network-analysis screen-container screen-hidden flex items-center justify-center p-6 z-40">
             <div class="analysis-network-layout relative w-full max-w-[1500px] h-[84dvh] pointer-events-none">
                 <svg class="analysis-connectors" viewBox="0 0 1000 640" preserveAspectRatio="none" aria-hidden="true">
-                    <path d="M500 320 C400 250 300 160 185 125 M500 320 C400 390 300 480 185 515 M500 320 C600 250 700 160 815 125 M500 320 C600 390 700 480 815 515" />
-                    <circle cx="500" cy="320" r="8" />
+                    <path d="M500 258 V170 H473 V120 H454 M500 382 V470 H473 V520 H454 M500 258 V170 H527 V120 H546 M500 382 V470 H527 V520 H546" />
                 </svg>
                 
                 <div id="analysis-center-title" class="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 text-2xl font-bold text-white text-shadow-lg cursor-pointer hover:scale-110 transition-transform pointer-events-auto text-center w-full z-10">
                     --
                 </div>
-                <div id="analysis-status" class="hidden absolute top-1/2 left-1/2 mt-10 -translate-x-1/2 text-xs text-cyan-200 bg-black/70 border border-cyan-300/40 rounded-full px-4 py-2 pointer-events-none z-20 whitespace-nowrap">
+                <div id="analysis-status" class="hidden absolute top-1/2 left-1/2 mt-16 -translate-x-1/2 text-xs text-cyan-200 bg-black/90 border border-cyan-300/40 rounded-full px-4 py-2 pointer-events-none z-20 whitespace-nowrap">
                     分析生成中…
                 </div>
                 
                 <div class="card-tl card-anim absolute top-0 left-0 lg:left-10 pointer-events-auto">
-                    <div onclick="showDetail('overview')" class="analysis-card w-64 glass-panel p-4 rounded-xl cursor-pointer hover:scale-105 hover:border-blue-400 transition-all group relative overflow-hidden">
-                        <h3 class="text-sm font-bold text-blue-300 mb-2 border-b border-blue-500/30 pb-1 relative z-10">📖 バブルの概要</h3>
-                        <div class="w-full h-24 bg-gray-800 rounded mb-2 flex items-center justify-center text-gray-400 text-xs overflow-hidden relative z-10">
-                            <div class="absolute inset-0 bg-gradient-to-br from-blue-900/40 to-purple-900/40"></div>
-                            <span class="relative">概要・画像・出典を確認</span>
-                        </div>
-                        <p class="text-xs text-gray-300 line-clamp-2 relative z-10">文字情報と取得できた関連画像から概要を確認します。</p>
-                        <div class="absolute -right-2 -top-2 bg-blue-500 w-6 h-6 rounded-full flex items-center justify-center text-xs opacity-0 group-hover:opacity-100 transition-opacity shadow-lg z-10">↗</div>
-                    </div>
+                    <button type="button" onclick="showDetail('overview')" class="analysis-card glass-panel group" aria-label="バブルの概要を詳しく見る">
+                        <span class="analysis-card-kicker">01 · まず全体を知る</span><h3>バブルの概要</h3>
+                        <span class="analysis-card-image is-overview"><img data-analysis-thumb="overview" alt="" hidden><i aria-hidden="true">◉</i></span>
+                        <p data-analysis-summary="overview">この話題のポイントと、確認できた根拠。</p>
+                    </button>
                 </div>
                 
                 <div class="card-bl card-anim absolute bottom-0 left-0 lg:left-10 pointer-events-auto">
-                    <div onclick="showDetail('history')" class="analysis-card w-64 glass-panel p-4 rounded-xl cursor-pointer hover:scale-105 hover:border-green-400 transition-all group">
-                        <h3 class="text-sm font-bold text-green-300 mb-2 border-b border-green-500/30 pb-1">⏳ 形成の歴史</h3>
-                        <div class="analysis-card-timeline-preview" aria-hidden="true">
-                            <span></span><span></span><span></span><span></span>
-                        </div>
-                        <p class="text-[10px] text-gray-400">根拠を確認できた出来事を左から右の時系列で表示します。</p>
-                    </div>
+                    <button type="button" onclick="showDetail('history')" class="analysis-card glass-panel group" aria-label="形成の歴史を詳しく見る">
+                        <span class="analysis-card-kicker">02 · 時間をたどる</span><h3>形成の歴史</h3>
+                        <span class="analysis-card-image is-history"><img data-analysis-thumb="history" alt="" hidden><i aria-hidden="true">⌁</i></span>
+                        <p data-analysis-summary="history">確認できた出来事を、古い順にたどります。</p>
+                    </button>
                 </div>
 
                 <div class="card-tr card-anim absolute top-0 right-0 lg:right-10 pointer-events-auto">
-                    <div onclick="showDetail('demographic')" class="analysis-card w-64 glass-panel p-4 rounded-xl cursor-pointer hover:scale-105 hover:border-yellow-400 transition-all group">
-                        <h3 class="text-sm font-bold text-yellow-300 mb-2 border-b border-yellow-500/30 pb-1">🎯 構成層・情報源</h3>
-                        <div class="flex justify-center mb-2" aria-hidden="true">
-                    <div class="analysis-card-pie-preview"></div>
-                        </div>
-                        <p class="text-xs text-gray-300 line-clamp-2">今回収集した独立Evidenceの情報源構成を表示します。</p>
-                    </div>
+                    <button type="button" onclick="showDetail('demographic')" class="analysis-card glass-panel group" aria-label="構成層と情報源を詳しく見る">
+                        <span class="analysis-card-kicker">03 · 情報源を見る</span><h3>構成層・情報源</h3>
+                        <span class="analysis-card-image is-sources"><img data-analysis-thumb="demographic" alt="" hidden><i aria-hidden="true">◌</i></span>
+                        <p data-analysis-summary="demographic">どんな資料が、この話題を支えているか。</p>
+                    </button>
                 </div>
 
                 <div class="card-br card-anim absolute bottom-0 right-0 lg:right-10 pointer-events-auto">
-                    <div onclick="showDetail('evaluation')" class="analysis-card w-64 glass-panel p-4 rounded-xl cursor-pointer hover:scale-105 hover:border-purple-400 transition-all group">
-                        <h3 class="text-sm font-bold text-purple-300 mb-2 border-b border-purple-500/30 pb-1">⚖️ 内外からの意見</h3>
-                        <div class="analysis-card-perspective-preview" aria-hidden="true">
-                            <span>反対派</span><span>賛成派</span>
-                        </div>
-                        <p class="text-xs text-gray-300 mt-3">詳細画面で両方の立場と根拠を比較します。</p>
-                    </div>
-                </div>
-
-                <div class="analysis-help pointer-events-auto">
-                    カードをクリックして詳細表示 / 下スクロールで戻る
+                    <button type="button" onclick="showDetail('evaluation')" class="analysis-card glass-panel group" aria-label="内外の論争を詳しく見る">
+                        <span class="analysis-card-kicker">04 · 立場を比べる</span><h3>内外の論争</h3>
+                        <span class="analysis-card-image is-debate"><img data-analysis-thumb="evaluation" alt="" hidden><i aria-hidden="true">↔</i></span>
+                        <p data-analysis-summary="evaluation">賛成・反対それぞれの主張と根拠。</p>
+                    </button>
                 </div>
             </div>
         </div>

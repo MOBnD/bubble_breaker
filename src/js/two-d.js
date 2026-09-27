@@ -175,7 +175,7 @@
             twoDLoading.hidden = true;
             twoDStage.hidden = false;
             const content = createTwoDSvgElement('g', { class: 'bubble-2d-group', 'data-bubble-id': bubble.id });
-            content.appendChild(createTwoDBubble({ bubble, x: compact ? 350 : 390, y: compact ? 610 : 350, radius: 142 }, {
+            content.appendChild(createTwoDBubble({ bubble, x: 350, y: compact ? 610 : 350, radius: 142 }, {
                 level: group && group.level,
                 single: true,
                 current: true
@@ -242,7 +242,7 @@
             twoDContainer.hidden = false;
             twoDStage.hidden = true;
             twoDLoading.hidden = false;
-            if (twoDLoadingStatus) twoDLoadingStatus.textContent = '複数の検索経路から情報源を収集中…';
+            if (twoDLoadingStatus) twoDLoadingStatus.textContent = 'テーマに関係する情報を集めています…';
             loadingAnimation = {
                 mode: '2d',
                 apiReady: false,
@@ -264,9 +264,9 @@
                 if (!loadingAnimation.completionStartedAt) {
                     loadingAnimation.completionStartedAt = now;
                     loadingAnimation.startProgress = progress;
-                    if (twoDLoadingStatus) twoDLoadingStatus.textContent = 'Evidenceを整理し、バブル宇宙を構成中…';
+                    if (twoDLoadingStatus) twoDLoadingStatus.textContent = '探索結果を整えて、目的の世界へ移動しています…';
                 }
-                const completion = Math.min(1, (now - loadingAnimation.completionStartedAt) / 1150);
+                const completion = Math.min(1, (now - loadingAnimation.completionStartedAt) / 480);
                 progress = loadingAnimation.startProgress + (1 - loadingAnimation.startProgress) * (completion * completion * (3 - 2 * completion));
                 if (completion >= 1) {
                     const ready = loadingAnimation.onReady;

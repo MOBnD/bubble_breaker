@@ -633,8 +633,8 @@
                 loadingAnimation.apiReady = true;
                 loadingAnimation.universeReadyAt = now;
             }
-            loadingAnimation.segmentDuration = 60000 / warpSpeedFactor;
-            loadingAnimation.maxSpeed = 900 * warpSpeedFactor;
+            loadingAnimation.segmentDuration = loadingAnimation.apiReady ? 1600 : 60000 / warpSpeedFactor;
+            loadingAnimation.maxSpeed = loadingAnimation.apiReady ? 120000 : 900 * warpSpeedFactor;
             if (!loadingAnimation.route || loadingAnimation.routeTargetIndex !== loadingAnimation.targetIndex) initializeLoadingRoute(target);
             if (loadingAnimation.apiReady && !loadingAnimation.returnRoute && !loadingAnimation.preEntryStartedAt && !loadingAnimation.entryStartedAt) beginReturnToDestination();
             const routeSampler = loadingAnimation.routeSampler || createRouteDistanceSampler(loadingAnimation.route);
@@ -663,7 +663,7 @@
                 camera.updateProjectionMatrix();
                 updateZoomSound(0.58);
             } else if (!loadingAnimation.entryStartedAt) {
-                const holdProgress = Math.min(1, (now - loadingAnimation.preEntryStartedAt) / 1000);
+                const holdProgress = Math.min(1, (now - loadingAnimation.preEntryStartedAt) / (loadingAnimation.apiReady ? 180 : 1000));
                 camera.position.copy(routeSampler.getPointAtDistance(preEntryProgress * routeLength));
                 targetControlTarget.copy(blackHole);
                 camera.fov = configuredFieldOfView;
@@ -671,7 +671,8 @@
                 updateZoomSound(0.42);
                 if (holdProgress >= 1) loadingAnimation.entryStartedAt = now;
             } else {
-                const entryProgress = Math.min(1, (now - loadingAnimation.entryStartedAt) / 1500);
+                const entryDuration = loadingAnimation.apiReady ? 560 : 1500;
+                const entryProgress = Math.min(1, (now - loadingAnimation.entryStartedAt) / entryDuration);
                 const exponentialProgress = entryProgress >= 1 ? 1 : 1 - Math.exp(-5 * entryProgress);
                 const preEntryPosition = routeSampler.getPointAtDistance(preEntryProgress * routeLength);
                 camera.position.copy(preEntryPosition).lerp(blackHole.clone().addScaledVector(loadingAnimation.approachDirection, eventHorizonRadius), exponentialProgress);
@@ -688,7 +689,7 @@
             if (!routeCameraOrientationApplied) camera.lookAt(targetControlTarget);
 
             // 事象の地平面に触れた瞬間に切り替える。
-            if (loadingAnimation.entryStartedAt && now - loadingAnimation.entryStartedAt >= 1500) {
+            if (loadingAnimation.entryStartedAt && now - loadingAnimation.entryStartedAt >= (loadingAnimation.apiReady ? 560 : 1500)) {
                 camera.position.copy(blackHole).addScaledVector(loadingAnimation.approachDirection, eventHorizonRadius);
                 targetControlTarget.copy(blackHole);
                 if (pendingUniverse && loadingAnimation.apiReady && typeof loadingAnimation.onReady === 'function') {
@@ -1271,7 +1272,9 @@
             // 個別画面への遷移はクリック、ラベル選択、または意図した近接ズームで行う。
 
             // 最後に、全ての計算結果をもとに画面を描画（レンダリング）する
-            renderer.render(scene, camera);
+            const warpSpeed = loadingAnimation ? Math.max(0.72, Math.min(1.25, loadingAnimation.routeSpeed * 4)) : 1;
+            if (typeof window.renderSceneFrame === 'function') window.renderSceneFrame(Boolean(isDiving || loadingAnimation), warpSpeed);
+            else renderer.render(scene, camera);
         }
 
         // --- 画面サイズが変更された時の対応処理 ---
@@ -1281,6 +1284,8 @@
             camera.aspect = width / height; // カメラの縦横比を修正
             camera.updateProjectionMatrix(); // カメラ設定を更新
             renderer.setSize(width, height); // レンダラーのサイズを更新
+            if (typeof resizeWarpBlurTarget === 'function') resizeWarpBlurTarget();
+            if (state.screen === 'SINGLE' && typeof window.onSceneBubbleScreenChanged === 'function') window.onSceneBubbleScreenChanged('SINGLE');
         });
 
         // アニメーションループを開始！

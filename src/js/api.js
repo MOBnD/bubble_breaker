@@ -1296,7 +1296,7 @@
             return results;
         }
 
-        async function requestDynamicUniverse(input) {
+        async function requestDynamicUniverse(input, onProgress = () => {}) {
             activeAnalysisInput = String(input || '');
             bubbleAnalysisRequests.clear();
             if (!isOpenAIKeyConfigured()) {
@@ -1304,11 +1304,16 @@
                 return null;
             }
             const generationProgress = { root: false, centralCount: 0, leafCount: 0 };
+            const report = (step, message) => {
+                if (typeof onProgress === 'function') onProgress({ step, message });
+            };
             try {
                 // 依存関係を固定する: root確定 → rootの各バブルのcentral確定
                 // → 各centralバブルのleaf確定。siblingsだけを並列化する。
+                report(0, '入力したテーマから、話題の中心を整理しています…');
                 const rootResult = await requestRootGroup(activeAnalysisInput);
                 generationProgress.root = true;
+                report(1, '近い考えや、違う立場から見た情報を集めています…');
                 const root = rootResult.group;
                 const centralResults = await runWithConcurrency(root.bubbles, 3, rootBubble => requestCentralGroup(
                     activeAnalysisInput,
@@ -1324,6 +1329,7 @@
                 const centralGroups = centralResults.map(result => result.group);
                 root.bubbles.forEach((bubble, index) => { bubble.childId = centralGroups[index].id; });
 
+                report(2, '集めた話題を、たどって読める世界に組み立てています…');
                 const leafRequests = centralGroups.flatMap(centralGroup => centralGroup.bubbles.map(centralBubble => ({ centralGroup, centralBubble })));
                 const leafGroups = await runWithConcurrency(leafRequests, 3, ({ centralGroup, centralBubble }) => {
                     const branchRoot = root.bubbles.find(bubble => bubble.childId === centralGroup.id);
@@ -1344,6 +1350,7 @@
                     entryGroupId: entryResult.group.id,
                     entryBubbleId: entryResult.entryBubbleId
                 });
+                report(2, '最後のつながりを整えています。まもなく探索を始められます…');
                 apiLog('root → central → leafの段階生成と検証に成功しました', { groupCount: Object.keys(universe.db).length, centralGroupCount: centralGroups.length, leafGroupCount: leafGroups.length });
                 return universe;
             } catch (error) {

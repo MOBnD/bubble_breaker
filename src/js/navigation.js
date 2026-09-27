@@ -9,6 +9,8 @@
             document.getElementById(`screen-${screenName.toLowerCase()}`).classList.remove('screen-hidden');
             document.getElementById(`screen-${screenName.toLowerCase()}`).classList.add('screen-active');
             state.screen = screenName;
+            if (typeof window.updateAppChromeForScreen === 'function') window.updateAppChromeForScreen(screenName);
+            if (typeof window.onSceneBubbleScreenChanged === 'function') window.onSceneBubbleScreenChanged(screenName);
             if (typeof window.onBubbleScreenChanged === 'function') window.onBubbleScreenChanged(screenName);
         }
 
