@@ -32,7 +32,6 @@
         .bubble-label:hover { color: #fff; text-shadow: 0 1px 3px rgba(0,0,0,1), 0 0 8px rgba(0,0,0,0.9), 0 0 12px rgba(72,229,255,0.62); }
         .bubble-label.is-leaf-label {
             width: min(184px, 42vw);
-            font-size: clamp(12px, 0.95vw, 15px);
             line-height: 1.25;
             overflow-wrap: normal;
             text-wrap: balance;
@@ -1169,7 +1168,7 @@
 .group-breadcrumb button.is-next { color: #edfbff; border-color: rgba(101, 214, 255, .64); background: rgba(16, 53, 79, .98); }
 .group-breadcrumb button.is-next::after { content: "→"; color: #8feaff; }
 .group-input-navigation-button { min-height: 46px; margin-top: 12px; border: 1px solid rgba(113, 196, 255, .38); border-radius: 10px; background: rgba(21, 48, 74, .77); font-size: 13px; font-weight: 800; }
-.bubble-label, .bubble-label.is-leaf-label { font-size: clamp(16px, 1.35vw, 22px); }
+.bubble-label { font-size: clamp(16px, 1.35vw, 22px); }
 .mode-2d .bubble-2d-label, .mode-2d .bubble-2d.is-leaf .bubble-2d-label { font-size: 19px; }
 .mode-2d .bubble-2d-single .bubble-2d-label { font-size: 22px; }
 
@@ -1410,12 +1409,11 @@
 .detail-comment-opposition::before { left: 22px; }
 .detail-comment-support::before { right: 22px; }
 .detail-comment-reply-context { display: none !important; }
-.bubble-label.is-leaf-label { font-size: clamp(16px, 1.35vw, 22px); }
 .bubble-label[data-level] { width: min(220px, 48vw); }
 .bubble-label { display: grid; gap: 3px; width: min(240px, 48vw); line-height: 1.2; }
 .bubble-label-name { display: block; }
-.bubble-generation-status { display: block; color: #bcefff; font-size: 10px; font-weight: 750; letter-spacing: .03em; text-shadow: 0 1px 4px #000, 0 0 8px #000; }
-.bubble-generation-status.is-loading { color: #ffd989; }
+.bubble-generation-status { display: inline-flex; width: fit-content; min-height: 21px; align-items: center; justify-self: center; padding: 2px 8px; color: #c8f3ff; border: 1px solid rgba(120, 218, 255, .52); border-radius: 999px; background: rgba(3, 15, 29, .92); box-shadow: 0 2px 8px rgba(0, 0, 0, .55); font-size: 12px; font-weight: 800; letter-spacing: .03em; text-shadow: 0 1px 3px #000; }
+.bubble-generation-status.is-loading { color: #ffe2a1; border-color: rgba(255, 204, 112, .62); background: rgba(36, 23, 7, .94); }
 .analysis-generation-status { display: inline-flex; width: fit-content; align-items: center; margin: 2px 0 10px; padding: 5px 9px; color: #c9f4ff; border: 1px solid rgba(111, 212, 255, .27); border-radius: 999px; background: rgba(4, 17, 32, .9); font-size: 11px; font-weight: 850; }
 .analysis-card-image > .analysis-generation-status { position: absolute; z-index: 2; right: 9px; bottom: 8px; margin: 0; box-shadow: 0 2px 9px rgba(0,0,0,.45); }
 .analysis-card-image.is-analysis-pending > .analysis-generation-status { top: 50%; right: auto; bottom: auto; left: 50%; padding: 11px 16px; transform: translate(-50%, -50%); font-size: 14px; }

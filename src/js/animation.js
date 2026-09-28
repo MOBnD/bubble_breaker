@@ -1288,9 +1288,11 @@
                     const x = (pos.x * 0.5 + 0.5) * window.innerWidth;
                     const y = -(pos.y * 0.5 - 0.5) * window.innerHeight;
                     
-                    // カメラからの距離に応じてラベルの大きさを変える（遠くにあると文字も小さくなる）
+                    // 階層ごとの実寸差を除き、現在のグループに入った時の距離を基準にする。
+                    // これにより同じ相対ズームでは全階層で同じ大きさになり、ズームアウト時の縮小は保たれる。
                     const dist = camera.position.distanceTo(b.mesh.position);
-                    const scale = Math.min(1.55, Math.max(0.72, 14 / Math.max(0.001, dist)));
+                    const relativeDistance = dist / Math.max(0.001, groupEntryCameraDistance);
+                    const scale = Math.min(1.55, Math.max(0.72, 1.55 / Math.max(0.001, relativeDistance)));
                     
                     // スタイルを適用してラベルを配置
                     const transform = `translate(-50%, -50%) translate(${x.toFixed(1)}px, ${y.toFixed(1)}px) scale(${scale.toFixed(3)})`;

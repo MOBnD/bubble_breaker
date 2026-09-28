@@ -62,6 +62,54 @@
             if (typeof window.syncApiKeyPrompt === 'function') window.syncApiKeyPrompt();
         }
 
+        window.startBubbleSessionRestoreVoyage = function(universe, onReady) {
+            if (!universe || typeof onReady !== 'function') return false;
+
+            isGenerating = true;
+            window.__bubbleBreakerLoading = true;
+            if (diveButton) diveButton.disabled = true;
+            if (voyagePanel) voyagePanel.hidden = false;
+            if (typeof window.updateVoyageProgress === 'function') {
+                window.updateVoyageProgress({ step: 2, message: '保存した世界へ向かっています…' });
+            }
+            const inputScreen = document.getElementById('screen-input');
+            if (typeof switchScreen === 'function'
+                && (state.screen !== 'INPUT' || !inputScreen?.classList.contains('screen-active'))) {
+                switchScreen('INPUT');
+            }
+
+            const panel = document.getElementById('input-panel');
+            if (panel) {
+                panel.style.transform = 'scale(0.5)';
+                panel.style.opacity = '0';
+                panel.style.pointerEvents = 'none';
+            }
+            startBackgroundMusic();
+            pendingUniverse = universe;
+            startLoadingAnimation();
+            if (!loadingAnimation) {
+                pendingUniverse = null;
+                window.__bubbleBreakerLoading = false;
+                isGenerating = false;
+                if (diveButton) diveButton.disabled = !runtimeKeyConfigured;
+                if (voyagePanel) voyagePanel.hidden = true;
+                return false;
+            }
+            loadingAnimation.onReady = () => {
+                const readyUniverse = pendingUniverse;
+                pendingUniverse = null;
+                if (voyagePanel) voyagePanel.hidden = true;
+                window.__bubbleBreakerLoading = false;
+                isGenerating = false;
+                if (diveButton) diveButton.disabled = !runtimeKeyConfigured;
+                updateWarpHazeLayer();
+                onReady(readyUniverse || universe);
+            };
+            window.updateAppChromeForScreen('INPUT');
+            if (typeof window.markLoadingUniverseReady === 'function') window.markLoadingUniverseReady();
+            return true;
+        };
+
         const promptExamples = [
             ['最近、気になっていることは？', '例：きのこの山とたけのこの里、どちらが好き？'],
             ['あなたの好きな食べ物は？', '例：たけのこの里が好き'],

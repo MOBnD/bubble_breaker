@@ -714,16 +714,43 @@
                     console.warn('[BubbleBreaker][Cosmos] NGC 3324写真の読み込みに失敗しました。星空背景を表示します', error);
                 };
                 if (window.location.protocol === 'file:') {
-                    // A file opened directly from disk has an opaque origin in many
-                    // browsers. Load it as a plain image without opting into CORS.
-                    const image = new Image();
-                    image.onload = () => {
-                        const texture = new THREE.Texture(image);
-                        texture.needsUpdate = true;
-                        applyLoadedTexture(texture);
+                    // WebGL refuses file:/// image textures even when an <img>
+                    // element can display the source. Decode the bundled bytes to
+                    // a Blob URL created by this document so the texture is local.
+                    const loadEmbeddedTexture = () => {
+                        try {
+                            const encodedImage = window.__NGC3324_FILE_TEXTURE_BASE64__;
+                            if (!encodedImage) throw new Error('埋め込みNGCテクスチャがありません');
+                            const binaryImage = window.atob(encodedImage);
+                            const imageBytes = new Uint8Array(binaryImage.length);
+                            for (let index = 0; index < binaryImage.length; index += 1) imageBytes[index] = binaryImage.charCodeAt(index);
+                            const blobUrl = URL.createObjectURL(new Blob([imageBytes], { type: 'image/jpeg' }));
+                            dome.userData.ngcTextureObjectUrl = blobUrl;
+                            const image = new Image();
+                            image.onload = () => {
+                                const texture = new THREE.Texture(image);
+                                texture.needsUpdate = true;
+                                applyLoadedTexture(texture);
+                            };
+                            image.onerror = error => {
+                                URL.revokeObjectURL(blobUrl);
+                                delete dome.userData.ngcTextureObjectUrl;
+                                handleLoadError(error);
+                            };
+                            image.src = blobUrl;
+                        } catch (error) {
+                            handleLoadError(error);
+                        }
                     };
-                    image.onerror = handleLoadError;
-                    image.src = textureUrl;
+                    if (window.__NGC3324_FILE_TEXTURE_BASE64__) {
+                        loadEmbeddedTexture();
+                    } else {
+                        const dataScript = document.createElement('script');
+                        dataScript.onload = loadEmbeddedTexture;
+                        dataScript.onerror = handleLoadError;
+                        dataScript.src = new URL('./assets/ngc-3324-file-texture.js', document.baseURI).href;
+                        document.head.appendChild(dataScript);
+                    }
                 } else {
                     // Same-origin app assets need no explicit crossOrigin override.
                     new THREE.TextureLoader().load(textureUrl, applyLoadedTexture, undefined, handleLoadError);
@@ -2297,7 +2324,7 @@
 
         // 【バブル群画面】 を読み込んで表示する関数
         // isAfterDive: ワープ直後に遠くからズームインしてくる演出を入れるかどうかのフラグ
-        window.loadGroup = function(groupId, isAfterDive = false) {
+        window.loadGroup = function(groupId, isAfterDive = false, loadOptions = {}) {
             const data = activeDB[groupId];
             if(!data) return;
             const validBubbles = data.bubbles.filter(isRenderableBubbleData);
@@ -2328,9 +2355,12 @@
             const previousGroupId = state.groupId;
             const previousScreen = state.screen;
             const previousBubbleData = state.bubbleData;
-            const preservedViewDirection = getExplorationViewDirection(previousScreen === 'SINGLE'
-                ? singleViewDirection.clone().normalize()
-                : camera.position.clone().sub(controls.target).normalize());
+            const requestedViewDirection = loadOptions && loadOptions.viewDirection;
+            const preservedViewDirection = requestedViewDirection && requestedViewDirection.isVector3
+                ? getExplorationViewDirection(requestedViewDirection)
+                : getExplorationViewDirection(previousScreen === 'SINGLE'
+                    ? singleViewDirection.clone().normalize()
+                    : camera.position.clone().sub(controls.target).normalize());
             if (!Number.isFinite(preservedViewDirection.x) || preservedViewDirection.lengthSq() < 0.01) preservedViewDirection.set(0, 0, 1);
             const previousOffset = groupWorldOffset.clone();
             const previousScale = groupWorldScale;
@@ -2338,9 +2368,18 @@
             let nextScale = previousScale;
             let transitionType = 'instant';
             if (isAfterDive) {
-                nextOffset.set(0, 0, 0);
-                nextScale = BUBBLE_GROUP_WORLD_SCALE;
-                navigationStack = buildNavigationEntries(getRestorableGroupPath(groupId).map(group => group.id));
+                const restoredPath = getRestorableGroupPath(groupId).map(group => group.id);
+                navigationStack = buildNavigationEntries(restoredPath);
+                if (loadOptions.preserveNavigationPath) {
+                    const restoredEntry = navigationStack[navigationStack.length - 1];
+                    if (restoredEntry) {
+                        nextOffset.copy(restoredEntry.worldPosition);
+                        nextScale = restoredEntry.worldScale;
+                    }
+                } else {
+                    nextOffset.set(0, 0, 0);
+                    nextScale = BUBBLE_GROUP_WORLD_SCALE;
+                }
                 transitionType = 'dive';
             } else if (previousScreen === 'SINGLE' && groupId === previousGroupId) {
                 transitionType = 'reveal';

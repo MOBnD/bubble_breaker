@@ -396,20 +396,37 @@
                 activeBubbleSession = { ...record, db: null, lastOpenedAt: new Date().toISOString() };
                 bubbleSessionByDatabase.set(activeDB, activeBubbleSession);
                 latestDatabaseBySessionId.set(activeBubbleSession.id, activeDB);
-                state.screen = 'INPUT';
                 state.groupId = null;
                 state.groupData = null;
                 state.bubbleId = null;
                 state.bubbleData = null;
                 state.analysisCardType = null;
                 document.getElementById('input-opinion').value = record.opinion;
-                if (typeof window.restoreBubbleNavigationPath === 'function') {
-                    window.restoreBubbleNavigationPath(record.navigationPath, record.lastGroupId);
-                }
-                window.loadGroup(record.lastGroupId);
                 setSavedExplorationsOpen(false);
-                window.scheduleCurrentBubbleSessionSave('restored');
-                showToast('保存したバブル宇宙を復元しました');
+                const restoreUniverse = {
+                    db: record.db,
+                    entryGroupId: record.entryGroupId,
+                    entryBubbleId: record.entryBubbleId
+                };
+                const voyageStarted = typeof window.startBubbleSessionRestoreVoyage === 'function'
+                    && window.startBubbleSessionRestoreVoyage(restoreUniverse, () => {
+                        const restoredPath = typeof window.restoreBubbleNavigationPath === 'function'
+                            ? window.restoreBubbleNavigationPath(record.navigationPath, record.lastGroupId)
+                            : [];
+                        const restoredGroupId = restoredPath[restoredPath.length - 1]
+                            || (activeDB[record.lastGroupId] ? String(record.lastGroupId) : record.entryGroupId);
+                        if (!restoredGroupId || !activeDB[restoredGroupId]) {
+                            showToast('保存した世界の表示先を見つけられませんでした');
+                            return;
+                        }
+                        window.loadGroup(restoredGroupId, true, {
+                            preserveNavigationPath: true,
+                            viewDirection: new THREE.Vector3(0, 0, 1)
+                        });
+                        window.scheduleCurrentBubbleSessionSave('restored');
+                        showToast('正面から保存したバブル宇宙に到着しました');
+                    });
+                if (!voyageStarted) throw new Error('保存した世界への渡航ロードを開始できませんでした');
             } catch (error) {
                 console.warn('[BubbleBreaker][Storage] restore failed', error);
                 showToast(`探索履歴を復元できませんでした: ${error.message}`);
