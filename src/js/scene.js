@@ -515,9 +515,13 @@
             const canvas = document.createElement('canvas');
             canvas.width = 128; canvas.height = 128;
             const context = canvas.getContext('2d');
+            const softenedInnerColor = String(innerColor).replace(
+                /rgba\(\s*([^,]+)\s*,\s*([^,]+)\s*,\s*([^,]+)\s*,\s*([\d.]+)\s*\)/i,
+                (_, red, green, blue, alpha) => `rgba(${red},${green},${blue},${Math.max(0, Math.min(1, Number(alpha) * 0.55))})`
+            );
             const gradient = context.createRadialGradient(64, 64, 2, 64, 64, 64);
             gradient.addColorStop(0, innerColor);
-            gradient.addColorStop(0.28, innerColor.replace('1)', '0.55)'));
+            gradient.addColorStop(0.28, softenedInnerColor);
             gradient.addColorStop(0.72, outerColor);
             gradient.addColorStop(1, 'rgba(0,0,0,0)');
             context.fillStyle = gradient;
@@ -684,9 +688,7 @@
             scene.add(dome);
             const textureUrl = window.__NGC3324_TEXTURE__ || '';
             if (textureUrl) {
-                const textureLoader = new THREE.TextureLoader();
-                textureLoader.setCrossOrigin('anonymous');
-                textureLoader.load(textureUrl, texture => {
+                const applyLoadedTexture = texture => {
                     if (!texture.image || !texture.image.width || !texture.image.height) {
                         dome.visible = false;
                         console.warn('[BubbleBreaker][Cosmos] NGC 3324画像に有効な画素がありません', textureUrl);
@@ -705,11 +707,27 @@
                     dome.material.needsUpdate = true;
                     dome.visible = window.__bubbleBreakerNGC3324Visible !== false && backgroundTheme === 'space';
                     window.__bubbleBreakerNGC3324Loaded = true;
-                }, undefined, error => {
+                };
+                const handleLoadError = error => {
                     dome.visible = false;
                     window.__bubbleBreakerNGC3324Loaded = false;
                     console.warn('[BubbleBreaker][Cosmos] NGC 3324写真の読み込みに失敗しました。星空背景を表示します', error);
-                });
+                };
+                if (window.location.protocol === 'file:') {
+                    // A file opened directly from disk has an opaque origin in many
+                    // browsers. Load it as a plain image without opting into CORS.
+                    const image = new Image();
+                    image.onload = () => {
+                        const texture = new THREE.Texture(image);
+                        texture.needsUpdate = true;
+                        applyLoadedTexture(texture);
+                    };
+                    image.onerror = handleLoadError;
+                    image.src = textureUrl;
+                } else {
+                    // Same-origin app assets need no explicit crossOrigin override.
+                    new THREE.TextureLoader().load(textureUrl, applyLoadedTexture, undefined, handleLoadError);
+                }
             }
         }
 
@@ -985,34 +1003,6 @@
 
         runCosmicSetupStep('宇宙背景一式', createCosmicEnvironment);
 
-        function updateCosmicDepthVisual(depth) {
-            const variant = (depth * 0.217 + 0.11) % 1;
-            const hue = (0.58 + variant * 0.32) % 1;
-            galaxyClusters.forEach((cluster, clusterIndex) => {
-                cluster.scale.setScalar(1 + Math.min(0.65, depth * 0.08));
-                cluster.rotation.set(variant * 0.18 + clusterIndex * 0.03, variant * Math.PI * 2 + clusterIndex * 0.17, variant * 0.11);
-                cluster.traverse(child => {
-                    if (!child.material || !child.material.color) return;
-                    if (child.userData && child.userData.isGalaxyCenterBlackHole) {
-                        child.material.color.set(0x010107);
-                        if (child.material.opacity !== undefined) child.material.opacity = 1;
-                        return;
-                    }
-                    if (child.userData && child.userData.preserveGalaxyColor) {
-                        return;
-                    }
-                    if (child.userData && child.userData.preserveInstanceColors) {
-                        if (child.material.opacity !== undefined) child.material.opacity = 0.84 + variant * 0.14;
-                        return;
-                    }
-                    const lightness = child.material.wireframe ? 0.72 : 0.68;
-                    child.material.color.setHSL((hue + clusterIndex * 0.041) % 1, 0.78, lightness);
-                    if (child.material.opacity !== undefined) child.material.opacity = child.material.wireframe ? 0.22 + variant * 0.2 : 0.72 + variant * 0.2;
-                });
-            });
-            cosmicBackgroundGroup.scale.setScalar(1 + Math.min(0.2, depth * 0.025));
-        }
-
         galaxyClusterCenters.forEach((center, index) => runCosmicSetupStep(`銀河団 ${index + 1}`, () => createGalaxyCluster(center, index)));
         runCosmicSetupStep('背景テーマ', () => setBackgroundTheme(backgroundTheme));
 
@@ -1021,13 +1011,9 @@
         let targetCameraPos = new THREE.Vector3(0, 0, 25);     // カメラが移動する目標地点
         let targetControlTarget = new THREE.Vector3(0, 0, 0);  // カメラが向くべき注視点の目標地点
         const BUBBLE_GROUP_WORLD_SCALE = 1.75;
-        const RELATIVE_BUBBLE_DIAMETER = 0.0225;
         let groupWorldOffset = new THREE.Vector3(0, 0, 0);
         let groupWorldScale = BUBBLE_GROUP_WORLD_SCALE;
         let navigationStack = [];
-        let hierarchyVisualShells = [];
-        let hierarchyRootGroupId = null;
-        let hierarchyGroupLayouts = new Map();
         let transitionState = null;
         let groupOverviewState = null;
         let loadingAnimation = null;
@@ -1717,7 +1703,7 @@
         };
 
         function createChildBubblePreview(bubbleData) {
-            // 子テーマは重複コピーではなく、buildWorldHierarchyが実データから配置する。
+            // 子テーマは固有の階層として保持し、表示時にそのグループだけを描画する。
             return null;
         }
 
@@ -1798,27 +1784,8 @@
             }));
         }
 
-        function getGroupAverageBubbleRadius(group) {
-            if (!group || !Array.isArray(group.bubbles)) return 1;
-            const radii = group.bubbles.filter(isRenderableBubbleData).map(bubble => getBubbleLocalRadius(group, bubble));
-            return radii.length ? radii.reduce((sum, radius) => sum + radius, 0) / radii.length : 1;
-        }
-
-        function getGroupPositionExtent(group) {
-            if (!group || !Array.isArray(group.bubbles)) return 1;
-            arrangeBubblePositions(group);
-            return Math.max(1, ...group.bubbles.filter(isRenderableBubbleData).map(bubble => {
-                const position = Array.isArray(bubble.pos) ? bubble.pos : [0, 0, 0];
-                return Math.hypot(Number(position[0]) || 0, Number(position[1]) || 0, Number(position[2]) || 0);
-            }));
-        }
-
         function getNestedGroupWorldScale(group, parentBubbleWorldRadius) {
-            return Math.max(0.0000001, (Math.max(0.00001, parentBubbleWorldRadius) * RELATIVE_BUBBLE_DIAMETER) / getGroupAverageBubbleRadius(group));
-        }
-
-        function getNestedGroupPlacementScale(group, parentBubbleWorldRadius) {
-            return Math.max(0.000001, (Math.max(0.00001, parentBubbleWorldRadius) * 0.52) / getGroupPositionExtent(group));
+            return Math.max(0.012, (Math.max(0.1, parentBubbleWorldRadius) * 0.56) / getGroupLocalExtent(group));
         }
 
         function buildNavigationEntries(path) {
@@ -1834,7 +1801,7 @@
                     if (anchorBubble) {
                         const parentRadius = getBubbleLocalRadius(parent, anchorBubble) * scale;
                         offset = offset.clone().add(new THREE.Vector3(...anchorBubble.pos).multiplyScalar(scale));
-                        scale = getNestedGroupPlacementScale(group, parentRadius);
+                        scale = getNestedGroupWorldScale(group, parentRadius);
                     }
                 }
                 return {
@@ -1848,119 +1815,76 @@
             });
         }
 
-        function createVisualOnlyBubbleShell(position, radius, color = 0x9beeff, opacity = 0.08) {
-            const shell = createHierarchyTransitionShell(position, radius, color);
-            shell.name = 'visual-only-bubble-shell';
-            shell.material.opacity = opacity;
-            shell.scale.setScalar(Math.max(0.0000001, radius));
-            shell.renderOrder = -2;
-            hierarchyVisualShells.push(shell);
-            return shell;
-        }
-
-        function buildWorldHierarchy(rootGroupId) {
-            const layouts = new Map();
+        function buildCurrentGroupBubbles(group, center, worldScale) {
             const rendered = [];
-            const visited = new Set();
-            hierarchyVisualShells.forEach(shell => {
-                scene.remove(shell);
-                disposeObjectTree(shell);
-            });
-            hierarchyVisualShells = [];
             labelsContainer.replaceChildren();
+            arrangeBubblePositions(group);
+            const validBubbles = group.bubbles.filter(isRenderableBubbleData);
+            ensureDistinctBubbleColors(validBubbles);
+            const isLowestLayer = group.level === 'leaf'
+                || (Boolean(group.parentId) && !validBubbles.some(bubble => bubble.childId && activeDB[bubble.childId]));
 
-            const addGroup = (groupId, center, placementScale, depth, parentBubbleId = null, parentBubbleRadius = 0) => {
-                const group = activeDB[groupId];
-                if (!group || visited.has(groupId) || !Array.isArray(group.bubbles)) return;
-                visited.add(groupId);
-                arrangeBubblePositions(group);
-                const validBubbles = group.bubbles.filter(isRenderableBubbleData);
-                if (!validBubbles.length) return;
-                const averageLocalRadius = getGroupAverageBubbleRadius(group);
-                const layout = { groupId, group, center: center.clone(), placementScale, depth, parentBubbleId, parentBubbleRadius, bubbles: [] };
-                layouts.set(groupId, layout);
-
-                validBubbles.forEach((bubbleData, index) => {
-                    const local = Array.isArray(bubbleData.pos) ? bubbleData.pos : [0, 0, 0];
-                    const position = center.clone().add(new THREE.Vector3(...local).multiplyScalar(placementScale));
-                    const localRadius = getBubbleLocalRadius(group, bubbleData);
-                    const radius = depth === 0
-                        ? localRadius * BUBBLE_GROUP_WORLD_SCALE
-                        : Math.max(0.000002, parentBubbleRadius * RELATIVE_BUBBLE_DIAMETER * localRadius / Math.max(0.0001, averageLocalRadius));
-                    const isFocus = isFocusPathBubble(group, bubbleData);
-                    const mesh = createBubbleMesh(bubbleData.size, bubbleData.color, position.toArray(), bubbleData, depth === 2 ? 'leaf' : (group.level || 'central'), isFocus);
-                    mesh.position.copy(position);
-                    mesh.scale.setScalar(radius);
-                    mesh.userData.finalScale = radius;
-                    mesh.userData.hierarchyDepth = depth;
-                    mesh.material.depthWrite = false;
-                    const seed = hashBubbleValue(bubbleData.id);
-                    mesh.userData.rotationVector = new THREE.Vector3(
-                        ((seed % 17) - 8) * 0.000035,
-                        ((Math.floor(seed / 7) % 19) - 9) * 0.000035,
-                        ((Math.floor(seed / 13) % 15) - 7) * 0.000025
-                    );
-                    mesh.userData.ornamentScale = 0.82 + (seed % 37) / 100;
-                    mesh.userData.bubbleVariant = seed % 4;
-                    mesh.userData.ornamentRotation = new THREE.Euler(
-                        ((Math.floor(seed / 5) % 17) - 8) * 0.055,
-                        ((Math.floor(seed / 11) % 23) - 11) * 0.065,
-                        ((Math.floor(seed / 19) % 15) - 7) * 0.055
-                    );
-                    const ornament = mesh.userData.networkVisual || mesh.userData.deepSeaVisual || mesh.userData.dataVisual;
-                    if (ornament) {
-                        ornament.scale.setScalar(mesh.userData.ornamentScale);
-                        ornament.rotation.copy(mesh.userData.ornamentRotation);
-                    }
-                    scene.add(mesh);
-
-                    const label = document.createElement('div');
-                    label.className = 'bubble-label';
-                    label.dataset.level = String(depth);
-                    const name = document.createElement('span');
-                    name.className = 'bubble-label-name';
-                    name.textContent = bubbleData.name;
-                    label.appendChild(name);
-                    const status = document.createElement('span');
-                    status.className = 'bubble-generation-status';
-                    status.dataset.bubbleStatus = bubbleData.id;
-                    label.appendChild(status);
-                    label.title = `${bubbleData.name} — 選択して詳しく見る`;
-                    label.onclick = event => {
-                        event.stopPropagation();
-                        selectBubble(bubbleData);
-                    };
-                    labelsContainer.appendChild(label);
-                    const bubble = {
-                        mesh, label, data: bubbleData, level: depth === 2 ? 'leaf' : group.level || 'central', isFocus,
-                        groupId: group.id, groupData: group, hierarchyDepth: depth, parentBubbleId,
-                        interactive: depth === 0, baseX: position.x, baseY: position.y
-                    };
-                    layout.bubbles.push(bubble);
-                    rendered.push(bubble);
-
-                    const childGroup = bubbleData.childId && activeDB[bubbleData.childId];
-                    if (childGroup && depth < 2) {
-                        const childPlacementScale = getNestedGroupPlacementScale(childGroup, radius);
-                        addGroup(childGroup.id, position, childPlacementScale, depth + 1, bubbleData.id, radius);
-                    } else if (depth === 2) {
-                        const tinyRadius = Math.max(0.0000001, radius * RELATIVE_BUBBLE_DIAMETER);
-                        for (let shellIndex = 0; shellIndex < 3; shellIndex += 1) {
-                            const angle = shellIndex * Math.PI * 2 / 3;
-                            const shellPosition = position.clone().add(new THREE.Vector3(Math.cos(angle), Math.sin(angle), (shellIndex - 1) * 0.12).multiplyScalar(radius * 0.08));
-                            createVisualOnlyBubbleShell(shellPosition, tinyRadius, bubbleData.color, 0.12);
-                        }
-                    }
-                });
-                if (depth === 0) {
-                    layout.bubbles.forEach(bubble => {
-                        const radius = bubble.mesh.userData.finalScale || bubble.mesh.scale.x;
-                        createVisualOnlyBubbleShell(bubble.mesh.position, radius / RELATIVE_BUBBLE_DIAMETER, bubble.data.color || 0xa9dfff, 0.022);
-                    });
+            validBubbles.forEach(bubbleData => {
+                const local = Array.isArray(bubbleData.pos) ? bubbleData.pos : [0, 0, 0];
+                const position = center.clone().add(new THREE.Vector3(...local).multiplyScalar(worldScale));
+                const isFocus = isFocusPathBubble(group, bubbleData);
+                const bubbleLevel = isLowestLayer ? 'leaf' : (group.level || 'central');
+                const mesh = createBubbleMesh(bubbleData.size, bubbleData.color, position.toArray(), bubbleData, bubbleLevel, isFocus);
+                mesh.position.copy(position);
+                mesh.scale.multiplyScalar(worldScale * getTypeBubbleScale(group, bubbleData));
+                mesh.userData.finalScale = mesh.scale.x;
+                const seed = hashBubbleValue(bubbleData.id);
+                mesh.userData.rotationVector = new THREE.Vector3(
+                    ((seed % 17) - 8) * 0.000035,
+                    ((Math.floor(seed / 7) % 19) - 9) * 0.000035,
+                    ((Math.floor(seed / 13) % 15) - 7) * 0.000025
+                );
+                mesh.userData.ornamentScale = 0.82 + (seed % 37) / 100;
+                mesh.userData.bubbleVariant = seed % 4;
+                mesh.userData.ornamentRotation = new THREE.Euler(
+                    ((Math.floor(seed / 5) % 17) - 8) * 0.055,
+                    ((Math.floor(seed / 11) % 23) - 11) * 0.065,
+                    ((Math.floor(seed / 19) % 15) - 7) * 0.055
+                );
+                const ornament = mesh.userData.networkVisual || mesh.userData.deepSeaVisual || mesh.userData.dataVisual;
+                if (ornament) {
+                    ornament.scale.setScalar(mesh.userData.ornamentScale);
+                    ornament.rotation.copy(mesh.userData.ornamentRotation);
                 }
-            };
-            addGroup(rootGroupId, new THREE.Vector3(), BUBBLE_GROUP_WORLD_SCALE, 0);
-            return { layouts, bubbles: rendered };
+                scene.add(mesh);
+
+                const label = document.createElement('div');
+                label.className = 'bubble-label' + (isLowestLayer ? ' is-leaf-label' : '');
+                label.dataset.level = group.level || '';
+                const name = document.createElement('span');
+                name.className = 'bubble-label-name';
+                name.textContent = isLowestLayer && window.BubbleBreakerText
+                    ? window.BubbleBreakerText.formatBubbleDisplayName(bubbleData.name)
+                    : bubbleData.name;
+                label.appendChild(name);
+                const status = document.createElement('span');
+                status.className = 'bubble-generation-status';
+                status.dataset.bubbleStatus = bubbleData.id;
+                label.appendChild(status);
+                label.title = `${bubbleData.name} — 選択して詳しく見る`;
+                label.onclick = event => {
+                    event.stopPropagation();
+                    selectBubble(bubbleData);
+                };
+                labelsContainer.appendChild(label);
+                rendered.push({
+                    mesh,
+                    label,
+                    data: bubbleData,
+                    level: bubbleLevel,
+                    isFocus,
+                    groupId: group.id,
+                    groupData: group,
+                    baseX: position.x,
+                    baseY: position.y
+                });
+            });
+            return rendered;
         }
 
         // ==========================================
@@ -2088,7 +2012,6 @@
             const current = navigationStack[navigationStack.length - 1];
             groupWorldOffset.copy(current.worldPosition);
             groupWorldScale = current.worldScale;
-            updateCosmicDepthVisual(Math.max(0, navigationStack.length - 1));
             return path;
         };
 
@@ -2417,7 +2340,7 @@
             if (isAfterDive) {
                 nextOffset.set(0, 0, 0);
                 nextScale = BUBBLE_GROUP_WORLD_SCALE;
-                navigationStack = [{ groupId, parentGroupId: data.parentId || null, anchorBubbleId: null, worldPosition: nextOffset.clone(), worldScale: nextScale, depth: 0 }];
+                navigationStack = buildNavigationEntries(getRestorableGroupPath(groupId).map(group => group.id));
                 transitionType = 'dive';
             } else if (previousScreen === 'SINGLE' && groupId === previousGroupId) {
                 transitionType = 'reveal';
@@ -2428,31 +2351,29 @@
                 const parentWorldRadius = parentBubbleMesh
                     ? (parentBubbleMesh.mesh.userData.finalScale || parentBubbleMesh.mesh.scale.x)
                     : getBubbleLocalRadius(parentGroup, state.bubbleData) * previousScale;
-                nextScale = getNestedGroupPlacementScale(data, parentWorldRadius);
-                navigationStack.push({ groupId, parentGroupId: data.parentId || previousGroupId, anchorBubbleId: state.bubbleData.id, worldPosition: nextOffset.clone(), worldScale: nextScale, depth: navigationStack.length });
+                nextScale = getNestedGroupWorldScale(data, parentWorldRadius);
+                navigationStack = buildNavigationEntries(getRestorableGroupPath(groupId).map(group => group.id));
                 transitionType = 'zoomIn';
-            } else if (previousScreen === 'GROUP' && previousGroupId !== groupId) {
-                const previousPath = getGroupHierarchyPath(previousGroupId).map(group => group.id);
-                const targetPath = getGroupHierarchyPath(groupId).map(group => group.id);
+            } else if ((previousScreen === 'GROUP' || previousScreen === 'SINGLE') && previousGroupId !== groupId) {
+                const previousPath = getRestorableGroupPath(previousGroupId).map(group => group.id);
+                const targetPath = getRestorableGroupPath(groupId).map(group => group.id);
+                const targetEntryPath = buildNavigationEntries(targetPath);
+                const targetEntry = targetEntryPath[targetEntryPath.length - 1];
+                navigationStack = targetEntryPath;
+                if (targetEntry) {
+                    nextOffset.copy(targetEntry.worldPosition);
+                    nextScale = targetEntry.worldScale;
+                }
                 const targetIsAncestor = targetPath.length < previousPath.length
                     && targetPath.every((id, index) => previousPath[index] === id);
                 const currentIsAncestor = previousPath.length < targetPath.length
                     && previousPath.every((id, index) => targetPath[index] === id);
-                if (targetIsAncestor || currentIsAncestor || previousPath[0] === targetPath[0]) {
-                    const path = buildNavigationEntries(targetPath);
-                    navigationStack = path;
-                    const targetEntry = path[path.length - 1];
-                    if (targetEntry) {
-                        nextOffset.copy(targetEntry.worldPosition);
-                        nextScale = targetEntry.worldScale;
-                    }
-                    transitionType = targetPath.length < previousPath.length ? 'zoomOut' : 'zoomIn';
-                }
+                if (targetIsAncestor) transitionType = 'zoomOut';
+                else if (currentIsAncestor) transitionType = 'zoomIn';
             }
             groupWorldOffset.copy(nextOffset);
             groupWorldScale = nextScale;
             const useThreeDTransition = explorationViewMode === '3d' && transitionType !== 'instant';
-            updateCosmicDepthVisual(Math.max(0, navigationStack.length - 1));
             relocateGalaxyUniverse(`category:${groupId}`);
             state.groupId = groupId;
             state.groupData = data;
@@ -2465,27 +2386,7 @@
             // 古いバブル（3DモデルとHTMLラベル）を画面から削除
             const outgoingBubbles = currentBubbles;
             currentBubbles = [];
-            const rootGroupId = navigationStack[0] && activeDB[navigationStack[0].groupId]
-                ? navigationStack[0].groupId
-                : groupId;
-            hierarchyRootGroupId = rootGroupId;
-            const hierarchy = buildWorldHierarchy(rootGroupId);
-            currentBubbles = hierarchy.bubbles;
-            hierarchyGroupLayouts = hierarchy.layouts;
-            const targetLayout = hierarchy.layouts.get(groupId);
-            if (targetLayout) {
-                nextOffset.copy(targetLayout.center);
-                nextScale = targetLayout.placementScale;
-                groupWorldOffset.copy(nextOffset);
-                groupWorldScale = nextScale;
-                navigationStack.forEach(entry => {
-                    const layout = hierarchy.layouts.get(entry.groupId);
-                    if (layout) {
-                        entry.worldPosition.copy(layout.center);
-                        entry.worldScale = layout.placementScale;
-                    }
-                });
-            }
+            currentBubbles = buildCurrentGroupBubbles(data, nextOffset, nextScale);
             if (useThreeDTransition) currentBubbles.forEach(bubble => { bubble.mesh.material.opacity = 0.02; });
 
             if (!useThreeDTransition) {
@@ -2584,49 +2485,6 @@
             if (typeof window.scheduleCurrentBubbleSessionSave === 'function') window.scheduleCurrentBubbleSessionSave('group-navigation');
             showToast(`${groupDisplayTitle} の宇宙を観測中`);
         }
-
-        window.updateObservedHierarchyGroup = function() {
-            if (state.screen !== 'GROUP' || transitionState || groupOverviewState || isZoomingIntoGroup || !hierarchyRootGroupId) return;
-            const rootGroup = activeDB[hierarchyRootGroupId];
-            if (!rootGroup) return;
-            let chosenGroup = rootGroup;
-            const candidates = currentBubbles.filter(bubble => bubble.data.childId && activeDB[bubble.data.childId])
-                .sort((a, b) => a.hierarchyDepth - b.hierarchyDepth);
-            candidates.forEach(bubble => {
-                let parentId = bubble.parentBubbleId;
-                let ancestorsInside = true;
-                while (parentId) {
-                    const parent = currentBubbles.find(item => item.data.id === parentId);
-                    if (!parent || camera.position.distanceTo(parent.mesh.position) > (parent.mesh.userData.finalScale || parent.mesh.scale.x) * 0.94) {
-                        ancestorsInside = false;
-                        break;
-                    }
-                    parentId = parent.parentBubbleId;
-                }
-                const radius = bubble.mesh.userData.finalScale || bubble.mesh.scale.x;
-                if (ancestorsInside && camera.position.distanceTo(bubble.mesh.position) < radius * 0.92) {
-                    chosenGroup = activeDB[bubble.data.childId];
-                }
-            });
-            if (!chosenGroup || chosenGroup.id === state.groupId) return;
-            state.groupId = chosenGroup.id;
-            state.groupData = chosenGroup;
-            const entryPath = getGroupHierarchyPath(chosenGroup.id).map(group => group.id);
-            navigationStack = buildNavigationEntries(entryPath);
-            const layout = hierarchyGroupLayouts.get(chosenGroup.id);
-            if (layout) {
-                groupWorldOffset.copy(layout.center);
-                groupWorldScale = layout.placementScale;
-            }
-            const anchor = chosenGroup.parentId && activeDB[chosenGroup.parentId]
-                ? activeDB[chosenGroup.parentId].bubbles.find(bubble => bubble.childId === chosenGroup.id)
-                : null;
-            const title = anchor && anchor.name || chosenGroup.title;
-            document.getElementById('group-title').textContent = title;
-            document.getElementById('group-desc').textContent = anchor && anchor.desc || chosenGroup.desc || `${title}に関する話題のまとまりです。`;
-            renderGroupBreadcrumb(chosenGroup.id);
-            renderGroupComposition(chosenGroup.bubbles);
-        };
 
         // 【個別バブル画面】 を読み込んで表示する関数
         // 特定のバブルにカメラがグーッと寄っていく演出を行います。
@@ -2973,17 +2831,77 @@
                 appendDetailSourceLinks(container, section.sourceIds, sourceMap, '形成史の参照ソース');
                 return;
             }
+            const timelineShell = createDetailElement('div', 'detail-timeline-shell');
             const timeline = createDetailElement('div', 'detail-timeline');
+            timeline.id = 'detail-history-timeline';
             timeline.setAttribute('aria-label', 'バブル形成の時系列');
             timeline.tabIndex = 0;
             const scale = createTimelineYearScale(section.events);
             const trackWidth = Math.max(760, section.events.length * 270, scale.ticks.length * 150, (scale.breaks || []).length * 135 + 760);
             const horizontalPadding = 54;
+            const timelineCardWidth = window.matchMedia('(max-width: 700px)').matches ? 180 : 210;
+            const trackHeight = window.matchMedia('(max-width: 700px)').matches ? 600 : 700;
             const track = createDetailElement('div', 'detail-timeline-track');
             track.style.width = `${trackWidth}px`;
+            track.style.height = `${trackHeight}px`;
             const axis = createDetailElement('div', 'detail-timeline-axis');
             axis.style.left = `${horizontalPadding}px`;
             axis.style.right = `${horizontalPadding}px`;
+            const eventPositions = section.events.map((event, index) => {
+                const year = getTimelineEventYear(event);
+                const ratio = scale.hasYears && Number.isFinite(year)
+                    ? scale.positionFor(year) / Math.max(1, scale.end - scale.start)
+                    : (index + 0.5) / Math.max(1, section.events.length);
+                return { event, index, ratio: Math.max(0, Math.min(1, ratio)) };
+            }).sort((left, right) => left.ratio - right.ratio || left.index - right.index);
+            const laneCenters = [[], []];
+            const minimumCardCenter = horizontalPadding + timelineCardWidth / 2;
+            const maximumCardCenter = trackWidth - horizontalPadding - timelineCardWidth / 2;
+            const cardGap = 24;
+            function findOpenCardCenter(desiredCenter, lane) {
+                const blockedRadius = timelineCardWidth / 2 + cardGap / 2;
+                const occupied = laneCenters[lane].slice().sort((left, right) => left - right);
+                const available = [];
+                let start = minimumCardCenter;
+                occupied.forEach(center => {
+                    const end = center - blockedRadius;
+                    if (end >= start) available.push({ start, end });
+                    start = Math.max(start, center + blockedRadius);
+                });
+                if (maximumCardCenter >= start) available.push({ start, end: maximumCardCenter });
+                const candidates = available.map(range => Math.max(range.start, Math.min(range.end, desiredCenter)));
+                if (!candidates.length) return Math.max(minimumCardCenter, Math.min(maximumCardCenter, desiredCenter));
+                return candidates.reduce((best, candidate) => Math.abs(candidate - desiredCenter) < Math.abs(best - desiredCenter) ? candidate : best);
+            }
+            const positionedEvents = eventPositions.map((entry, positionIndex) => {
+                const lane = positionIndex % 2;
+                const naturalX = horizontalPadding + entry.ratio * (trackWidth - horizontalPadding * 2);
+                const cardCenter = findOpenCardCenter(naturalX, lane);
+                laneCenters[lane].push(cardCenter);
+                return { ...entry, lane, naturalX, cardCenter };
+            });
+            const connectors = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+            connectors.setAttribute('class', 'detail-timeline-connectors');
+            connectors.setAttribute('viewBox', `0 0 ${trackWidth} ${trackHeight}`);
+            connectors.setAttribute('preserveAspectRatio', 'none');
+            connectors.setAttribute('aria-hidden', 'true');
+            const axisY = trackHeight / 2;
+            positionedEvents.forEach(({ lane, naturalX, cardCenter }) => {
+                const direction = lane === 0 ? -1 : 1;
+                const turnY = axisY + direction * 18;
+                const cardEdgeY = axisY + direction * 38;
+                const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+                path.setAttribute('d', `M ${naturalX} ${axisY} V ${turnY} H ${cardCenter} V ${cardEdgeY}`);
+                path.setAttribute('class', 'detail-timeline-connector');
+                connectors.appendChild(path);
+                const point = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+                point.setAttribute('cx', String(naturalX));
+                point.setAttribute('cy', String(axisY));
+                point.setAttribute('r', '5');
+                point.setAttribute('class', 'detail-timeline-connector-point');
+                connectors.appendChild(point);
+            });
+            track.appendChild(connectors);
             if (scale.hasYears) {
                 scale.ticks.forEach(year => {
                     const ratio = scale.positionFor(year) / Math.max(1, scale.end - scale.start);
@@ -3002,22 +2920,9 @@
                 });
             }
             track.appendChild(axis);
-            const lastLanePosition = [-Infinity, -Infinity];
-            const timelineCardWidth = 210;
-            const minimumCardCenter = horizontalPadding + timelineCardWidth / 2;
-            const maximumCardCenter = trackWidth - horizontalPadding - timelineCardWidth / 2;
-            section.events.forEach((event, index) => {
-                const year = getTimelineEventYear(event);
-                const baseRatio = scale.hasYears && Number.isFinite(year)
-                    ? scale.positionFor(year) / Math.max(1, scale.end - scale.start)
-                    : (index + 0.5) / Math.max(1, section.events.length);
-                const lane = index % 2;
-                const naturalX = horizontalPadding + Math.max(0, Math.min(1, baseRatio)) * (trackWidth - horizontalPadding * 2);
-                const eventX = Math.max(naturalX, lastLanePosition[lane] + timelineCardWidth + 16);
-                const eventCenter = Math.max(minimumCardCenter, Math.min(maximumCardCenter, eventX));
-                lastLanePosition[lane] = eventCenter;
+            positionedEvents.forEach(({ event, lane, cardCenter }) => {
                 const card = createDetailElement('article', `detail-timeline-event ${lane === 0 ? 'is-above' : 'is-below'}`);
-                card.style.left = `${eventCenter}px`;
+                card.style.left = `${cardCenter}px`;
                 card.appendChild(createDetailElement('time', 'detail-timeline-date', event.dateLabel));
                 card.appendChild(createDetailElement('h3', 'detail-timeline-title', event.title));
                 card.appendChild(createDetailElement('p', 'detail-timeline-description', event.description));
@@ -3025,12 +2930,77 @@
                 track.appendChild(card);
             });
             timeline.appendChild(track);
+
+            const scrollbar = createDetailElement('div', 'detail-timeline-scrollbar');
+            scrollbar.setAttribute('role', 'scrollbar');
+            scrollbar.setAttribute('aria-label', '年表を左右にスクロール');
+            scrollbar.setAttribute('aria-orientation', 'horizontal');
+            scrollbar.setAttribute('aria-controls', timeline.id);
+            scrollbar.tabIndex = 0;
+            const scrollbarThumb = createDetailElement('div', 'detail-timeline-scrollbar-thumb');
+            scrollbar.appendChild(scrollbarThumb);
+            const updateTimelineScrollbar = () => {
+                const visibleWidth = Math.max(1, timeline.clientWidth);
+                const contentWidth = Math.max(visibleWidth, timeline.scrollWidth);
+                const thumbRatio = visibleWidth / contentWidth;
+                const thumbWidth = Math.max(12, thumbRatio * 100);
+                const travel = Math.max(0, 100 - thumbWidth);
+                const maxScroll = Math.max(0, timeline.scrollWidth - timeline.clientWidth);
+                const progress = maxScroll ? timeline.scrollLeft / maxScroll : 0;
+                scrollbarThumb.style.width = `${thumbWidth}%`;
+                scrollbarThumb.style.left = `${travel * progress}%`;
+                scrollbar.setAttribute('aria-valuemin', '0');
+                scrollbar.setAttribute('aria-valuemax', String(Math.round(maxScroll)));
+                scrollbar.setAttribute('aria-valuenow', String(Math.round(timeline.scrollLeft)));
+            };
+            let scrollbarDrag = null;
+            scrollbar.addEventListener('pointerdown', event => {
+                const thumbRect = scrollbarThumb.getBoundingClientRect();
+                const onThumb = event.target === scrollbarThumb || scrollbarThumb.contains(event.target);
+                if (onThumb) {
+                    scrollbarDrag = { pointerX: event.clientX, scrollLeft: timeline.scrollLeft };
+                    scrollbar.setPointerCapture(event.pointerId);
+                } else {
+                    const railRect = scrollbar.getBoundingClientRect();
+                    const thumbWidth = thumbRect.width;
+                    const travel = Math.max(1, railRect.width - thumbWidth);
+                    const targetLeft = Math.max(0, Math.min(travel, event.clientX - railRect.left - thumbWidth / 2));
+                    const maxScroll = Math.max(0, timeline.scrollWidth - timeline.clientWidth);
+                    timeline.scrollLeft = targetLeft / travel * maxScroll;
+                }
+                event.preventDefault();
+            });
+            scrollbar.addEventListener('pointermove', event => {
+                if (!scrollbarDrag) return;
+                const railWidth = Math.max(1, scrollbar.clientWidth);
+                const maxScroll = Math.max(0, timeline.scrollWidth - timeline.clientWidth);
+                timeline.scrollLeft = scrollbarDrag.scrollLeft + (event.clientX - scrollbarDrag.pointerX) / railWidth * timeline.scrollWidth;
+            });
+            const finishScrollbarDrag = () => { scrollbarDrag = null; };
+            scrollbar.addEventListener('pointerup', finishScrollbarDrag);
+            scrollbar.addEventListener('pointercancel', finishScrollbarDrag);
+            scrollbar.addEventListener('keydown', event => {
+                const maxScroll = Math.max(0, timeline.scrollWidth - timeline.clientWidth);
+                if (!['ArrowLeft', 'ArrowRight', 'PageUp', 'PageDown', 'Home', 'End'].includes(event.key)) return;
+                event.preventDefault();
+                if (event.key === 'Home') timeline.scrollLeft = 0;
+                else if (event.key === 'End') timeline.scrollLeft = maxScroll;
+                else timeline.scrollLeft += ['ArrowRight', 'PageDown'].includes(event.key) ? 180 : -180;
+            });
+            timeline.addEventListener('scroll', updateTimelineScrollbar, { passive: true });
+            if (typeof ResizeObserver === 'function') {
+                timelineShell.scrollbarResizeObserver = new ResizeObserver(updateTimelineScrollbar);
+                timelineShell.scrollbarResizeObserver.observe(timeline);
+                timelineShell.scrollbarResizeObserver.observe(track);
+            }
+            timelineShell.append(timeline, scrollbar);
             timeline.addEventListener('keydown', event => {
                 if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
                 event.preventDefault();
                 timeline.scrollLeft += event.key === 'ArrowRight' ? 160 : -160;
             });
-            container.appendChild(timeline);
+            container.appendChild(timelineShell);
+            updateTimelineScrollbar();
             appendPanelImages(container, section.imageIds, imageMap, 'history');
         }
 

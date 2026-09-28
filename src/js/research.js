@@ -146,9 +146,9 @@
                 { id: 'evaluation', label: '内外からの意見', focus: 'テーマの賛否・議論・異なる立場に関連する画像' }
             ];
 
-            function buildImageSearchRequest(plan, model, panel = IMAGE_PANEL_SPECS[0]) {
+            function buildImageSearchRequest(plan, model, panel = IMAGE_PANEL_SPECS[0], maxOutputTokens = 1600) {
                 return {
-                    model, store: false, reasoning: { effort: 'low' }, max_output_tokens: 500,
+                    model, store: false, reasoning: { effort: 'low' }, max_output_tokens: maxOutputTokens,
                     tool_choice: 'required',
                     tools: [{
                         type: 'web_search', search_content_types: ['image', 'text'],
@@ -611,11 +611,22 @@
                     log('詳細調査のQuery Planを確定しました', { bubbleId: bubble.id, intents: plan.intents.map(intent => intent.id) });
                     const imageSearchPromise = runLimited(IMAGE_PANEL_SPECS, 2, async panel => {
                         try {
-                            const result = await withOneRetry(() => requestResponse(buildImageSearchRequest(plan, model, panel), 45000, `bubble-image-search-${panel.id}`));
+                            let outputLimit = 1600;
+                            let result;
+                            for (let outputRetry = 0; ; outputRetry += 1) {
+                                try {
+                                    result = await withOneRetry(() => requestResponse(buildImageSearchRequest(plan, model, panel, outputLimit), 45000, `bubble-image-search-${panel.id}`));
+                                    break;
+                                } catch (error) {
+                                    if (outputRetry > 0 || error.code !== 'API_INCOMPLETE_OUTPUT' || (error.reason && error.reason !== 'max_output_tokens')) throw error;
+                                    outputLimit = 3200;
+                                    log('画像検索の出力上限に達したため、上限を増やして再試行します', { bubbleId: bubble.id, panelId: panel.id, reason: error.reason, maxOutputTokens: outputLimit });
+                                }
+                            }
                             const panelImages = imageResultsFromPayload(result.payload, panel.id);
                             return { panelId: panel.id, status: panelImages.length ? 'success' : 'no_results', images: panelImages, resultCount: panelImages.length };
                         } catch (error) {
-                            warn('詳細パネル用の画像検索に失敗しました', { bubbleId: bubble.id, panelId: panel.id, code: error.code || null, status: error.status || null });
+                            warn('詳細パネル用の画像検索に失敗しました', { bubbleId: bubble.id, panelId: panel.id, code: error.code || null, reason: error.reason || null, status: error.status || null });
                             return { panelId: panel.id, status: 'failed', images: [], resultCount: 0, errorCode: error.code || null, errorStatus: error.status || null };
                         }
                     });

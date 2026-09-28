@@ -972,21 +972,8 @@
             if (movementKeys.has('q')) movement.sub(worldUp);
             if (movement.lengthSq() < 0.001) return;
             movement.normalize();
-            let hierarchyDepth = 0;
-            currentBubbles.forEach(bubble => {
-                const radius = bubble.mesh.userData.finalScale || bubble.mesh.scale.x;
-                if (camera.position.distanceTo(bubble.mesh.position) >= radius * 0.94) return;
-                let parentId = bubble.parentBubbleId;
-                while (parentId) {
-                    const parent = currentBubbles.find(item => item.data.id === parentId);
-                    if (!parent || camera.position.distanceTo(parent.mesh.position) >= (parent.mesh.userData.finalScale || parent.mesh.scale.x) * 0.94) return;
-                    parentId = parent.parentBubbleId;
-                }
-                hierarchyDepth = Math.max(hierarchyDepth, bubble.hierarchyDepth + 1);
-            });
-            const worldScale = Math.pow(0.0225, hierarchyDepth);
-            const speed = (window.__bubbleBreakerShiftDown ? 168 : 32) * worldScale;
-            movement.multiplyScalar(Math.max(0.000001, speed) * deltaSeconds);
+            const speed = window.__bubbleBreakerShiftDown ? 96 : 32;
+            movement.multiplyScalar(speed * deltaSeconds);
             camera.position.add(movement);
             controls.target.add(movement);
             targetCameraPos.add(movement);
@@ -1276,34 +1263,13 @@
                 
                 // --- 解析画面時の他バブル透過処理 ---
                 const isTarget = (state.bubbleId === b.data.id);
-                const bubbleRadius = b.mesh.userData.finalScale || b.mesh.scale.x;
-                const insideBubble = camera.position.distanceTo(b.mesh.position) < bubbleRadius * 0.96;
-                let ancestorId = b.parentBubbleId;
-                let insideAncestors = true;
-                while (ancestorId) {
-                    const ancestor = currentBubbles.find(item => item.data.id === ancestorId);
-                    if (!ancestor || camera.position.distanceTo(ancestor.mesh.position) >= (ancestor.mesh.userData.finalScale || ancestor.mesh.scale.x) * 0.96) {
-                        insideAncestors = false;
-                        break;
-                    }
-                    ancestorId = ancestor.parentBubbleId;
-                }
-                const insidePeerBubble = currentBubbles.some(peer =>
-                    peer.hierarchyDepth === b.hierarchyDepth
-                    && peer.parentBubbleId === b.parentBubbleId
-                    && camera.position.distanceTo(peer.mesh.position) < (peer.mesh.userData.finalScale || peer.mesh.scale.x) * 0.96
-                );
-                b.interactive = insideAncestors && !insidePeerBubble && !isAnalysisOrDetail;
-                const insideNestedBubble = currentBubbles.some(child => child.parentBubbleId === b.data.id
-                    && camera.position.distanceTo(child.mesh.position) < (child.mesh.userData.finalScale || child.mesh.scale.x) * 0.96);
                 const statusNode = b.label.querySelector('.bubble-generation-status');
                 if (statusNode) {
                     const status = b.data.analysisStatus;
                     statusNode.textContent = status === 'loading' ? '探査中' : (status === 'ready' || status === 'partial' ? '探査完了' : '探査機待ち');
                     statusNode.classList.toggle('is-loading', status === 'loading' || status === 'queued');
                 }
-                // カメラがバブルの内側なら球だけを透かし、表面の装飾は残す。
-                const targetOpacity = (isAnalysisOrDetail && !isTarget) ? 0.0 : (insideBubble && !insideNestedBubble ? 0.075 : 0.9);
+                const targetOpacity = (isAnalysisOrDetail && !isTarget) ? 0.0 : 0.9;
 
                 // グループ遷移中は専用アニメーションが不透明度と縮尺を制御する。
                 if (!transitionState) b.mesh.material.opacity += (targetOpacity - b.mesh.material.opacity) * 0.1;
@@ -1313,11 +1279,6 @@
                 // --- HTML文字ラベルの追従処理 ---
                 // バブル群画面で、かつ自動ズーム演出中でない時だけラベルを表示する
                 if (state.screen === 'GROUP' && !isAnalysisOrDetail && !isZoomingIntoGroup) {
-                    if (!b.interactive) {
-                        b.label.style.opacity = '0';
-                        b.label.style.pointerEvents = 'none';
-                        return;
-                    }
                     // 3D空間の座標を、2Dの画面上の座標(-1〜1)に投影・変換する
                     const pos = labelProjectionScratch.copy(b.mesh.position).project(camera);
                     // カメラの背後にバブルがある場合はラベルを非表示にする
@@ -1345,8 +1306,6 @@
                     b.label.style.pointerEvents = 'none';
                 }
             });
-
-            if (state.screen === 'GROUP' && typeof window.updateObservedHierarchyGroup === 'function') window.updateObservedHierarchyGroup();
 
             // バブル未選択時も、利用者が意図して近づけた最寄りバブルへ自動遷移する。
             updateAutomaticBubbleApproach();

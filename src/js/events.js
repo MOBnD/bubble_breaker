@@ -586,6 +586,44 @@
         let lastVisiblePanelSize = ['large', 'medium', 'small'].includes(storedPanelSize)
             ? storedPanelSize
             : (localStorage.getItem('bubblebreaker.rightPanelLastVisibleSize') || 'medium');
+        const contextualHintElement = document.getElementById('contextual-hint');
+        const explorationPanels = [...document.querySelectorAll('#panel-group, #panel-single')];
+        let hintLayoutFrame = 0;
+        function syncHintAvoidance() {
+            hintLayoutFrame = 0;
+            if (!contextualHintElement) return;
+            const activePanel = explorationPanels.find(panel => {
+                if (panel.classList.contains('panel-is-closed') || panel.classList.contains('panel-size-none')) return false;
+                const screen = panel.closest('.exploration-screen');
+                if (!screen || !screen.classList.contains('screen-active')) return false;
+                return getComputedStyle(panel).display !== 'none' && panel.getClientRects().length > 0;
+            });
+            if (!activePanel) {
+                contextualHintElement.style.removeProperty('--hint-safe-center');
+                contextualHintElement.style.removeProperty('--hint-safe-width');
+                explorationPanels.forEach(panel => { panel.style.maxHeight = ''; });
+                return;
+            }
+            const panelRect = activePanel.getBoundingClientRect();
+            if (panelRect.left >= 320) {
+                contextualHintElement.style.setProperty('--hint-safe-center', `${panelRect.left / 2}px`);
+                contextualHintElement.style.setProperty('--hint-safe-width', `${Math.max(220, panelRect.left - 32)}px`);
+                explorationPanels.forEach(panel => { panel.style.maxHeight = ''; });
+                return;
+            }
+            contextualHintElement.style.removeProperty('--hint-safe-center');
+            contextualHintElement.style.removeProperty('--hint-safe-width');
+            const hintRect = contextualHintElement.getBoundingClientRect();
+            if (panelRect.bottom > hintRect.top && panelRect.top < hintRect.bottom) {
+                const reservedHeight = Math.max(72, hintRect.height) + 24;
+                const availableHeight = window.innerHeight - panelRect.top - reservedHeight;
+                activePanel.style.maxHeight = `${Math.max(150, availableHeight)}px`;
+            }
+        }
+        function queueHintAvoidance() {
+            if (hintLayoutFrame) return;
+            hintLayoutFrame = requestAnimationFrame(syncHintAvoidance);
+        }
         function setPanelSize(size, persist = true) {
             selectedPanelSize = panelSizeOptions.has(size) ? size : 'medium';
             if (selectedPanelSize !== 'none') lastVisiblePanelSize = selectedPanelSize;
@@ -594,6 +632,7 @@
                 panel.classList.toggle('panel-size-none', selectedPanelSize === 'none');
             });
             if (panelSizeControl) panelSizeControl.value = selectedPanelSize;
+            queueHintAvoidance();
             if (persist) {
                 localStorage.setItem('bubblebreaker.rightPanelSize', selectedPanelSize);
                 localStorage.setItem('bubblebreaker.rightPanelLastVisibleSize', lastVisiblePanelSize);
@@ -601,6 +640,16 @@
         }
         panelSizeControl?.addEventListener('change', () => setPanelSize(panelSizeControl.value));
         setPanelSize(selectedPanelSize, false);
+        window.addEventListener('resize', queueHintAvoidance, { passive: true });
+        if (typeof ResizeObserver === 'function') {
+            const hintPanelResizeObserver = new ResizeObserver(queueHintAvoidance);
+            explorationPanels.forEach(panel => hintPanelResizeObserver.observe(panel));
+            hintPanelResizeObserver.observe(contextualHintElement);
+        }
+        if (typeof MutationObserver === 'function') {
+            const hintPanelMutationObserver = new MutationObserver(queueHintAvoidance);
+            [...explorationPanels, ...document.querySelectorAll('.exploration-screen')].forEach(panel => hintPanelMutationObserver.observe(panel, { attributes: true, attributeFilter: ['class', 'data-panel-size', 'style'] }));
+        }
         const movementKeys = window.__bubbleBreakerMovementKeys || new Set();
         window.__bubbleBreakerMovementKeys = movementKeys;
         function isTextEditingTarget(target) {
@@ -611,7 +660,7 @@
             if (isTextEditingTarget(event.target)) return;
             window.__bubbleBreakerShiftDown = event.shiftKey || event.key === 'Shift';
             const key = event.key.toLowerCase();
-            if (['w', 'a', 's', 'd', 'e', 'q'].includes(key)) {
+            if (['w', 'a', 's', 'd', 'q', 'e'].includes(key)) {
                 movementKeys.add(key);
                 event.preventDefault();
             }
@@ -786,95 +835,9 @@
         }
 
         const canvasElement = document.querySelector('#canvas-container canvas');
-        const touchFlight = { points: [], lastCenter: null, lastDistance: null, lastAngle: null, controlsWereEnabled: true };
-        function getTouchGeometry(touches) {
-            if (!touches || !touches.length) return null;
-            const first = touches[0];
-            const second = touches[1] || first;
-            return {
-                centerX: (first.clientX + second.clientX) / 2,
-                centerY: (first.clientY + second.clientY) / 2,
-                distance: touches.length > 1 ? Math.hypot(second.clientX - first.clientX, second.clientY - first.clientY) : 0,
-                angle: touches.length > 1 ? Math.atan2(second.clientY - first.clientY, second.clientX - first.clientX) : 0
-            };
-        }
-        if (canvasElement) {
-            canvasElement.addEventListener('touchstart', event => {
-                if (explorationViewMode === '2d' || (state.screen !== 'GROUP' && state.screen !== 'SINGLE')) return;
-                const geometry = getTouchGeometry(event.touches);
-                if (!geometry) return;
-                event.preventDefault();
-                touchFlight.points = Array.from(event.touches).map(touch => ({ x: touch.clientX, y: touch.clientY }));
-                touchFlight.lastCenter = { x: geometry.centerX, y: geometry.centerY };
-                touchFlight.lastDistance = geometry.distance;
-                touchFlight.lastAngle = geometry.angle;
-                touchFlight.controlsWereEnabled = controls.enabled;
-                controls.enabled = false;
-            }, { capture: true, passive: false });
-            canvasElement.addEventListener('touchmove', event => {
-                if (!touchFlight.lastCenter || !event.touches.length || explorationViewMode === '2d') return;
-                event.preventDefault();
-                const geometry = getTouchGeometry(event.touches);
-                if (!geometry) return;
-                const dx = geometry.centerX - touchFlight.lastCenter.x;
-                const dy = geometry.centerY - touchFlight.lastCenter.y;
-                const viewDistance = Math.max(0.001, camera.position.distanceTo(controls.target));
-                const worldPerPixel = Math.max(0.000002, viewDistance * 0.0034);
-                const forward = controls.target.clone().sub(camera.position).normalize();
-                const right = new THREE.Vector3().crossVectors(forward, new THREE.Vector3(0, 1, 0)).normalize();
-                const up = new THREE.Vector3(0, 1, 0);
-                const movement = new THREE.Vector3();
-                if (event.touches.length === 1) {
-                    movement.addScaledVector(right, dx * worldPerPixel);
-                    movement.addScaledVector(forward, -dy * worldPerPixel);
-                } else {
-                    movement.addScaledVector(up, -dy * worldPerPixel);
-                    const zoomFactor = Math.exp(-Math.max(-80, Math.min(80, geometry.distance - touchFlight.lastDistance)) * 0.003);
-                    const cameraOffset = camera.position.clone().sub(controls.target).multiplyScalar(zoomFactor);
-                    camera.position.copy(controls.target).add(cameraOffset);
-                    const angleDelta = geometry.angle - touchFlight.lastAngle;
-                    if (Number.isFinite(angleDelta) && Math.abs(angleDelta) < Math.PI) {
-                        const orbit = camera.position.clone().sub(controls.target).applyAxisAngle(up, angleDelta);
-                        camera.position.copy(controls.target).add(orbit);
-                    }
-                    touchFlight.lastDistance = geometry.distance;
-                    touchFlight.lastAngle = geometry.angle;
-                }
-                camera.position.add(movement);
-                controls.target.add(movement);
-                targetCameraPos.add(movement);
-                targetControlTarget.add(movement);
-                touchFlight.lastCenter = { x: geometry.centerX, y: geometry.centerY };
-            }, { capture: true, passive: false });
-            const resetTouchFlight = () => {
-                if (touchFlight.lastCenter && (state.screen === 'GROUP' || state.screen === 'SINGLE')) {
-                    controls.enabled = true;
-                    controls.update();
-                }
-                touchFlight.points = [];
-                touchFlight.lastCenter = null;
-                touchFlight.lastDistance = null;
-                touchFlight.lastAngle = null;
-            };
-            canvasElement.addEventListener('touchend', event => {
-                if (event.touches.length && touchFlight.lastCenter) {
-                    const geometry = getTouchGeometry(event.touches);
-                    if (geometry) {
-                        touchFlight.points = Array.from(event.touches).map(touch => ({ x: touch.clientX, y: touch.clientY }));
-                        touchFlight.lastCenter = { x: geometry.centerX, y: geometry.centerY };
-                        touchFlight.lastDistance = geometry.distance;
-                        touchFlight.lastAngle = geometry.angle;
-                    }
-                    event.preventDefault();
-                    return;
-                }
-                resetTouchFlight();
-            }, { capture: true, passive: false });
-            canvasElement.addEventListener('touchcancel', resetTouchFlight, { capture: true, passive: false });
-            canvasElement.addEventListener('pointerdown', () => {
-                if (state.screen === 'GROUP' || state.screen === 'SINGLE') window.interruptSceneMotion?.();
-            }, true);
-        }
+        canvasElement?.addEventListener('pointerdown', () => {
+            if (state.screen === 'GROUP' || state.screen === 'SINGLE') window.interruptSceneMotion?.();
+        }, true);
 
         window.addEventListener('wheel', (e) => {
             if (e.target.closest('#about-overlay')) return;
