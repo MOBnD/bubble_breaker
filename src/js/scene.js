@@ -1272,9 +1272,19 @@
             const points = [];
             for (let index = 0; index <= steps; index++) {
                 const progress = index / steps;
-                const direction = perpendicular
-                    ? from.clone().multiplyScalar(Math.cos(Math.PI * progress)).addScaledVector(perpendicular, Math.sin(Math.PI * progress))
-                    : from.clone().slerp(to, progress);
+                let direction;
+                if (perpendicular) {
+                    direction = from.clone()
+                        .multiplyScalar(Math.cos(Math.PI * progress))
+                        .addScaledVector(perpendicular, Math.sin(Math.PI * progress));
+                } else if (angle < 0.00001) {
+                    direction = from.clone().lerp(to, progress);
+                } else {
+                    const sinAngle = Math.sin(angle);
+                    direction = from.clone()
+                        .multiplyScalar(Math.sin((1 - progress) * angle) / sinAngle)
+                        .addScaledVector(to, Math.sin(progress * angle) / sinAngle);
+                }
                 points.push(direction.normalize().multiplyScalar(radius));
             }
             return new THREE.BufferGeometry().setFromPoints(points);
