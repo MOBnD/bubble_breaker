@@ -1506,18 +1506,25 @@
 }
 .bubble-generation-status[data-probe-state="loading"],
 #single-generation-status[data-probe-state="loading"] {
-    color: #241000;
+    color: #1F2937;
     border-color: rgba(255, 255, 255, .32);
     background: #F97316;
     text-shadow: none;
 }
 .bubble-generation-status[data-probe-state="complete"],
 #single-generation-status[data-probe-state="complete"] {
-    color: #03210D;
+    color: #07532D;
     border-color: rgba(0, 0, 0, .18);
     background: #00FF5F;
     text-shadow: none;
 }
+.bubble-generation-status,
+#single-generation-status {
+    -webkit-text-stroke: 0 transparent;
+    paint-order: normal;
+    font-weight: 900;
+}
+.bubble-generation-status { font-size: 13px; }
 #single-bubble-info #single-generation-status {
     min-height: 48px;
     align-self: center;
