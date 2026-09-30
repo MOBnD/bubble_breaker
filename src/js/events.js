@@ -223,24 +223,32 @@
         };
 
         const hintByScreen = {
-            INPUT: ['自分のおすすめ欄の外を探検する', 'SNSや検索サービスは、あなたがよく見る話題を優先して表示します。気になっていることをひとつ入力すると、関連する話題や違う立場を並べて見られます。例をまねて短く書けば大丈夫です。'],
-            LOADING: ['テーマのまわりを調査中', '入力されたテーマについて、基本情報・歴史・情報源・異なる立場を集め、探索できる世界を準備しています。画面の手順バーで進み具合を確認できます。目安は約3分です。'],
-            GROUP: ['話題のまとまりから、次の視点へ', '大きな丸は話題のまとまりです。丸の中へ進むと、その話題に集まる小さな視点を見られます。WASDまたは画面のドラッグで移動し、E/Qで上下へ進みます。Shiftを押しながら移動すると速くなります。'],
-            SINGLE: ['この話題ができた背景を見る', '中央の説明で話題の要点を読み、「詳しい分析を見る」から根拠・歴史・情報源・賛否を比べられます。親の話題へ戻るには、上部の道順かマウスホイールを使います。'],
-            ANALYSIS: ['4つの窓から、同じ話題を見比べる', 'カードを選ぶと詳しい内容と、その説明を支える出典を読めます。対象の話題へ戻るには中央のタイトルを選びます。\n・概要：何が話題なのか、要点を読む\n・形成の歴史：出来事を時間順にたどる\n・情報源：資料や発信元の種類を確かめる\n・内外の論争：賛成・反対の根拠を比べる'],
+            INPUT: ['フィルターバブルを突破しよう！', 'SNSや検索サービスは、あなたがよく見る話題を優先して表示するため、見ている情報や視野が狭まる「フィルターバブル」に陥ってしまいます。このツールでフィルターバブルを突破し、偏りのない自由なインターネットを冒険しましょう！\n入力：テーマ例を参考に、冒険したいテーマを自由に入力してください。「宇宙へダイブ」を押すとあなたが入力したテーマを探索します。\n今まで探索した世界：事前に用意された世界や、保存した世界から再開できます。'],
+            LOADING: ['世界から入力されたテーマを探索中', '入力されたテーマについて、基本情報・歴史・情報源・異なる立場などの情報を集め、探索できる世界を構築しています。目安は約3分です。'],
+            GROUP: ['偏りのないインターネットを冒険する', '右のパネル：今見ている世界について知ることができます。\nズーム：ズームしたテーマを分析できます。\nズームアウト：今見ている世界を俯瞰することができます。'],
+            SINGLE: ['このテーマを深掘る', 'さらにズーム：このテーマをさらに深掘ります。\nパネルをクリック：このバブルを分析することができます。\nズームアウト：このバブルを俯瞰します'],
+            ANALYSIS: ['4つの窓から、同じ話題を見比べる', 'カードをクリック：詳しい分析と、その説明を支える出典を読めます。\n中央のバブルをクリック：分析を終わります\n・バブルの概要：何が話題なのか、要点を読む\n・形成の歴史：出来事を時間順にたどる\n・構成層・情報源：資料や発信元の種類を確かめる\n・内外の論争：賛成・反対の論争を見る'],
             DETAIL: ['根拠と一緒に、分析を確かめる', '要約や資料のリンクを見て、どこまで確認できた内容なのか確かめましょう。カードの外をクリックするか、ホイールを動かすと4つの分析へ戻ります。']
         };
         const hintPanel = document.getElementById('contextual-hint');
+        const hintToggle = document.getElementById('btn-open-hint');
         let hintVisible = localStorage.getItem('bubblebreaker.hintVisible') !== 'off';
         let apiSetupExplicit = false;
+        function setHintVisible(visible, persist = true) {
+            hintVisible = Boolean(visible);
+            hintPanel?.classList.toggle('hint-is-closed', !hintVisible);
+            hintToggle?.setAttribute('aria-expanded', String(hintVisible));
+            hintToggle?.setAttribute('aria-label', hintVisible ? 'ヒントを閉じる' : 'ヒントを開く');
+            if (persist) localStorage.setItem('bubblebreaker.hintVisible', hintVisible ? 'on' : 'off');
+        }
         function renderHint(screenName) {
             const key = hintByScreen[screenName] ? screenName : 'INPUT';
             const [defaultTitle, copy] = hintByScreen[key];
             const detailHelp = {
-                overview: ['概要を読む', '話題の要点と主な根拠を短くまとめています。出典リンクを開き、説明が資料の内容に沿っているか確かめられます。'],
-                history: ['形成の歴史をたどる', '確認できた出来事を古い順に並べています。年表の下にあるカードを読んで、話題がどう広がったかを追いましょう。'],
-                demographic: ['情報源の構成を確かめる', '今回集めた資料の種類や発信元をまとめています。円グラフと発信元の一覧で、どんな資料に基づく分析かを確認できます。'],
-                evaluation: ['内外の論争を比べる', '賛成側と反対側の主張を、根拠となる資料と一緒に表示しています。左右の吹き出しを読み、異なる理由を比べましょう。']
+                overview: ['概要を読む', '話題の要点と主な根拠を短くまとめています。出典リンクをクリックすると情報源に飛ぶことができます'],
+                history: ['歴史をたどる', 'このテーマの歴史を見ることができます。上下にあるカードでは起きた出来事の概要を見ることができます。'],
+                demographic: ['情報源を確かめる', '今回集めた資料の種類や発信元をまとめています。発信元の種類により、情報の信頼性を見直すことができます'],
+                evaluation: ['内外の論争', 'このテーマについて賛成側と反対側の論争を見ることができます。反対派からはどう見えているのかを知ることで、偏りのない視点を得ることができます']
             };
             const activeDetailHelp = key === 'DETAIL' ? detailHelp[state.analysisCardType] : null;
             const title = activeDetailHelp ? activeDetailHelp[0] : defaultTitle;
@@ -252,29 +260,9 @@
             document.getElementById('hint-copy').textContent = needsKey ? `${contextualCopy}\n\nAPI Key が未設定です。保存済みの解析は読めますが、新しい解析を取得するには API Key を入力してください。` : contextualCopy;
             action.hidden = !needsKey;
             action.textContent = 'API Key を入力する';
-            if (needsKey) hintVisible = true;
-            hintPanel?.classList.toggle('hint-is-closed', !hintVisible);
-            document.getElementById('btn-open-hint').hidden = hintVisible;
+            setHintVisible(hintVisible, false);
         }
-        document.getElementById('btn-close-hint')?.addEventListener('click', () => {
-            hintVisible = false;
-            localStorage.setItem('bubblebreaker.hintVisible', 'off');
-            hintPanel.classList.add('hint-is-closed');
-            document.getElementById('btn-open-hint').hidden = false;
-        });
-        document.getElementById('btn-open-hint')?.addEventListener('click', () => {
-            hintVisible = true;
-            localStorage.setItem('bubblebreaker.hintVisible', 'on');
-            hintPanel.classList.remove('hint-is-closed');
-            document.getElementById('btn-open-hint').hidden = true;
-        });
-        document.addEventListener('click', event => {
-            if (!hintVisible || !hintPanel || hintPanel.contains(event.target)) return;
-            hintVisible = false;
-            localStorage.setItem('bubblebreaker.hintVisible', 'off');
-            hintPanel.classList.add('hint-is-closed');
-            document.getElementById('btn-open-hint').hidden = false;
-        });
+        hintToggle?.addEventListener('click', () => setHintVisible(!hintVisible));
         window.openApiKeySetup = () => {
             apiSetupExplicit = true;
             if (typeof window.syncApiKeyPrompt === 'function') window.syncApiKeyPrompt();
@@ -318,10 +306,6 @@
             if (header) {
                 header.classList.toggle('chrome-hidden', !headerVisible);
                 header.classList.toggle('chrome-topmost', headerVisible);
-            }
-            if (hintPanel) {
-                hintPanel.classList.toggle('hint-is-closed', !hintVisible);
-                document.getElementById('btn-open-hint').hidden = hintVisible;
             }
             renderHint(loading && screenName === 'INPUT' ? 'LOADING' : screenName);
             if (typeof window.syncApiKeyPrompt === 'function') window.syncApiKeyPrompt();
@@ -634,44 +618,6 @@
         let lastVisiblePanelSize = ['large', 'medium', 'small'].includes(storedPanelSize)
             ? storedPanelSize
             : (localStorage.getItem('bubblebreaker.rightPanelLastVisibleSize') || 'medium');
-        const contextualHintElement = document.getElementById('contextual-hint');
-        const explorationPanels = [...document.querySelectorAll('#panel-group, #panel-single')];
-        let hintLayoutFrame = 0;
-        function syncHintAvoidance() {
-            hintLayoutFrame = 0;
-            if (!contextualHintElement) return;
-            const activePanel = explorationPanels.find(panel => {
-                if (panel.classList.contains('panel-is-closed') || panel.classList.contains('panel-size-none')) return false;
-                const screen = panel.closest('.exploration-screen');
-                if (!screen || !screen.classList.contains('screen-active')) return false;
-                return getComputedStyle(panel).display !== 'none' && panel.getClientRects().length > 0;
-            });
-            if (!activePanel) {
-                contextualHintElement.style.removeProperty('--hint-safe-center');
-                contextualHintElement.style.removeProperty('--hint-safe-width');
-                explorationPanels.forEach(panel => { panel.style.maxHeight = ''; });
-                return;
-            }
-            const panelRect = activePanel.getBoundingClientRect();
-            if (panelRect.left >= 320) {
-                contextualHintElement.style.setProperty('--hint-safe-center', `${panelRect.left / 2}px`);
-                contextualHintElement.style.setProperty('--hint-safe-width', `${Math.max(220, panelRect.left - 32)}px`);
-                explorationPanels.forEach(panel => { panel.style.maxHeight = ''; });
-                return;
-            }
-            contextualHintElement.style.removeProperty('--hint-safe-center');
-            contextualHintElement.style.removeProperty('--hint-safe-width');
-            const hintRect = contextualHintElement.getBoundingClientRect();
-            if (panelRect.bottom > hintRect.top && panelRect.top < hintRect.bottom) {
-                const reservedHeight = Math.max(72, hintRect.height) + 24;
-                const availableHeight = window.innerHeight - panelRect.top - reservedHeight;
-                activePanel.style.maxHeight = `${Math.max(150, availableHeight)}px`;
-            }
-        }
-        function queueHintAvoidance() {
-            if (hintLayoutFrame) return;
-            hintLayoutFrame = requestAnimationFrame(syncHintAvoidance);
-        }
         function setPanelSize(size, persist = true) {
             selectedPanelSize = panelSizeOptions.has(size) ? size : 'medium';
             if (selectedPanelSize !== 'none') lastVisiblePanelSize = selectedPanelSize;
@@ -680,7 +626,6 @@
                 panel.classList.toggle('panel-size-none', selectedPanelSize === 'none');
             });
             if (panelSizeControl) panelSizeControl.value = selectedPanelSize;
-            queueHintAvoidance();
             if (persist) {
                 localStorage.setItem('bubblebreaker.rightPanelSize', selectedPanelSize);
                 localStorage.setItem('bubblebreaker.rightPanelLastVisibleSize', lastVisiblePanelSize);
@@ -688,16 +633,6 @@
         }
         panelSizeControl?.addEventListener('change', () => setPanelSize(panelSizeControl.value));
         setPanelSize(selectedPanelSize, false);
-        window.addEventListener('resize', queueHintAvoidance, { passive: true });
-        if (typeof ResizeObserver === 'function') {
-            const hintPanelResizeObserver = new ResizeObserver(queueHintAvoidance);
-            explorationPanels.forEach(panel => hintPanelResizeObserver.observe(panel));
-            hintPanelResizeObserver.observe(contextualHintElement);
-        }
-        if (typeof MutationObserver === 'function') {
-            const hintPanelMutationObserver = new MutationObserver(queueHintAvoidance);
-            [...explorationPanels, ...document.querySelectorAll('.exploration-screen')].forEach(panel => hintPanelMutationObserver.observe(panel, { attributes: true, attributeFilter: ['class', 'data-panel-size', 'style'] }));
-        }
         const movementKeys = window.__bubbleBreakerMovementKeys || new Set();
         window.__bubbleBreakerMovementKeys = movementKeys;
         function isTextEditingTarget(target) {

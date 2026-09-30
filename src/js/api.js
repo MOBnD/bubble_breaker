@@ -1131,19 +1131,69 @@
             return `${name.slice(0, limit - 1)}…`;
         }
 
+        function segmentBubbleTitle(value) {
+            const name = String(value || '').replace(/\s+/g, ' ').trim();
+            if (!name) return [];
+            if (typeof Intl !== 'undefined' && typeof Intl.Segmenter === 'function') {
+                return Array.from(new Intl.Segmenter('ja', { granularity: 'word' }).segment(name), item => item.segment);
+            }
+            return name.match(/[A-Za-z0-9]+(?:[-'][A-Za-z0-9]+)*|[\u3040-\u30ff\u3400-\u9fff]+|\s+|[^\s]/gu) || [name];
+        }
+
+        function wrapBubbleTitle(value, maxCharacters = 14) {
+            const tokens = segmentBubbleTitle(value);
+            const maxLength = Math.max(4, Number(maxCharacters) || 14);
+            const lines = [];
+            let current = '';
+            let currentLength = 0;
+            tokens.forEach(token => {
+                if (/^\s+$/.test(token)) {
+                    if (currentLength && currentLength < maxLength) {
+                        current += ' ';
+                        currentLength += 1;
+                    } else if (current) {
+                        lines.push(current.trimEnd());
+                        current = '';
+                        currentLength = 0;
+                    }
+                    return;
+                }
+                const tokenLength = Array.from(token).length;
+                if (current && currentLength + tokenLength > maxLength) {
+                    lines.push(current.trimEnd());
+                    current = '';
+                    currentLength = 0;
+                }
+                current += token;
+                currentLength += tokenLength;
+            });
+            if (current) lines.push(current.trimEnd());
+            return lines.length ? lines : [''];
+        }
+
         function formatBubbleDisplayName(value, limit = 12) {
             const name = String(value || '').replace(/\s+/g, ' ').trim();
             if (!name) return name;
-            const segments = typeof Intl !== 'undefined' && typeof Intl.Segmenter === 'function'
-                ? Array.from(new Intl.Segmenter('ja', { granularity: 'grapheme' }).segment(name), item => item.segment)
-                : Array.from(name);
             const safeLimit = Math.max(2, Math.floor(Number(limit) || 12));
-            return segments.length > safeLimit
-                ? `${segments.slice(0, safeLimit - 1).join('')}…`
-                : name;
+            let visible = '';
+            let length = 0;
+            for (const token of segmentBubbleTitle(name)) {
+                const tokenLength = Array.from(token).length;
+                if (length + tokenLength > safeLimit) {
+                    if (!visible) return token;
+                    return `${visible.trimEnd()}…`;
+                }
+                visible += token;
+                length += tokenLength;
+            }
+            return visible;
         }
 
-        window.BubbleBreakerText = Object.assign(window.BubbleBreakerText || {}, { formatBubbleDisplayName });
+        window.BubbleBreakerText = Object.assign(window.BubbleBreakerText || {}, {
+            formatBubbleDisplayName,
+            segmentBubbleTitle,
+            wrapBubbleTitle
+        });
 
         function validateStageGroup(group, expectedLevel, expectedParentId, expectedParentBubbleId) {
             if (!group || !String(group.id || '').trim() || !String(group.title || '').trim() || !group.level) throw new Error(`${expectedLevel}カテゴリの構造が空です`);

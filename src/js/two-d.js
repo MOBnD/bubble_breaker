@@ -131,7 +131,18 @@
             const label = options.level === 'leaf' && window.BubbleBreakerText
                 ? window.BubbleBreakerText.formatBubbleDisplayName(bubble.name)
                 : String(bubble.name || '');
-            group.appendChild(createTwoDSvgElement('text', { class: 'bubble-2d-label', y: options.single ? item.radius + 35 : 0 }, label));
+            const lines = window.BubbleBreakerText && window.BubbleBreakerText.wrapBubbleTitle
+                ? window.BubbleBreakerText.wrapBubbleTitle(label, options.single ? 16 : 12)
+                : [label];
+            const labelText = createTwoDSvgElement('text', { class: 'bubble-2d-label', y: options.single ? item.radius + 35 : 0 });
+            const longestLine = Math.max(1, ...lines.map(line => Array.from(line).length));
+            if (longestLine > 12) labelText.style.fontSize = `${Math.max(12, 18 * 12 / longestLine)}px`;
+            lines.forEach((line, index) => {
+                const offset = index === 0 ? `${-(lines.length - 1) * 0.55}em` : '1.1em';
+                const tspan = createTwoDSvgElement('tspan', { x: 0, dy: offset }, line);
+                labelText.appendChild(tspan);
+            });
+            group.appendChild(labelText);
             const activate = event => {
                 if (event.type === 'keydown' && !['Enter', ' '].includes(event.key)) return;
                 event.preventDefault();

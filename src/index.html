@@ -137,11 +137,11 @@
                 <label class="input-field-label" for="input-opinion">あなたの考えをひとことで</label>
                 <textarea id="input-opinion" rows="2" maxlength="240" placeholder="好きなもの、気になるニュース、日々の疑問など" class="input-opinion-field pointer-events-auto"></textarea>
                 <div class="input-actions-row">
-                    <button id="btn-dive" disabled class="input-dive-button pointer-events-auto">このテーマの世界を見てみる <span aria-hidden="true">→</span></button>
+                    <button id="btn-dive" disabled class="input-dive-button pointer-events-auto">宇宙へダイブ <span aria-hidden="true">→</span></button>
                     <button id="btn-return-current-exploration" type="button" class="hidden current-exploration-button">現在の探索に戻る</button>
                 </div>
                 <div class="input-history-dock">
-                    <div><strong>前の続きから始める</strong><span>保存した探索をいつでも再開できます</span></div>
+                    <div><strong>続きから始める</strong><span>保存した探索をいつでも再開できます</span></div>
                     <button id="btn-open-history" type="button" class="input-history-button">今まで探索した世界 <span aria-hidden="true">↗</span></button>
                 </div>
             </div>
@@ -203,13 +203,13 @@
         </section>
 
         <aside id="contextual-hint" class="contextual-hint" aria-live="polite">
+            <button id="btn-open-hint" class="hint-toggle-button" type="button" aria-label="ヒントを閉じる" aria-expanded="true" aria-controls="contextual-hint-content">?</button>
             <div id="contextual-hint-content" class="contextual-hint-content">
-                <div><span id="hint-screen-label" class="hint-screen-label">はじめに</span><button id="btn-close-hint" type="button" aria-label="ヒントを閉じる">×</button></div>
+                <div><span id="hint-screen-label" class="hint-screen-label">はじめに</span></div>
                 <strong id="hint-title">BubbleBreakerでできること</strong>
                 <p id="hint-copy"></p>
                 <button id="btn-hint-action" class="hint-action-button" type="button" hidden></button>
             </div>
-            <button id="btn-open-hint" class="hint-reopen-button" type="button" aria-label="この画面のヒントを開く" hidden>?</button>
         </aside>
 
         <section id="about-overlay" class="about-overlay" role="dialog" aria-modal="true" aria-labelledby="about-title" hidden>
@@ -365,9 +365,9 @@
             <button id="single-bubble-info" onclick="loadAnalysis()" class="single-bubble-info pointer-events-auto group" type="button" aria-label="このバブルの詳しい解析を開く">
                 <span class="single-description-label">このバブルについて</span>
                 <h2 id="single-title" class="text-4xl font-bold text-white text-shadow-lg mb-2 group-hover:text-blue-200 transition-colors">--</h2>
-                <span id="single-generation-status" class="analysis-generation-status">探査機待ち</span>
                 <p id="single-desc" class="text-sm text-gray-200">--</p>
                 <span class="single-info-action">詳しい分析を見る <b aria-hidden="true">→</b></span>
+                <span id="single-generation-status" class="analysis-generation-status" data-probe-state="waiting">探査機待ち</span>
             </button>
 
             <div id="panel-single" class="exploration-panel glass-panel rounded-xl relative pointer-events-auto">
@@ -417,7 +417,6 @@
                     <button type="button" onclick="showDetail('overview')" class="analysis-card glass-panel group" aria-label="バブルの概要を詳しく見る">
                         <span class="analysis-card-kicker">01 · まず全体を知る</span><h3>バブルの概要</h3>
                         <span class="analysis-card-image is-overview"><span class="analysis-generation-status" data-analysis-generation-status="overview">探査機待ち</span><img data-analysis-thumb="overview" alt="" hidden><i aria-hidden="true">◉</i></span>
-                        <p data-analysis-summary="overview">この話題のポイントと、確認できた根拠。</p>
                     </button>
                 </div>
                 
@@ -425,7 +424,6 @@
                     <button type="button" onclick="showDetail('history')" class="analysis-card glass-panel group" aria-label="形成の歴史を詳しく見る">
                         <span class="analysis-card-kicker">02 · 時間をたどる</span><h3>形成の歴史</h3>
                         <span class="analysis-card-image is-history"><span class="analysis-generation-status" data-analysis-generation-status="history">探査機待ち</span><img data-analysis-thumb="history" alt="" hidden><i aria-hidden="true">⌁</i></span>
-                        <p data-analysis-summary="history">確認できた出来事を、古い順にたどります。</p>
                     </button>
                 </div>
 
@@ -433,7 +431,6 @@
                     <button type="button" onclick="showDetail('demographic')" class="analysis-card glass-panel group" aria-label="構成層と情報源を詳しく見る">
                         <span class="analysis-card-kicker">03 · 情報源を見る</span><h3>構成層・情報源</h3>
                         <span class="analysis-card-image is-sources"><span class="analysis-generation-status" data-analysis-generation-status="demographic">探査機待ち</span><img data-analysis-thumb="demographic" alt="" hidden><i aria-hidden="true">◌</i></span>
-                        <p data-analysis-summary="demographic">どんな資料が、この話題を支えているか。</p>
                     </button>
                 </div>
 
@@ -441,7 +438,6 @@
                     <button type="button" onclick="showDetail('evaluation')" class="analysis-card glass-panel group" aria-label="内外の論争を詳しく見る">
                         <span class="analysis-card-kicker">04 · 立場を比べる</span><h3>内外の論争</h3>
                         <span class="analysis-card-image is-debate"><span class="analysis-generation-status" data-analysis-generation-status="evaluation">探査機待ち</span><img data-analysis-thumb="evaluation" alt="" hidden><i aria-hidden="true">↔</i></span>
-                        <p data-analysis-summary="evaluation">賛成・反対それぞれの主張と根拠。</p>
                     </button>
                 </div>
             </div>

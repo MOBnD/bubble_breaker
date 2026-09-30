@@ -1259,6 +1259,27 @@
             return new THREE.Color(Number(colorHex) || 0x66ccff);
         }
 
+        function createExteriorArcGeometry(start, end, radius = 1.22, steps = 12) {
+            const from = start.clone().normalize();
+            const to = end.clone().normalize();
+            const angle = from.angleTo(to);
+            let perpendicular = null;
+            if (Math.PI - angle < 0.001) {
+                perpendicular = new THREE.Vector3(1, 0, 0).cross(from);
+                if (perpendicular.lengthSq() < 0.001) perpendicular.set(0, 1, 0).cross(from);
+                perpendicular.normalize();
+            }
+            const points = [];
+            for (let index = 0; index <= steps; index++) {
+                const progress = index / steps;
+                const direction = perpendicular
+                    ? from.clone().multiplyScalar(Math.cos(Math.PI * progress)).addScaledVector(perpendicular, Math.sin(Math.PI * progress))
+                    : from.clone().slerp(to, progress);
+                points.push(direction.normalize().multiplyScalar(radius));
+            }
+            return new THREE.BufferGeometry().setFromPoints(points);
+        }
+
         function applyBubbleMeshColor(mesh, bubbleData) {
             if (!mesh || !mesh.material) return;
             const color = getBubbleDisplayColor(mesh.userData.sourceColor, bubbleData);
@@ -1280,6 +1301,7 @@
 
         function createAnalysisProbeVisual(isFocus = false) {
             const visual = new THREE.Group();
+            visual.visible = false;
             visual.scale.setScalar(isFocus ? 2.55 : 2.05);
             visual.userData.baseScale = visual.scale.x;
             const orbit = new THREE.Mesh(
@@ -1306,7 +1328,7 @@
             probe.add(body, nose, antenna);
             visual.add(probe);
             const scanBeam = new THREE.Line(
-                new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3(0, 0, -0.52)]),
+                new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3(0, 0, 0.15)]),
                 new THREE.LineBasicMaterial({ color: 0x9beeff, transparent: true, opacity: isFocus ? 0.9 : 0.62, depthWrite: false, blending: THREE.AdditiveBlending })
             );
             probe.add(scanBeam);
@@ -1400,12 +1422,13 @@
                 visual.add(node);
                 nodes.push(node);
                 nodePositions.push(nodePosition);
-                const linkGeometry = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), nodePosition]);
+                const innerAnchor = nodePosition.clone().normalize().multiplyScalar(1.15);
+                const linkGeometry = new THREE.BufferGeometry().setFromPoints([innerAnchor, nodePosition]);
                 visual.add(new THREE.Line(linkGeometry, lineMaterial));
             }
 
             for (let index = 1; index < nodePositions.length; index += 2) {
-                const linkGeometry = new THREE.BufferGeometry().setFromPoints([nodePositions[index - 1], nodePositions[index]]);
+                const linkGeometry = createExteriorArcGeometry(nodePositions[index - 1], nodePositions[index], 1.22);
                 visual.add(new THREE.Line(linkGeometry, lineMaterial));
             }
 
@@ -1441,7 +1464,7 @@
                 visual.add(observerRing);
             }
             const scanRing = new THREE.Mesh(
-                new THREE.TorusGeometry(0.88, 0.018, 6, 48),
+                new THREE.TorusGeometry(1.28, 0.018, 6, 48),
                 new THREE.MeshBasicMaterial({ color: 0x9beeff, transparent: true, opacity: 0.9, depthWrite: false, blending: THREE.AdditiveBlending })
             );
             scanRing.rotation.x = Math.PI * 0.5;
@@ -1478,8 +1501,11 @@
             const bubbles = [];
             for (let index = 0; index < bubbleCount; index++) {
                 const bubble = new THREE.Mesh(bubbleGeometry, bubbleMaterial);
+                const phase = (seed + index * 37) % 100 / 100 * Math.PI * 2;
+                const radius = 1.24 + (index % 5) * 0.07;
+                bubble.position.set(Math.cos(phase) * radius, -0.76, Math.sin(phase) * radius);
                 visual.add(bubble);
-                bubbles.push({ mesh: bubble, phase: (seed + index * 37) % 100 / 100 * Math.PI * 2, radius: 0.62 + (index % 5) * 0.12, height: 0.78 + (index % 4) * 0.15, speed: 0.18 + (index % 3) * 0.07 });
+                bubbles.push({ mesh: bubble, phase, radius, height: 0.18 + (index % 4) * 0.025, speed: 0.18 + (index % 3) * 0.07 });
             }
 
             const tendrils = [];
@@ -1489,7 +1515,7 @@
                 const angle = (seed % 360) * Math.PI / 180 + index * Math.PI / 3;
                 for (let pointIndex = 0; pointIndex < 6; pointIndex++) {
                     const progress = pointIndex / 5;
-                    const radius = 0.34 + progress * 0.86;
+                    const radius = 1.18 + progress * 0.22;
                     points.push(new THREE.Vector3(
                         Math.cos(angle + progress * 0.9) * radius,
                         -0.25 - progress * 0.8,
@@ -1516,8 +1542,12 @@
                 fishTail.rotation.z = -Math.PI * 0.5;
                 fishTail.position.x = isFocus ? -0.14 : -0.1;
                 fishGroup.add(fishBody, fishTail);
+                const phase = (seed + index * 61) % 360 * Math.PI / 180;
+                const radius = 1.3 + (index % 3) * 0.12;
+                const height = -0.15 + (index % 4) * 0.1;
+                fishGroup.position.set(Math.cos(phase) * radius, height, Math.sin(phase) * radius);
                 visual.add(fishGroup);
-                fish.push({ mesh: fishGroup, phase: (seed + index * 61) % 360 * Math.PI / 180, radius: 0.65 + (index % 3) * 0.16, height: -0.15 + (index % 4) * 0.2, speed: 0.24 + (index % 3) * 0.06, direction: index % 2 ? 1 : -1 });
+                fish.push({ mesh: fishGroup, phase, radius, height, speed: 0.24 + (index % 3) * 0.06, direction: index % 2 ? 1 : -1 });
             }
             const jellies = [];
             const jellyCount = level === 'central' ? 3 : 2;
@@ -1536,24 +1566,27 @@
                     tentacles.push(tentacle);
                 }
                 jelly.add(bell);
+                const phase = (seed + index * 97) % 360 * Math.PI / 180;
+                const radius = 1.3 + index * 0.1;
+                jelly.position.set(Math.cos(phase) * radius, 0.25, Math.sin(phase) * radius);
                 visual.add(jelly);
-                jellies.push({ mesh: jelly, phase: (seed + index * 97) % 360 * Math.PI / 180, radius: 0.72 + index * 0.2, speed: 0.16 + index * 0.04, tentacles });
+                jellies.push({ mesh: jelly, phase, radius, speed: 0.16 + index * 0.04, tentacles });
             }
             const coral = [];
             const coralMaterial = new THREE.MeshBasicMaterial({ color: 0xff7fc8, transparent: true, opacity: 0.58, depthWrite: false, blending: THREE.AdditiveBlending });
             for (let index = 0; index < (level === 'central' ? 8 : 5); index++) {
                 const angle = (seed + index * 43) % 360 * Math.PI / 180;
                 const coralMesh = new THREE.Mesh(new THREE.ConeGeometry(0.05 + (index % 3) * 0.018, 0.32 + (index % 4) * 0.09, 5, 1), coralMaterial);
-                coralMesh.position.set(Math.cos(angle) * (0.72 + (index % 2) * 0.18), -0.72 + (index % 3) * 0.04, Math.sin(angle) * (0.72 + (index % 2) * 0.18));
+                coralMesh.position.set(Math.cos(angle) * (1.25 + (index % 2) * 0.06), -0.24 + (index % 3) * 0.04, Math.sin(angle) * (1.25 + (index % 2) * 0.06));
                 visual.add(coralMesh);
                 coral.push(coralMesh);
             }
             const planktonPositions = new Float32Array((level === 'central' ? 90 : 55) * 3);
             for (let index = 0; index < planktonPositions.length / 3; index++) {
                 const angle = cosmicRandom(seed + index * 1.7) * Math.PI * 2;
-                const radius = 0.45 + cosmicRandom(seed + index * 2.3) * 0.92;
+                const radius = 1.2 + cosmicRandom(seed + index * 2.3) * 0.34;
                 planktonPositions[index * 3] = Math.cos(angle) * radius;
-                planktonPositions[index * 3 + 1] = (cosmicRandom(seed + index * 3.1) - 0.5) * 1.8;
+                planktonPositions[index * 3 + 1] = (cosmicRandom(seed + index * 3.1) - 0.5) * 0.6;
                 planktonPositions[index * 3 + 2] = Math.sin(angle) * radius;
             }
             const planktonGeometry = new THREE.BufferGeometry();
@@ -1561,7 +1594,7 @@
             const plankton = new THREE.Points(planktonGeometry, new THREE.PointsMaterial({ color: 0xb5fff4, size: isFocus ? 0.035 : 0.024, transparent: true, opacity: 0.52, depthWrite: false, blending: THREE.AdditiveBlending }));
             visual.add(plankton);
             const scanRing = new THREE.Mesh(
-                new THREE.TorusGeometry(0.92, 0.018, 6, 48),
+                new THREE.TorusGeometry(1.28, 0.018, 6, 48),
                 new THREE.MeshBasicMaterial({ color: 0xb5fff4, transparent: true, opacity: 0.9, depthWrite: false, blending: THREE.AdditiveBlending })
             );
             scanRing.visible = false;
@@ -1588,8 +1621,8 @@
             for (let index = 0; index < nodeCount; index++) {
                 const angle = (seed + index * 137) % 360 * Math.PI / 180;
                 const latitude = (((seed + index * 29) % 100) / 100 - 0.5) * 1.5;
-                const radius = Math.sqrt(Math.max(0.18, 1 - latitude * latitude)) * 1.02;
-                const position = new THREE.Vector3(Math.cos(angle) * radius, latitude, Math.sin(angle) * radius);
+                const direction = new THREE.Vector3(Math.cos(angle) * Math.sqrt(Math.max(0.18, 1 - latitude * latitude)), latitude, Math.sin(angle) * Math.sqrt(Math.max(0.18, 1 - latitude * latitude))).normalize();
+                const position = direction.multiplyScalar(1.3);
                 const node = new THREE.Mesh(nodeGeometry, nodeMaterial);
                 node.position.copy(position);
                 visual.add(node);
@@ -1600,7 +1633,8 @@
             const links = [];
             positions.forEach((position, index) => {
                 const next = positions[(index + 1) % positions.length];
-                const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints([position, next]), linkMaterial);
+                const path = createExteriorArcGeometry(position, next, 1.24);
+                const line = new THREE.Line(path, linkMaterial);
                 visual.add(line);
                 links.push(line);
             });
@@ -1609,11 +1643,12 @@
             const packets = Array.from({ length: Math.min(4, nodeCount) }, (_, index) => {
                 const packet = new THREE.Mesh(packetGeometry, packetMaterial);
                 visual.add(packet);
+                packet.position.copy(positions[index]);
                 return { mesh: packet, edge: index, progress: (seed % 100) / 100 + index * 0.19 };
             });
             const grids = [];
             const gridMaterial = new THREE.LineBasicMaterial({ color: accent, transparent: true, opacity: isFocus ? 0.36 : 0.2, depthWrite: false, blending: THREE.AdditiveBlending });
-            [0.58, 0.82, 1.06].forEach((radius, index) => {
+            [1.28, 1.4, 1.52].forEach((radius, index) => {
                 const grid = new THREE.Mesh(new THREE.TorusGeometry(radius, 0.008 + index * 0.003, 5, 40), gridMaterial);
                 grid.rotation.set(index * 0.72, index * 0.43, index * 0.31);
                 visual.add(grid);
@@ -1627,10 +1662,10 @@
                 const streamAngle = (seed + streamIndex * 71) % 360 * Math.PI / 180;
                 for (let pointIndex = 0; pointIndex < 7; pointIndex++) {
                     const progress = pointIndex / 6;
-                    const radius = 0.28 + progress * 0.96;
+                    const radius = 1.2 + progress * 0.28;
                     streamPoints.push(new THREE.Vector3(
                         Math.cos(streamAngle + progress * 1.5) * radius,
-                        Math.sin(streamAngle * 0.7 + progress * 2.2) * 0.46,
+                        Math.sin(streamAngle * 0.7 + progress * 2.2) * 0.22,
                         Math.sin(streamAngle + progress * 1.5) * radius
                     ));
                 }
@@ -1640,6 +1675,7 @@
                 for (let packetIndex = 0; packetIndex < 4; packetIndex++) {
                     const packet = new THREE.Mesh(new THREE.BoxGeometry(0.045, 0.045, 0.045), packetMaterial);
                     visual.add(packet);
+                    packet.position.copy(streamPoints[0]);
                     streamPackets.push({ mesh: packet, streamIndex, progress: packetIndex * 0.23 + (seed % 50) / 100 });
                 }
             }
@@ -1650,12 +1686,12 @@
                     new THREE.MeshBasicMaterial({ color: index % 2 ? 0xffe38a : 0xff7bd8, transparent: true, opacity: 0.72, wireframe: true, depthWrite: false, blending: THREE.AdditiveBlending })
                 );
                 const angle = (seed + index * 53) % 360 * Math.PI / 180;
-                cube.position.set(Math.cos(angle) * (0.72 + index * 0.03), Math.sin(angle * 1.8) * 0.58, Math.sin(angle) * (0.72 + index * 0.03));
+                cube.position.set(Math.cos(angle) * (1.25 + index * 0.03), Math.sin(angle * 1.8) * 0.2, Math.sin(angle) * (1.25 + index * 0.03));
                 visual.add(cube);
                 dataCubes.push(cube);
             }
             const scanRing = new THREE.Mesh(
-                new THREE.TorusGeometry(0.9, 0.018, 6, 48),
+                new THREE.TorusGeometry(1.3, 0.018, 6, 48),
                 new THREE.MeshBasicMaterial({ color: 0x9afcff, transparent: true, opacity: 0.9, depthWrite: false, blending: THREE.AdditiveBlending })
             );
             scanRing.visible = false;
@@ -1778,12 +1814,13 @@
             mesh.userData.networkVisual = null;
             mesh.userData.deepSeaVisual = null;
             mesh.userData.dataVisual = null;
+            mesh.userData.ornamentScale = 1.04 + (hashBubbleValue(bubbleData && bubbleData.id) % 15) / 100;
             mesh.userData.analysisProbe = createAnalysisProbeVisual(isFocus);
             mesh.add(mesh.userData.analysisProbe);
             mesh.userData.childPreview = null;
             if (bubbleData) ensureBubbleVisual(mesh, bubbleData, level, isFocus);
             const ornament = mesh.userData.networkVisual || mesh.userData.deepSeaVisual || mesh.userData.dataVisual;
-            if (ornament) ornament.scale.setScalar(mesh.userData.ornamentScale || (0.82 + (hashBubbleValue(bubbleData && bubbleData.id) % 37) / 100));
+            if (ornament) ornament.scale.setScalar(mesh.userData.ornamentScale);
             return mesh;
         }
 
@@ -1866,7 +1903,7 @@
                     ((Math.floor(seed / 7) % 19) - 9) * 0.000035,
                     ((Math.floor(seed / 13) % 15) - 7) * 0.000025
                 );
-                mesh.userData.ornamentScale = 0.82 + (seed % 37) / 100;
+                mesh.userData.ornamentScale = 1.04 + (seed % 15) / 100;
                 mesh.userData.bubbleVariant = seed % 4;
                 mesh.userData.ornamentRotation = new THREE.Euler(
                     ((Math.floor(seed / 5) % 17) - 8) * 0.055,
@@ -1885,13 +1922,30 @@
                 label.dataset.level = group.level || '';
                 const name = document.createElement('span');
                 name.className = 'bubble-label-name';
-                name.textContent = isLowestLayer && window.BubbleBreakerText
+                const displayName = isLowestLayer && window.BubbleBreakerText
                     ? window.BubbleBreakerText.formatBubbleDisplayName(bubbleData.name)
                     : bubbleData.name;
+                const titleTokens = window.BubbleBreakerText && window.BubbleBreakerText.segmentBubbleTitle
+                    ? window.BubbleBreakerText.segmentBubbleTitle(displayName)
+                    : [String(displayName || '')];
+                const longestTitleWord = Math.max(1, ...titleTokens.filter(token => !/^\s+$/.test(token)).map(token => Array.from(token).length));
+                if (longestTitleWord > 14) name.style.fontSize = `${Math.max(12, 22 * 14 / longestTitleWord)}px`;
+                titleTokens.forEach(token => {
+                    if (/^\s+$/.test(token)) {
+                        name.appendChild(document.createTextNode(token));
+                        return;
+                    }
+                    const word = document.createElement('span');
+                    word.className = 'bubble-label-token';
+                    word.textContent = token;
+                    name.appendChild(word);
+                });
                 label.appendChild(name);
                 const status = document.createElement('span');
                 status.className = 'bubble-generation-status';
                 status.dataset.bubbleStatus = bubbleData.id;
+                status.dataset.probeState = 'waiting';
+                status.textContent = '探査機待ち';
                 label.appendChild(status);
                 label.title = `${bubbleData.name} — 選択して詳しく見る`;
                 label.onclick = event => {
@@ -2553,7 +2607,9 @@
             // UIパネルの情報を更新
             document.getElementById('single-title').innerText = bubbleData.name;
             const bubbleStatus = bubbleData.analysisStatus;
-            document.getElementById('single-generation-status').textContent = bubbleStatus === 'loading' ? '探査中' : (bubbleStatus === 'ready' || bubbleStatus === 'partial' ? '探査完了' : '探査機待ち');
+            const singleStatus = document.getElementById('single-generation-status');
+            singleStatus.textContent = bubbleStatus === 'loading' || bubbleStatus === 'queued' ? '探査中' : (bubbleStatus === 'ready' || bubbleStatus === 'partial' ? '探査完了' : '探査機待ち');
+            singleStatus.dataset.probeState = bubbleStatus === 'loading' || bubbleStatus === 'queued' ? 'loading' : (bubbleStatus === 'ready' || bubbleStatus === 'partial' ? 'complete' : 'waiting');
             document.getElementById('single-desc').innerText = bubbleData.desc || `${bubbleData.name}に関する意見や評価が集まるバブルです。`;
             document.getElementById('single-panel-title').innerText = bubbleData.name;
             document.getElementById('single-panel-desc').innerText = bubbleData.desc || `${bubbleData.name}に関する意見や評価が集まるバブルです。`;
@@ -2588,14 +2644,18 @@
                 element.classList.toggle('text-cyan-200', !failed && !partial);
                 element.classList.toggle('text-amber-200', partial);
             });
-            const label = stateName === 'loading' ? '探査中' : (stateName === 'ready' || stateName === 'partial' ? '探査完了' : '探査機待ち');
+            const label = loading ? '探査中' : (stateName === 'ready' || stateName === 'partial' ? '探査完了' : '探査機待ち');
+            const probeState = loading ? 'loading' : (stateName === 'ready' || stateName === 'partial' ? 'complete' : 'waiting');
             document.querySelectorAll('[data-analysis-generation-status]').forEach(node => {
                 node.textContent = label;
                 node.classList.toggle('is-loading', loading);
                 node.closest('.analysis-card-image')?.classList.toggle('is-analysis-pending', loading || failed);
             });
             const singleStatus = document.getElementById('single-generation-status');
-            if (singleStatus) singleStatus.textContent = label;
+            if (singleStatus) {
+                singleStatus.textContent = label;
+                singleStatus.dataset.probeState = probeState;
+            }
         }
 
         function updateAnalysisCardPreviews() {
@@ -2605,17 +2665,9 @@
                 ? state.bubbleData.detailResearch.images : [];
             const imageMap = new Map(researchImages.filter(image => image && image.imageId).map(image => [String(image.imageId), image]));
             const usedImages = new Set();
-            const previews = [
-                ['overview', 'このテーマの要点と、確認できた事実。'],
-                ['history', '根拠をたどれる出来事の流れ。'],
-                ['demographic', 'どんな資料や発信元が見つかったか。'],
-                ['evaluation', '賛成・反対それぞれの主張と根拠。']
-            ];
-            previews.forEach(([panelId, fallback]) => {
+            const previews = ['overview', 'history', 'demographic', 'evaluation'];
+            previews.forEach(panelId => {
                 const section = analysis[panelId] || {};
-                const summary = String(section.summary || section.overview || section.conclusion || fallback).trim();
-                const summaryNode = document.querySelector(`[data-analysis-summary="${panelId}"]`);
-                if (summaryNode) summaryNode.textContent = summary.length > 180 ? `${Array.from(summary).slice(0, 177).join('')}…` : summary;
                 const imageNode = document.querySelector(`[data-analysis-thumb="${panelId}"]`);
                 if (!imageNode) return;
                 const wrapper = imageNode.closest('.analysis-card-image');

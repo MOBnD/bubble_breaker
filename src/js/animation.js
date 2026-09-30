@@ -1105,7 +1105,7 @@
                         analysisProbeAnimation.orbit.rotation.y += 0.018;
                         analysisProbeAnimation.orbit.rotation.z = Math.sin(time * 0.8 + analysisProbeAnimation.phase) * 0.22;
                         analysisProbe.rotation.y += 0.012;
-                        analysisProbe.scale.setScalar((analysisProbe.userData.baseScale || 1) * (1.02 + Math.sin(time * 4.4 + analysisProbeAnimation.phase) * 0.08));
+                        analysisProbe.scale.setScalar(analysisProbe.userData.baseScale || 1);
                     } else if (isAnalysisQueued) {
                         analysisProbeAnimation.probe.position.set(0, 0.08, 1.02);
                         analysisProbeAnimation.probe.rotation.set(0.18, analysisProbeAnimation.phase, 0);
@@ -1129,22 +1129,16 @@
                     networkAnimation.rings.forEach((ring, ringIndex) => {
                         ring.rotation.z += 0.0022 * (ringIndex % 2 === 0 ? 1 : -1);
                     });
-                    networkAnimation.nodes.forEach((node, nodeIndex) => {
-                        const pulse = 1 + Math.sin(time * 1.8 + networkAnimation.phase + nodeIndex * 0.7) * 0.12;
-                        node.scale.setScalar(pulse);
-                    });
                     networkAnimation.particles.rotation.y -= 0.0018;
                     if (networkAnimation.observerRing) {
-                        const observerPulse = 1 + Math.sin(time * 2.1 + networkAnimation.phase) * 0.07;
-                        networkAnimation.observerRing.scale.setScalar(observerPulse);
+                        networkAnimation.observerRing.scale.setScalar(1);
                     }
                     if (networkAnimation.scanRing) {
                         const isAnalysisLoading = state.bubbleData && state.bubbleData.id === b.data.id && b.data.analysisStatus === 'loading';
                         networkAnimation.scanRing.visible = Boolean(isAnalysisLoading);
                         if (isAnalysisLoading) {
                             networkAnimation.scanRing.rotation.z += 0.045;
-                            const scanPulse = 0.92 + Math.sin(time * 4.2 + networkAnimation.phase) * 0.08;
-                            networkAnimation.scanRing.scale.setScalar(scanPulse);
+                            networkAnimation.scanRing.scale.setScalar(1);
                         }
                     }
                     const fade = Math.max(0, Math.min(1, b.mesh.material.opacity / 0.95));
@@ -1163,8 +1157,7 @@
                             -0.76 + lift * bubble.height,
                             Math.sin(angle) * bubble.radius
                         );
-                        const pulse = 0.72 + Math.sin(time * 2.2 + bubble.phase) * 0.18;
-                        bubble.mesh.scale.setScalar(pulse);
+                        bubble.mesh.scale.setScalar(1);
                     });
                     deepSeaAnimation.tendrils.forEach((tendril, index) => {
                         tendril.rotation.z = Math.sin(time * 0.34 + deepSeaAnimation.phase + index) * 0.08;
@@ -1186,11 +1179,10 @@
                             0.25 + Math.sin(time * 0.9 + jelly.phase) * 0.24,
                             Math.sin(jellyAngle) * jelly.radius
                         );
-                        jelly.mesh.scale.y = 0.94 + Math.sin(time * 2.1 + jelly.phase) * 0.09;
+                        jelly.mesh.scale.y = 1;
                     });
                     deepSeaAnimation.coral.forEach((coral, index) => {
                         coral.rotation.z = Math.sin(time * 0.55 + index * 0.8) * 0.12;
-                        coral.material.opacity = 0.42 + (Math.sin(time * 1.7 + index) + 1) * 0.1;
                     });
                     deepSeaAnimation.plankton.rotation.y -= 0.0022;
                     if (deepSeaAnimation.scanRing) {
@@ -1198,7 +1190,7 @@
                         deepSeaAnimation.scanRing.visible = Boolean(isAnalysisLoading);
                         if (isAnalysisLoading) {
                             deepSeaAnimation.scanRing.rotation.z += 0.05;
-                            deepSeaAnimation.scanRing.scale.setScalar(0.92 + Math.sin(time * 4.4 + deepSeaAnimation.phase) * 0.08);
+                            deepSeaAnimation.scanRing.scale.setScalar(1);
                         }
                     }
                     const fade = Math.max(0, Math.min(1, b.mesh.material.opacity / 0.95));
@@ -1209,19 +1201,9 @@
                 const dataAnimation = dataVisual && dataVisual.userData.dataAnimation;
                 if (dataVisual && dataAnimation) {
                     dataVisual.rotation.y += 0.0015 + b.mesh.scale.x * 0.00007;
-                    dataAnimation.nodes.forEach((node, index) => {
-                        const pulse = 0.88 + Math.sin(time * 2.6 + dataAnimation.phase + index * 0.55) * 0.14;
-                        node.scale.setScalar(pulse);
-                    });
-                    dataAnimation.links.forEach((link, index) => {
-                        link.material.opacity = 0.3 + (Math.sin(time * 1.5 + dataAnimation.phase + index * 0.3) + 1) * 0.12;
-                    });
                     dataAnimation.grids.forEach((grid, index) => {
                         grid.rotation.z += 0.0015 * (index % 2 ? -1 : 1);
                         grid.rotation.x += 0.0008;
-                    });
-                    dataAnimation.streams.forEach((stream, index) => {
-                        stream.material.opacity = 0.34 + (Math.sin(time * 2.8 + dataAnimation.phase + index * 0.9) + 1) * 0.14;
                     });
                     dataAnimation.streamPackets.forEach(packet => {
                         packet.progress = (packet.progress + 0.018) % 1;
@@ -1240,13 +1222,19 @@
                     dataAnimation.dataCubes.forEach((cube, index) => {
                         cube.rotation.x += 0.012 + index * 0.001;
                         cube.rotation.y -= 0.009 + index * 0.001;
-                        cube.material.opacity = 0.48 + (Math.sin(time * 2 + dataAnimation.phase + index) + 1) * 0.14;
                     });
                     dataAnimation.packets.forEach(packet => {
                         packet.progress = (packet.progress + 0.012) % 1;
-                        const start = dataAnimation.positions[packet.edge];
-                        const end = dataAnimation.positions[(packet.edge + 1) % dataAnimation.positions.length];
-                        packet.mesh.position.lerpVectors(start, end, packet.progress);
+                        const path = dataAnimation.links[packet.edge].geometry.attributes.position;
+                        const segmentCount = path.count - 1;
+                        const scaled = packet.progress * segmentCount;
+                        const segment = Math.min(segmentCount - 1, Math.floor(scaled));
+                        const localProgress = scaled - segment;
+                        packet.startScratch = packet.startScratch || new THREE.Vector3();
+                        packet.endScratch = packet.endScratch || new THREE.Vector3();
+                        packet.startScratch.fromBufferAttribute(path, segment);
+                        packet.endScratch.fromBufferAttribute(path, segment + 1);
+                        packet.mesh.position.lerpVectors(packet.startScratch, packet.endScratch, localProgress);
                     });
                     if (dataAnimation.scanRing) {
                         const isAnalysisLoading = state.bubbleData && state.bubbleData.id === b.data.id && b.data.analysisStatus === 'loading';
@@ -1254,7 +1242,7 @@
                         if (isAnalysisLoading) {
                             dataAnimation.scanRing.rotation.x += 0.035;
                             dataAnimation.scanRing.rotation.z += 0.025;
-                            dataAnimation.scanRing.scale.setScalar(0.93 + Math.sin(time * 4.6 + dataAnimation.phase) * 0.07);
+                            dataAnimation.scanRing.scale.setScalar(1);
                         }
                     }
                     const fade = Math.max(0, Math.min(1, b.mesh.material.opacity / 0.95));
@@ -1266,8 +1254,13 @@
                 const statusNode = b.label.querySelector('.bubble-generation-status');
                 if (statusNode) {
                     const status = b.data.analysisStatus;
-                    statusNode.textContent = status === 'loading' ? '探査中' : (status === 'ready' || status === 'partial' ? '探査完了' : '探査機待ち');
-                    statusNode.classList.toggle('is-loading', status === 'loading' || status === 'queued');
+                    const probeState = status === 'loading' || status === 'queued' ? 'loading' : (status === 'ready' || status === 'partial' ? 'complete' : 'waiting');
+                    const statusText = probeState === 'loading' ? '探査中' : (probeState === 'complete' ? '探査完了' : '探査機待ち');
+                    if (statusNode.textContent !== statusText) statusNode.textContent = statusText;
+                    if (statusNode.dataset.probeState !== probeState) {
+                        statusNode.dataset.probeState = probeState;
+                        statusNode.classList.toggle('is-loading', probeState === 'loading');
+                    }
                 }
                 const targetOpacity = (isAnalysisOrDetail && !isTarget) ? 0.0 : 0.9;
 
