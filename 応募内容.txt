@@ -1,2 +1,149 @@
 プログラム動作の説明（作品の遊び方）
 APIキーを設定し、気になるテーマを入力して「宇宙へダイブ」を押すと、テーマを検索して情報を集め、関連する話題を大小のバブルで表した世界を作ります。バブルをクリックするとその話題へ入り、マウスホイールで階層を深掘りしたり、前の階層へ戻ったりできます。3D表示ではW・A・S・Dで前後左右、Q・Eで上下に移動し、Shiftを押すと速く移動できます。設定から2D表示にも切り替えられます。バブルの詳しい画面では、概要・歴史・情報源・賛否それぞれの視点を確認でき、出典リンクから根拠を確かめられます。探索した世界は保存され、あとから再開できます。
+
+
+プログラムのソースコードの抜粋と意図（応募用の5案）
+
+※応募欄は「3か所」とありますが、選べるように5案を用意しました。特に1・2・5は、実装上の工夫がコードから伝わりやすい案です。ファイル名と行番号は現在のソースに基づいています。
+
+1. カテゴリ階層の親子関係が破綻しないようにした方法
+
+抜粋：src/js/api.js 724～756行付近
+    const roots = groups.filter(group => group.parentId === null);
+    if (roots.length !== 1) throw new Error('親カテゴリは1つだけ必要です');
+    const requireUniqueChild = (parentGroup, bubble, level) => {
+        if (!bubble.childId) throw new Error(`${level}のバブルに下位カテゴリ接続がありません`);
+        const child = db[bubble.childId];
+        if (child.level !== (level === '親カテゴリ' ? 'central' : 'leaf')) {
+            throw new Error(`${level}のchildIdが一つ下のカテゴリではありません`);
+        }
+        if (child.parentId !== parentGroup.id) throw new Error(`${level}のchildIdの親カテゴリが不正です`);
+        if (referencedIds.has(child.id)) throw new Error(`${level}の下位カテゴリが重複しています`);
+        referencedIds.add(child.id);
+        return child;
+    };
+
+接続先を親バブルIDから正規化する箇所（src/js/api.js 675～677行）
+    group.parentId = parentGroup.id;
+    group.parentBubbleId = parentBubble.id;
+    childGroupsByParentBubble.set(parentBubble.id, group);
+
+意図：AIが生成したデータを、そのまま画面に表示せず、親カテゴリroot・中央カテゴリcentral・下位カテゴリleafの順序とIDのつながりを検査します。親バブルに子カテゴリが一つだけ対応すること、親子の階層が一段ずつ進むこと、孤立したカテゴリが残らないことを確認します。親カテゴリIDだけでなく、親バブルIDも使って接続先を照合するため、「どのカテゴリの、どのバブルの下位なのか」を特定できます。条件を満たさないデータはエラーとして扱い、不正な階層が探索画面に出るのを防ぐ設計です。
+
+2. フラクタル構造を意識したカテゴリ移動のアニメーション
+
+抜粋：src/js/scene.js 1861～1879行付近
+    function getNestedGroupWorldScale(group, parentBubbleWorldRadius) {
+        return Math.max(0.012, (Math.max(0.1, parentBubbleWorldRadius) * 0.56) / getGroupLocalExtent(group));
+    }
+
+抜粋：src/js/scene.js 2450～2459行付近
+    nextOffset.copy(parentBubbleMesh.mesh.position);
+    nextScale = getNestedGroupWorldScale(data, parentWorldRadius);
+    transitionType = 'zoomIn';
+
+動きを補間する抜粋（src/js/animation.js 809～840行付近）
+    if (progress <= 0.5) {
+        camera.position.lerpVectors(transitionState.cameraStart, transitionState.portalCamera, approach);
+        controls.target.lerpVectors(transitionState.controlStart, transitionState.portalTarget, approach);
+    } else {
+        camera.position.lerpVectors(transitionState.portalCamera, transitionState.cameraEnd, reveal);
+        controls.target.lerpVectors(transitionState.portalTarget, transitionState.controlEnd, reveal);
+    }
+
+意図：下位カテゴリを親バブルの位置に重ね、親バブルの大きさに合わせて縮尺を決めます。そのため、別の画面へ切り替わるだけでなく、今見ているバブルの内側へ入って次のバブル群に到着するように見えます。src/js/animation.js 787～845行付近では、カメラを補間して親バブルを通過する動きを作り、移動中に親側のバブルを薄くしながら子側のバブルを現します。階層ごとに同じ「バブルの中に次のバブル群がある」見せ方を繰り返し、ズームイン・アウトでフラクタルを思わせる探索感を作る意図です。
+
+3. 厳密な要件定義書をCodexに渡して開発したこと
+
+参照：BubbleBreaker仕様書.md、BubbleBreaker仕様書.xlsx、src/js/api.js 1393～1404行および1427～1432行付近
+rootからcentralを作る箇所：
+    const rootResult = await requestRootGroup(activeAnalysisInput, generationController.signal);
+    const root = rootResult.group;
+    const centralResults = await runWithConcurrency(root.bubbles, 3, rootBubble => requestCentralGroup(
+        activeAnalysisInput,
+        root,
+        rootBubble,
+        rootBubble.id === rootResult.entryRootBubbleId,
+        rootResult.explorationAxes,
+        generationController.signal
+    ));
+
+生成した階層をまとめて検証する箇所：
+    const mergedGroups = [root, ...centralGroups, ...leafGroups];
+    const universe = normalizeGeneratedUniverse({
+        groups: mergedGroups,
+        entryGroupId: entryResult.group.id,
+        entryBubbleId: entryResult.entryBubbleId
+    });
+
+説明：私は、作品の目的や画面構成だけでなく、カテゴリの階層、画面間の移動、入力に対する動きなどを仕様書に整理し、Codexに渡して実装を依頼しました。たとえば、話題をroot・central・leafの順に組み立て、親バブルと子カテゴリの対応を保つ要件を明確にしています。コードでは、rootを確定してから各バブルのcentralを作り、その後に各centralのバブルからleafを作る順序として実装し、最後に全体を検証します。仕様を文章で具体化することで、生成されたコードを「希望した動作や構造になっているか」という観点で確かめられるようにしました。
+
+※Codexを使ったこと自体はプログラム実行時の機能ではなく、開発方法についての説明です。
+
+4. 画像が少ない画面に、検索で見つけた画像をURLから表示する方法
+
+抜粋：src/js/research.js 149～163行、179～199行付近
+    tools: [{
+        type: 'web_search', search_content_types: ['image', 'text'],
+        image_settings: { max_results: 3, caption: true }
+    }]
+    const imageUrl = safeHttpsUrl(result.image_url);
+    const sourceWebsiteUrl = safeHttpsUrl(result.source_website_url);
+    if (!imageUrl || !sourceWebsiteUrl || seen.has(imageUrl)) return;
+
+抜粋：src/js/scene.js 2693～2702行付近
+    imageNode.src = image.thumbnailUrl || image.imageUrl;
+
+意図：画像をプログラム内に固定で埋め込まず、テーマや分析カードに合わせたWeb画像検索から画像URLと出典ページURLを受け取ります。HTTPSのURLだけを採用し、出典がない画像や重複画像を除外してから、HTML画像要素のsrcにURLを設定して表示します。詳細画面には出典ページへのリンクも付けています（src/js/scene.js 2778～2802行）。画像の読み込みに失敗したときは表示を隠す、またはサムネイルから元画像へ切り替える処理もあり、画像がない場合に画面が崩れにくいようにしています。画像そのものを配布ファイルに保存する方式ではなく、表示時に外部URLから読み込む方式です。
+
+5. 情報収集を検索・整理・検証・統合に分けた方法
+
+抜粋：src/js/research.js 2～6行、122～139行付近
+    const INTENTS = [
+        { id: 'support', label: 'SUPPORT', suffix: '効果 根拠 実証' },
+        { id: 'contradict', label: 'CONTRADICT', suffix: '批判 反証 限界 問題' },
+        { id: 'primary', label: 'PRIMARY', suffix: '公式 一次資料 統計 研究論文 原調査' },
+        { id: 'context', label: 'CONTEXT', suffix: '定義 背景 統計 時系列' }
+    ];
+    tool_choice: 'required',
+    tools: [{ type: 'web_search', search_context_size: 'medium', user_location: { type: 'approximate', country: 'JP', timezone: 'Asia/Tokyo' } }],
+    include: ['web_search_call.action.sources'],
+    text: { format: { type: 'json_schema', name: 'bubble_evidence_search', strict: true, schema: SEARCH_RESULT_SCHEMA } }
+
+検索結果URLを照合する抜粋（src/js/research.js 272～281行付近）
+    const consulted = consultedSourcesFromPayload(response.payload);
+    const consultedMap = new Map(consulted.map(source => [source.url, source]));
+    const canonicalUrl = canonicalizeUrl(candidate.sourceUrl);
+    if (!canonicalUrl || !consultedMap.has(canonicalUrl)) {
+        excluded.push({ intent: intent.id, url: canonicalUrl || null, reason: canonicalUrl ? 'not_in_web_search_sources' : 'invalid_url' });
+        return;
+    }
+
+説明：話題について一度だけ自由回答を求めるのではなく、賛成を支える情報、反証や批判、一次資料、定義や背景という4つの検索意図に分けて調べます。検索結果は決めたJSON形式で受け取り、URL・発信元・公開日・関連抜粋・検証できる主張候補として整理します。
+
+次に、src/js/research.js 262～322行付近で、モデルが返したURLが実際のWeb検索結果に含まれているかを照合し、未確認のURLを除外します。同じURLや本文の重複をまとめ、同一ドメインや転載関係のある情報源を独立した根拠として二重に数えないようにグループ化します。
+
+さらに、334～343行付近で主張を細かく分け、各情報源が支持・反証・不明のどれに当たるかを比較します。366～402行付近では、独立した情報源の数、支持と反証の照合、一次資料の有無、検索意図の網羅度、抜粋や公開日の有無などから根拠の充実度を計算します。この値は主張が真実である確率ではなく、集めた根拠がどの程度そろっているかを示すための指標です。
+
+最後に、549～565行付近で検証済みの情報だけを分析文へまとめ、各説明に対応する出典IDも返すようにしています。検索、出典確認、主張の比較、分析文の作成を段階に分けることで、根拠のない補足や一方の意見だけに寄った要約を減らす意図があります。
+
+
+苦労した点や改善したい点（200字以内）
+テーマを変えて何度も探索し、バブルを選んで階層を上下したとき、親子関係とズームの流れが意図どおりか確認しました。ずれた時は、曖昧な指示を親子の対応や移動前後の見え方まで具体化し、仕様書とプロンプトを直して再確認しました。今後は3階層に限らず、全バブル群が一つの3D空間につながり、上下左右へ自由に進める冒険的な探索にしたいです。
+
+
+アピールポイント（200字以内）
+フィルターバブルの外に広がる世界を、3Dの宇宙をズームイン・ズームアウトして探検できるのが本作の魅力です。バブルを深くたどるほど異なる視点に出会い、広く見渡すと、自分が知っていた世界の小ささに気づく。思わずぞっとするような感覚的な体験を目指しました。
+
+活用したAPIなど（200字以内）
+OpenAI Responses API、Three.js／OrbitControls、Tailwind CSS CDNを使用。背景画像「Cosmic Cliffs」はNASA・ESA・CSA・STScI、BGMはDOVA-SYNDROMEとOpenTracksの素材です。
+
+参考URL（回答本文の文字数には含めない確認用メモ）
+OpenAI Responses API: https://platform.openai.com/docs/quickstart/make-your-first-api-request
+Three.js OrbitControls: https://threejs.org/docs/pages/OrbitControls.html
+Tailwind CSS Play CDN: https://tailwindcss.com/docs/installation/play-cdn
+背景画像（NASA, ESA, CSA, STScI）: https://science.nasa.gov/asset/webb/cosmic-cliffs-in-the-carina-nebula-nircam-image/
+DOVA-SYNDROME「宇宙遊泳」: https://dova-s.jp/bgm/detail/3228
+DOVA-SYNDROME「星間宇宙」: https://dova-s.jp/bgm/detail/9895
+DOVA-SYNDROME「Edgeworth-kuiper belt」: https://dova-s.jp/en/bgm/detail/14662
+OpenTracks「Far away from the Earth」: https://opentracks.com/bgm/detail/19738

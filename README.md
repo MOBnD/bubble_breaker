@@ -4,15 +4,25 @@ SNSや検索サービスのおすすめだけでは見つけにくい視点を�
 
 ## 起動する
 
-リポジトリのルートでローカルWebサーバーを起動します。
+### GitHubのDownload ZIPから使う
 
+1. GitHubリポジトリの **Code → Download ZIP** を選び、ZIPを展開します。
+2. 展開したフォルダーの `src/index.html` をダブルクリックし、ブラウザーで開きます。サーバー起動や依存パッケージのインストールは不要です。
+3. 同梱された共有世界は「今まで探索した世界」から開けます。新しい世界の生成にはインターネット接続と、利用者自身のOpenAI API Keyが必要です。API Keyはページのメモリ内だけで使われます。
+
+### 自分の保存世界をZIPに含める
+
+1. 保存元PCで、保存したときと同じ方法・URLでアプリを開きます。以前に `http://localhost:8000/index.html` で使っていた場合は、次のコマンドで一時的に開きます：
 ```powershell
-python -m http.server 8000 --directory src
+py -3 -m http.server 8000 --directory src
 ```
+その後 `http://localhost:8000/index.html` にアクセスします。macOSでは `python3 -m http.server 8000 --directory src` を使います。これは既存のブラウザー保存領域から配布データを書き出すときだけ必要です。
 
-ブラウザーで http://localhost:8000/index.html を開いてください。アプリ本体は src/index.html から直接読み込みます。ビルド手順や dist/ はありません。NGC 3324の背景画像は src/assets/、BGMは src/BGM/ から読み込みます。
+2. 「今まで探索した世界」で配布したい世界にチェックを入れ、**選択した世界をまとめて書き出す** を選びます。同梱済みの共有世界は保持されます。
+3. `shared-explorations.txt` がダウンロードされます。これは実行ファイルではなくテキストです。Windowsの警告を避けるため、ダブルクリックして実行しないでください。テキストエディターで内容を開き、リポジトリ内の `src/shared-explorations.js` の内容を置き換えて保存します。
+4. 変更をGitHubへ反映します。以後にGitHubからDownload ZIPした人は、同梱された世界を直接開けます。
 
-初回はサービス紹介を読み、次にAPI Keyを設定します。入力した話題はOpenAIのWeb Searchで調査されます。使用モデルは gpt-6-luna です。
+ブラウザー内の保存データは、ブラウザーや開き方（`file://` と `http://localhost` など）ごとに分かれています。配布データの更新時は、保存に使った元の場所で書き出してください。共有データは読み取り専用のスナップショットで、受け取った人の保存内容は他のPCへ同期されません。
 
 ## 探索する
 

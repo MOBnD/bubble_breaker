@@ -171,6 +171,13 @@
                     <button id="btn-close-history" class="overlay-close-button" type="button" aria-label="保存履歴を閉じる">×</button>
                 </div>
                 <p id="saved-exploration-status" class="saved-exploration-status" aria-live="polite"></p>
+                <div class="shared-world-export-tools">
+                    <p class="shared-world-help">配布したい世界にチェックを入れてまとめて書き出せます。すでに同梱されている世界は残したまま追加します。保存される .txt はテキストデータです。GitHubへ登録するときは内容をテキストエディターで開き、src/shared-explorations.js に反映してください。ダウンロードした .txt を実行する必要はありません。</p>
+                    <div class="shared-world-export-actions">
+                        <span id="shared-world-selection-status" aria-live="polite">配布する世界を選択してください</span>
+                        <button id="btn-export-selected-worlds" type="button" disabled>選択した世界をまとめて書き出す</button>
+                    </div>
+                </div>
                 <p id="saved-exploration-empty" class="saved-exploration-empty">保存した探索はまだありません。気になることから、新しい世界を作ってみましょう。</p>
                 <div id="saved-exploration-list" class="saved-exploration-list"></div>
             </div>
@@ -178,16 +185,51 @@
 
         <section id="first-run-guide" class="first-run-guide" role="dialog" aria-modal="true" aria-labelledby="guide-title" hidden>
             <div class="first-run-guide-card glass-panel">
-                <div class="guide-progress" aria-label="はじめてガイド">
-                    <span id="guide-step-label">1 / 4</span><div><i id="guide-progress-fill"></i></div>
+                <div class="guide-progress">
+                    <span id="guide-step-label" class="guide-sr-only" aria-live="polite">1 / 3</span>
+                    <div id="guide-progress-stops" class="guide-progress-stops" role="group" aria-label="スライドを選択">
+                        <button class="guide-progress-stop" type="button" data-guide-slide="0" aria-label="1枚目：おすすめが生む見えない壁">1</button>
+                        <button class="guide-progress-stop" type="button" data-guide-slide="1" aria-label="2枚目：Bubble Breakerで泡の外へ">2</button>
+                        <button class="guide-progress-stop" type="button" data-guide-slide="2" aria-label="3枚目：自由なインターネットを冒険">3</button>
+                    </div>
                     <button id="btn-close-guide" type="button" aria-label="ガイドを閉じる">×</button>
                 </div>
-                <div class="guide-illustration" aria-hidden="true"><span class="guide-orbit guide-orbit-one"></span><span class="guide-orbit guide-orbit-two"></span><b>✦</b></div>
-                <div class="guide-map" aria-label="BubbleBreakerでできること"><span>あなたの投稿<br><b>💬</b></span><i>→</i><span>賛成・反対・背景<br><b>🌐</b></span><i>→</i><span>自分で確かめる<br><b>🔎</b></span></div>
-                <span class="input-kicker">A NEW WAY TO EXPLORE</span>
-                <h2 id="guide-title"></h2>
-                <p id="guide-copy"></p>
-                <div class="guide-actions"><button id="btn-guide-next" type="button">次へ <span aria-hidden="true">→</span></button></div>
+                <div class="guide-body">
+                    <div id="guide-art" class="guide-art" aria-hidden="true">
+                        <svg class="guide-scene guide-scene--filter" data-guide-scene="0" viewBox="0 0 640 400">
+                            <rect class="guide-window" x="22" y="20" width="596" height="360" rx="24"></rect><path class="guide-window-top" d="M46 20h548a24 24 0 0 1 24 24v34H22V44a24 24 0 0 1 24-24Z"></path>
+                            <circle class="guide-window-dot" cx="52" cy="50" r="6"></circle><circle class="guide-window-dot" cx="73" cy="50" r="6"></circle><circle class="guide-window-dot" cx="94" cy="50" r="6"></circle><text class="guide-window-caption" x="119" y="55">あなたへのおすすめ</text>
+                            <rect class="guide-feed-card" x="43" y="91" width="332" height="72" rx="13"></rect><rect class="guide-feed-thumb" x="55" y="102" width="75" height="50" rx="8"></rect><path class="guide-feed-play" d="M86 115v24l19-12Z"></path><text class="guide-feed-kicker" x="145" y="118">VIDEO / おすすめ</text><text class="guide-feed-title" x="145" y="143">話題の投稿をチェック</text>
+                            <rect class="guide-feed-card" x="43" y="174" width="332" height="72" rx="13"></rect><rect class="guide-feed-thumb guide-feed-thumb--violet" x="55" y="185" width="75" height="50" rx="8"></rect><path class="guide-feed-play" d="M86 198v24l19-12Z"></path><text class="guide-feed-kicker" x="145" y="201">TREND / あなた向け</text><text class="guide-feed-title" x="145" y="226">同じ話題の人気投稿</text>
+                            <rect class="guide-feed-card" x="43" y="257" width="332" height="72" rx="13"></rect><rect class="guide-feed-thumb guide-feed-thumb--pink" x="55" y="268" width="75" height="50" rx="8"></rect><path class="guide-feed-play" d="M86 281v24l19-12Z"></path><text class="guide-feed-kicker" x="145" y="284">PICK FOR YOU / 次へ</text><text class="guide-feed-title" x="145" y="309">似た見方の情報も</text>
+                            <circle class="guide-feed-bubble" cx="218" cy="210" r="190"></circle><path class="guide-feed-loop" d="M143 344c47 26 107 28 155 7m8-6-9 13 16-2"></path><text class="guide-feed-loop-label" x="216" y="362" text-anchor="middle">似た情報が続く</text>
+                            <path class="guide-feed-boundary" d="M419 83c-19 48-20 194 0 244"></path><text class="guide-feed-outside-label" x="516" y="100" text-anchor="middle">泡の外</text><circle class="guide-node guide-node--known" cx="520" cy="155" r="37"></circle><text class="guide-feed-outside" x="520" y="160" text-anchor="middle">別の意見</text><circle class="guide-node guide-node--known-alt" cx="520" cy="245" r="37"></circle><text class="guide-feed-outside" x="520" y="250" text-anchor="middle">音楽</text><circle class="guide-sparkle" cx="580" cy="310" r="4"></circle><circle class="guide-sparkle" cx="467" cy="312" r="3"></circle>
+                        </svg>
+                        <svg class="guide-scene guide-scene--breakout" data-guide-scene="1" viewBox="0 0 640 400" hidden>
+                            <rect class="guide-window" x="22" y="20" width="596" height="360" rx="24"></rect><path class="guide-window-top" d="M46 20h548a24 24 0 0 1 24 24v34H22V44a24 24 0 0 1 24-24Z"></path>
+                            <circle class="guide-window-dot" cx="52" cy="50" r="6"></circle><circle class="guide-window-dot" cx="73" cy="50" r="6"></circle><circle class="guide-window-dot" cx="94" cy="50" r="6"></circle><text class="guide-window-caption" x="119" y="55">フィルターバブルを突破</text>
+                            <path class="guide-break-wall" d="M356 111a145 145 0 1 0 0 198"></path><circle class="guide-break-glow" cx="366" cy="210" r="35"></circle>
+                            <rect class="guide-interest-card" x="91" y="158" width="194" height="104" rx="19"></rect><text class="guide-interest-kicker" x="113" y="190">あなたの関心</text><text class="guide-interest-text" x="113" y="220">気になること</text><text class="guide-break-inside" x="188" y="291" text-anchor="middle">いつものおすすめ</text>
+                            <path class="guide-break-crack" d="m341 122 29 30-21 22 35 25-29 20 31 19-34 24 23 34"></path><path class="guide-break-shard" d="m349 132 26-24-8 36z"></path><path class="guide-break-shard guide-break-shard--two" d="m361 263 27 11-19 17z"></path><path class="guide-break-shard guide-break-shard--three" d="m353 197 22-10-6 24z"></path>
+                            <path class="guide-break-route" d="M285 210h125m-17-15 17 15-17 15M411 210c42 0 48-73 92-73m-92 73h92m-92 0c42 0 48 73 92 73"></path>
+                            <circle class="guide-node guide-node--known" cx="532" cy="137" r="40"></circle><text class="guide-related-label" x="532" y="142" text-anchor="middle">違う立場</text><circle class="guide-node guide-node--small-cyan" cx="532" cy="210" r="36"></circle><text class="guide-related-label" x="532" y="215" text-anchor="middle">背景</text><circle class="guide-node guide-node--small-pink" cx="532" cy="283" r="40"></circle><text class="guide-related-label" x="532" y="288" text-anchor="middle">意外な話題</text>
+                            <text class="guide-map-caption" x="320" y="350" text-anchor="middle">ひとつの関心から、選べる道が広がる</text><circle class="guide-sparkle" cx="426" cy="114" r="4"></circle><circle class="guide-sparkle" cx="432" cy="304" r="3"></circle>
+                        </svg>
+                        <svg class="guide-scene guide-scene--adventure" data-guide-scene="2" viewBox="0 0 640 400" hidden>
+                            <circle class="guide-adventure-nebula" cx="473" cy="163" r="134"></circle><circle class="guide-star" cx="71" cy="83" r="2.5"></circle><circle class="guide-star" cx="164" cy="139" r="2"></circle><circle class="guide-star" cx="245" cy="62" r="3"></circle><circle class="guide-star" cx="332" cy="337" r="2"></circle><circle class="guide-star" cx="559" cy="314" r="2.5"></circle><circle class="guide-star" cx="593" cy="184" r="2"></circle><circle class="guide-star" cx="379" cy="82" r="1.8"></circle>
+                            <path class="guide-free-route" d="M76 295C135 283 142 220 199 219s61 69 121 47 65-118 128-109 57 63 113 28"></path><path class="guide-free-route guide-free-route--branch" d="M319 266c24 44 48 49 91 43m-18-10 18 10-15 13M447 157c21-34 51-39 83-30m-18-10 18 10-18 8"></path>
+                            <circle class="guide-adventure-start" cx="77" cy="295" r="31"></circle><text class="guide-adventure-start-label" x="77" y="292" text-anchor="middle">YOUR</text><text class="guide-adventure-start-label" x="77" y="304" text-anchor="middle">CURIOSITY</text>
+                            <circle class="guide-adventure-bubble" cx="199" cy="219" r="43"></circle><text class="guide-adventure-label" x="199" y="224" text-anchor="middle">気になる話題</text><circle class="guide-adventure-bubble guide-adventure-bubble--violet" cx="320" cy="266" r="48"></circle><text class="guide-adventure-label" x="320" y="271" text-anchor="middle">新しい視点</text><circle class="guide-adventure-bubble guide-adventure-bubble--cyan" cx="448" cy="157" r="50"></circle><text class="guide-adventure-label" x="448" y="162" text-anchor="middle">別の世界</text><circle class="guide-adventure-bubble guide-adventure-bubble--gold" cx="561" cy="136" r="37"></circle><text class="guide-adventure-label" x="561" y="141" text-anchor="middle">発見！</text><circle class="guide-adventure-bubble guide-adventure-bubble--cyan" cx="411" cy="309" r="33"></circle><text class="guide-adventure-label" x="411" y="314" text-anchor="middle">寄り道</text>
+                            <path class="guide-adventure-spark" d="M119 128v24m-12-12h24M530 263v30m-15-15h30M278 112v18m-9-9h18"></path><text class="guide-adventure-caption" x="320" y="369" text-anchor="middle">どこへ進むかは、あなた次第。</text>
+                        </svg>
+                    </div>
+                    <div class="guide-copy-column">
+                        <span class="guide-kicker" id="guide-kicker">01 / THE FILTER BUBBLE</span>
+                        <h2 id="guide-title"></h2>
+                        <p id="guide-copy"></p>
+                        <div class="guide-actions"><button id="btn-guide-next" type="button">次へ <span aria-hidden="true">→</span></button></div>
+                    </div>
+                </div>
             </div>
         </section>
 
@@ -478,6 +520,7 @@
     <script src="./js/research.js"></script>
     <script src="./js/api.js"></script>
     <script src="./js/state.js"></script>
+    <script src="./shared-explorations.js"></script>
     <script src="./js/storage.js"></script>
     <script src="./js/audio.js"></script>
     <script src="./js/navigation.js"></script>

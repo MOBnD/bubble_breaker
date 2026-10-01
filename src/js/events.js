@@ -165,23 +165,48 @@
         document.getElementById('btn-refresh-prompt')?.addEventListener('click', setRandomPrompt);
 
         const guideSlides = [
-            ['おすすめの外へ、冒険に出よう', 'SNSでは、過去に見た投稿に似た情報がおすすめされがちです。気になる一言から、いつものタイムラインの外へ出発します。'],
-            ['賛成・反対・背景を同じ地図で', '話題の丸を選ぶと、関連する考えへ進めます。自分と近い意見だけでなく、違う立場や話題の背景も見つけられます。'],
-            ['4つの窓で、見え方を比べる', '概要・歴史・情報源・内外の論争を開き、出典も確認できます。おすすめを受け取るだけでなく、次に見る視点を自分で選べます。'],
-            ['準備はできました。フィルターバブルを突破しよう', '好きな食べ物でも、気になるニュースでも大丈夫。あなたの一言を地図にして、まだ知らない視点へ出発しましょう。']
+            {
+                kicker: '01 / THE FILTER BUBBLE',
+                title: 'いつものおすすめだけが、世界のすべて？',
+                copy: 'SNSや検索では、見たものに似た情報が次々におすすめされます。\n便利な一方で、違う意見や初めての話題に気づきにくくなることも。\n\n見える世界が少しずつ狭まる状態が「フィルターバブル」です。'
+            },
+            {
+                kicker: '02 / BREAK THE LOOP',
+                title: 'Bubble Breakerなら、泡の外へ飛び出せる。',
+                copy: '気になることをひとことで入力すると、関連する話題がバブルの地図に。\n似た話題だけでなく、違う立場や背景へも、自分で選んで進めます。'
+            },
+            {
+                kicker: '03 / YOUR INTERNET',
+                title: 'アルゴリズムに支配されない、自由なインターネットを冒険しよう！',
+                copy: 'おすすめの流れを抜け出して、次に知りたいことへ。\n自分の好奇心をコンパスに、まだ知らない世界を覗いてみよう。'
+            }
         ];
         const guideOverlay = document.getElementById('first-run-guide');
         let guideSlideIndex = 0;
         let guideIsOpen = false;
         let savedExplorationCountResolved = false;
         function renderGuideSlide() {
-            const [title, copy] = guideSlides[guideSlideIndex];
+            const { kicker, title, copy } = guideSlides[guideSlideIndex];
+            document.getElementById('guide-kicker').textContent = kicker;
             document.getElementById('guide-title').textContent = title;
             document.getElementById('guide-copy').textContent = copy;
             document.getElementById('guide-step-label').textContent = `${guideSlideIndex + 1} / ${guideSlides.length}`;
-            document.getElementById('guide-progress-fill').style.width = `${((guideSlideIndex + 1) / guideSlides.length) * 100}%`;
-            document.getElementById('btn-guide-next').innerHTML = guideSlideIndex === guideSlides.length - 1
-                ? 'さあ、探索へ <span aria-hidden="true">→</span>'
+            document.querySelectorAll('.guide-progress-stop').forEach(button => {
+                const isCurrent = Number(button.dataset.guideSlide) === guideSlideIndex;
+                const isComplete = Number(button.dataset.guideSlide) < guideSlideIndex;
+                button.classList.toggle('is-current', isCurrent);
+                button.classList.toggle('is-complete', isComplete);
+                if (isCurrent) button.setAttribute('aria-current', 'step');
+                else button.removeAttribute('aria-current');
+            });
+            document.querySelectorAll('[data-guide-scene]').forEach(scene => {
+                scene.toggleAttribute('hidden', Number(scene.dataset.guideScene) !== guideSlideIndex);
+            });
+            const isLastSlide = guideSlideIndex === guideSlides.length - 1;
+            const nextButton = document.getElementById('btn-guide-next');
+            nextButton.classList.toggle('is-final-slide', isLastSlide);
+            nextButton.innerHTML = isLastSlide
+                ? '探索をはじめる <span aria-hidden="true">→</span>'
                 : '次へ <span aria-hidden="true">→</span>';
         }
         function setGuideOpen(open, restart = false) {
@@ -202,7 +227,23 @@
             if (guideSlideIndex < guideSlides.length - 1) {
                 guideSlideIndex += 1;
                 renderGuideSlide();
-            } else setGuideOpen(false);
+            } else {
+                setGuideOpen(false);
+                requestAnimationFrame(() => {
+                    // The API-key prompt takes focus when it opens; otherwise start at the theme field.
+                    if (document.getElementById('api-key-overlay')?.hidden) {
+                        document.getElementById('input-opinion')?.focus();
+                    }
+                });
+            }
+        });
+        document.querySelectorAll('.guide-progress-stop').forEach(button => {
+            button.addEventListener('click', () => {
+                const nextIndex = Number(button.dataset.guideSlide);
+                if (!Number.isInteger(nextIndex) || nextIndex < 0 || nextIndex >= guideSlides.length) return;
+                guideSlideIndex = nextIndex;
+                renderGuideSlide();
+            });
         });
         document.getElementById('btn-close-guide')?.addEventListener('click', () => setGuideOpen(false));
         guideOverlay?.addEventListener('click', event => {

@@ -12,6 +12,11 @@
         const bubbleSessionByDatabase = new WeakMap();
         const latestDatabaseBySessionId = new Map();
         const bubbleSessionSaveTimers = new Map();
+        const BUBBLE_SHARED_WORLD_SCHEMA_VERSION = 1;
+        const BUBBLE_SHARED_RECORD_ID_PREFIX = 'shared:';
+        let sharedBubbleSessionRecordsPromise = null;
+        let sharedBubbleSessionWarningShown = false;
+        let localBubbleSessionWarningShown = false;
 
         function cloneBubbleSessionValue(value) {
             if (typeof structuredClone === 'function') return structuredClone(value);
@@ -106,6 +111,7 @@
             return {
                 schemaVersion: BUBBLE_SESSION_SCHEMA_VERSION,
                 id: String(record.id || createBubbleSessionId()),
+                source: options.source === 'shared' || record.source === 'shared' ? 'shared' : 'local',
                 opinion: String(record.opinion || '').trim(),
                 createdAt: String(record.createdAt || now),
                 updatedAt: String(record.updatedAt || now),
@@ -183,29 +189,174 @@
 
         async function saveBubbleSessionRecord(record) {
             const normalized = normalizeBubbleSessionRecord(record);
+            if (normalized.source === 'shared') throw new Error('共有された探索は配布元のデータとして読み取り専用です');
             await runBubbleSessionTransaction('readwrite', store => store.put(normalized));
             return normalized;
         }
 
+        async function loadSharedBubbleSessionRecords() {
+            if (!sharedBubbleSessionRecordsPromise) {
+                sharedBubbleSessionRecordsPromise = Promise.resolve().then(() => {
+                    const payload = window.BUBBLE_SHARED_EXPLORATIONS;
+                    if (!isBubbleSessionObject(payload)
+                        || Number(payload.schemaVersion) !== BUBBLE_SHARED_WORLD_SCHEMA_VERSION
+                        || !Array.isArray(payload.explorations)) {
+                        throw new Error('共有データがありません。shared-explorations.jsが読み込まれているか確認してください');
+                    }
+                    const seenIds = new Set();
+                    return payload.explorations.map(record => {
+                        if (!isBubbleSessionObject(record) || !String(record.id || '').trim()) {
+                            throw new Error('共有データにIDのない探索があります');
+                        }
+                        const sourceId = String(record.id).trim();
+                        if (seenIds.has(sourceId)) throw new Error('共有データに重複した探索IDがあります');
+                        seenIds.add(sourceId);
+                        const normalized = normalizeBubbleSessionRecord(record, { source: 'shared' });
+                        normalized.id = BUBBLE_SHARED_RECORD_ID_PREFIX + sourceId;
+                        normalized.source = 'shared';
+                        return normalized;
+                    });
+                }).catch(error => {
+                    sharedBubbleSessionRecordsPromise = null;
+                    throw error;
+                });
+            }
+            return sharedBubbleSessionRecordsPromise;
+        }
+
         async function listBubbleSessionRecords() {
-            const records = await runBubbleSessionTransaction('readonly', store => store.getAll());
-            return (records || [])
-                .map(record => {
-                    try { return normalizeBubbleSessionRecord(record); } catch (_error) { return null; }
-                })
-                .filter(Boolean)
+            let localRecords = [];
+            let localError = null;
+            try {
+                const records = await runBubbleSessionTransaction('readonly', store => store.getAll());
+                localRecords = (records || [])
+                    .map(record => {
+                        try { return normalizeBubbleSessionRecord(record, { source: 'local' }); } catch (_error) { return null; }
+                    })
+                    .filter(Boolean);
+            } catch (error) {
+                localError = error;
+                console.warn('[BubbleBreaker][Storage]', error);
+            }
+
+            let sharedRecords = [];
+            let sharedError = null;
+            try {
+                sharedRecords = await loadSharedBubbleSessionRecords();
+                sharedBubbleSessionWarningShown = false;
+            } catch (error) {
+                sharedError = error;
+                console.warn('[BubbleBreaker][SharedWorlds]', error);
+            }
+
+            const bundledPayload = window.BUBBLE_SHARED_EXPLORATIONS;
+            const bundleIsValidAndEmpty = !sharedError
+                && isBubbleSessionObject(bundledPayload)
+                && Array.isArray(bundledPayload.explorations)
+                && bundledPayload.explorations.length === 0;
+            if (localError && sharedRecords.length === 0 && bundleIsValidAndEmpty) {
+                if (!localBubbleSessionWarningShown && typeof showToast === 'function') {
+                    localBubbleSessionWarningShown = true;
+                    showToast('共有世界データが空です。保存元PCから世界を書き出して同梱してください');
+                }
+                return [];
+            }
+            if (localError && sharedRecords.length === 0) throw localError;
+            if (sharedError && localRecords.length === 0) throw sharedError;
+            if (localError && sharedRecords.length > 0 && !localBubbleSessionWarningShown && typeof showToast === 'function') {
+                localBubbleSessionWarningShown = true;
+                showToast('端末内の保存領域を使えませんが、配布された共有世界は表示できます');
+            }
+            if (sharedError && localRecords.length > 0 && !sharedBubbleSessionWarningShown && typeof showToast === 'function') {
+                sharedBubbleSessionWarningShown = true;
+                showToast('配布された世界を読み込めませんでした。端末内の保存履歴は表示しています');
+            }
+            return [...sharedRecords, ...localRecords]
                 .sort((left, right) => String(right.updatedAt).localeCompare(String(left.updatedAt)));
         }
 
         async function loadBubbleSessionRecord(sessionId) {
-            const record = await runBubbleSessionTransaction('readonly', store => store.get(String(sessionId)));
+            const requestedId = String(sessionId);
+            if (requestedId.startsWith(BUBBLE_SHARED_RECORD_ID_PREFIX)) {
+                const sharedRecords = await loadSharedBubbleSessionRecords();
+                const sharedRecord = sharedRecords.find(record => record.id === requestedId);
+                if (!sharedRecord) throw new Error('選択した共有世界が見つかりません');
+                return normalizeBubbleSessionRecord(sharedRecord, { forRestore: true, source: 'shared' });
+            }
+            const record = await runBubbleSessionTransaction('readonly', store => store.get(requestedId));
             if (!record) throw new Error('選択した探索履歴が見つかりません');
-            return normalizeBubbleSessionRecord(record, { forRestore: true });
+            return normalizeBubbleSessionRecord(record, { forRestore: true, source: 'local' });
         }
 
         async function deleteBubbleSessionRecord(sessionId) {
+            if (String(sessionId).startsWith(BUBBLE_SHARED_RECORD_ID_PREFIX)) {
+                throw new Error('共有された探索はこの画面から削除できません');
+            }
             await runBubbleSessionTransaction('readwrite', store => store.delete(String(sessionId)));
         }
+
+        async function exportBubbleSessionRecords(sessionIds) {
+            const uniqueIds = [...new Set(sessionIds.map(String))];
+            if (!uniqueIds.length) {
+                showToast('配布したい世界を選択してください');
+                return;
+            }
+            const session = bubbleSessionByDatabase.get(activeDB);
+            if (session && uniqueIds.includes(session.id) && session.source !== 'shared') {
+                await persistBubbleSessionDatabase(activeDB);
+            }
+            // すでに同梱されている世界を残し、選択したローカル世界を追加します。
+            const exportRecordsById = new Map();
+            const existingSharedRecords = await loadSharedBubbleSessionRecords();
+            existingSharedRecords.forEach(record => {
+                const exportedRecord = { ...record };
+                delete exportedRecord.source;
+                if (exportedRecord.id.startsWith(BUBBLE_SHARED_RECORD_ID_PREFIX)) {
+                    exportedRecord.id = exportedRecord.id.slice(BUBBLE_SHARED_RECORD_ID_PREFIX.length);
+                }
+                exportRecordsById.set(exportedRecord.id, exportedRecord);
+            });
+            for (const sessionId of uniqueIds) {
+                const record = await loadBubbleSessionRecord(sessionId);
+                if (record.source === 'shared') throw new Error('同梱済みの共有世界は再書き出しできません');
+                const exportedRecord = { ...record };
+                delete exportedRecord.source;
+                exportRecordsById.set(exportedRecord.id, exportedRecord);
+            }
+            const records = [...exportRecordsById.values()];
+            const payload = { schemaVersion: BUBBLE_SHARED_WORLD_SCHEMA_VERSION, explorations: records };
+            const source = 'window.BUBBLE_SHARED_EXPLORATIONS = ' + JSON.stringify(payload, null, 2) + ';\n';
+            // .txtとして保存すれば、Windowsでスクリプトを直接開く際の警告を避けて中身を確認できます。
+            const blob = new Blob([source], { type: 'text/plain;charset=utf-8' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = 'shared-explorations.txt';
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+            selectedBubbleSessionIdsForExport.clear();
+            updateBubbleSharedExportControls();
+            showToast(uniqueIds.length + '件を追加し、共有世界を含む計' + records.length + '件を書き出しました');
+        }
+
+        const selectedBubbleSessionIdsForExport = new Set();
+
+        function updateBubbleSharedExportControls() {
+            const button = document.getElementById('btn-export-selected-worlds');
+            const status = document.getElementById('shared-world-selection-status');
+            const count = selectedBubbleSessionIdsForExport.size;
+            if (button) button.disabled = count === 0;
+            if (status) status.textContent = count ? count + '件を選択中' : '配布する世界を選択してください';
+        }
+
+        document.getElementById('btn-export-selected-worlds')?.addEventListener('click', () => {
+            void exportBubbleSessionRecords([...selectedBubbleSessionIdsForExport]).catch(error => {
+                console.warn('[BubbleBreaker][Storage] export failed', error);
+                showToast('共有用データを書き出せませんでした: ' + error.message);
+            });
+        });
 
         function getCurrentBubbleNavigationPath() {
             if (typeof window.getBubbleNavigationPath !== 'function') return state.groupId ? [state.groupId] : [];
@@ -237,7 +388,7 @@
 
         async function persistBubbleSessionDatabase(database) {
             const snapshot = createBubbleSessionSnapshot(database);
-            if (!snapshot) return null;
+            if (!snapshot || snapshot.source === 'shared') return null;
             if (latestDatabaseBySessionId.get(snapshot.id) !== database) return null;
             try {
                 const saved = await saveBubbleSessionRecord(snapshot);
@@ -259,7 +410,7 @@
 
         window.scheduleBubbleDatabaseSessionSave = function(database, _reason = 'update') {
             const session = database && bubbleSessionByDatabase.get(database);
-            if (!session || latestDatabaseBySessionId.get(session.id) !== database) return;
+            if (!session || session.source === 'shared' || latestDatabaseBySessionId.get(session.id) !== database) return;
             const existingTimer = bubbleSessionSaveTimers.get(session.id);
             if (existingTimer) clearTimeout(existingTimer);
             const timer = setTimeout(() => {
@@ -278,6 +429,7 @@
             activeBubbleSession = {
                 schemaVersion: BUBBLE_SESSION_SCHEMA_VERSION,
                 id: createBubbleSessionId(),
+                source: 'local',
                 opinion: String(opinion || '').trim(),
                 createdAt: now,
                 updatedAt: now,
@@ -323,7 +475,28 @@
                     heading.textContent = summary.opinion || '意見未設定の探索';
                     const meta = document.createElement('p');
                     meta.className = 'saved-exploration-meta';
-                    meta.textContent = `最終探索：${formatBubbleSessionDate(summary.updatedAt)}`;
+                    const isShared = record.source === 'shared';
+                    item.classList.toggle('is-shared', isShared);
+                    meta.textContent = isShared
+                        ? 'GitHub同梱の共有世界 · 更新：' + formatBubbleSessionDate(summary.updatedAt)
+                        : '最終探索：' + formatBubbleSessionDate(summary.updatedAt);
+                    if (!isShared) {
+                        const selectLabel = document.createElement('label');
+                        selectLabel.className = 'saved-exploration-select';
+                        const checkbox = document.createElement('input');
+                        checkbox.type = 'checkbox';
+                        checkbox.checked = selectedBubbleSessionIdsForExport.has(summary.id);
+                        checkbox.setAttribute('aria-label', '「' + summary.opinion + '」を配布に含める');
+                        checkbox.addEventListener('change', () => {
+                            if (checkbox.checked) selectedBubbleSessionIdsForExport.add(summary.id);
+                            else selectedBubbleSessionIdsForExport.delete(summary.id);
+                            updateBubbleSharedExportControls();
+                        });
+                        const selectText = document.createElement('span');
+                        selectText.textContent = '配布に含める';
+                        selectLabel.append(checkbox, selectText);
+                        item.appendChild(selectLabel);
+                    }
                     const actions = document.createElement('div');
                     actions.className = 'saved-exploration-actions';
                     const restore = document.createElement('button');
@@ -331,22 +504,32 @@
                     restore.className = 'saved-exploration-restore';
                     restore.textContent = 'この世界を開く';
                     restore.addEventListener('click', () => void restoreBubbleSession(summary.id));
-                    const remove = document.createElement('button');
-                    remove.type = 'button';
-                    remove.className = 'saved-exploration-delete';
-                    remove.textContent = '削除';
-                    remove.addEventListener('click', () => void removeBubbleSession(summary.id, summary.opinion));
-                    actions.append(restore, remove);
+                    actions.append(restore);
+                    if (!isShared) {
+                        const remove = document.createElement('button');
+                        remove.type = 'button';
+                        remove.className = 'saved-exploration-delete';
+                        remove.textContent = '削除';
+                        remove.addEventListener('click', () => void removeBubbleSession(summary.id, summary.opinion));
+                        actions.append(remove);
+                    }
                     item.append(heading, meta, actions);
                     list.appendChild(item);
                 });
                 empty.classList.toggle('hidden', records.length > 0);
-                status.textContent = records.length > 0 ? `${records.length}件の探索を保存しています` : '';
+                const sharedCount = records.filter(record => record.source === 'shared').length;
+                const localCount = records.length - sharedCount;
+                const localIds = new Set(records.filter(record => record.source !== 'shared').map(record => record.id));
+                [...selectedBubbleSessionIdsForExport].forEach(id => { if (!localIds.has(id)) selectedBubbleSessionIdsForExport.delete(id); });
+                updateBubbleSharedExportControls();
+                status.textContent = records.length > 0
+                    ? '共有世界 ' + sharedCount + '件 · この端末の保存 ' + localCount + '件'
+                    : '';
             } catch (error) {
                 if (typeof window.onSavedExplorationCountChanged === 'function') window.onSavedExplorationCountChanged(null);
                 list.innerHTML = '';
                 empty.classList.remove('hidden');
-                empty.textContent = '保存済み探索を読み込めませんでした。';
+                empty.textContent = '保存済み探索を読み込めませんでした。' + (error && error.message ? ' ' + error.message : '');
                 status.textContent = '';
                 showBubbleSessionStorageError(error);
             }
@@ -491,5 +674,6 @@
             listRecords: listBubbleSessionRecords,
             loadRecord: loadBubbleSessionRecord,
             deleteRecord: deleteBubbleSessionRecord,
-            persistCurrent: persistCurrentBubbleSession
+            persistCurrent: persistCurrentBubbleSession,
+            exportRecord: exportBubbleSessionRecord
         };
